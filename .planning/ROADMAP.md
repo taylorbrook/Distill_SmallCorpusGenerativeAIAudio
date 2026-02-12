@@ -13,7 +13,7 @@ This roadmap follows a risk-first progression: establish a robust small-dataset 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Project Setup** - Environment, dependencies, hardware abstraction *(completed 2026-02-12)*
-- [ ] **Phase 2: Data Pipeline Foundation** - Import, validation, preprocessing, augmentation
+- [x] **Phase 2: Data Pipeline Foundation** - Import, validation, preprocessing, augmentation *(completed 2026-02-12)*
 - [ ] **Phase 3: Core Training Engine** - VAE training with overfitting prevention and checkpointing
 - [ ] **Phase 4: Audio Quality & Export** - 48kHz fidelity, anti-aliasing, basic generation, WAV export
 - [ ] **Phase 5: Musically Meaningful Controls** - Latent space disentanglement and PCA mapping to musical parameters
@@ -54,9 +54,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Audio I/O abstraction layer and dataset validation
-- [ ] 02-02-PLAN.md — Augmentation pipeline and preprocessing with caching
-- [ ] 02-03-PLAN.md — Dataset class, summary computation, and waveform thumbnails
+- [x] 02-01-PLAN.md — Audio I/O abstraction layer and dataset validation
+- [x] 02-02-PLAN.md — Augmentation pipeline and preprocessing with caching
+- [x] 02-03-PLAN.md — Dataset class, summary computation, and waveform thumbnails
 
 ### Phase 3: Core Training Engine
 **Goal**: Users can train a generative VAE model on small datasets (5-500 files) with overfitting prevention, progress monitoring, and checkpoint recovery.
@@ -198,7 +198,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Project Setup | 3/3 | ✓ Complete | 2026-02-12 |
-| 2. Data Pipeline Foundation | 0/3 | Planned | - |
+| 2. Data Pipeline Foundation | 3/3 | ✓ Complete | 2026-02-12 |
 | 3. Core Training Engine | 0/TBD | Not started | - |
 | 4. Audio Quality & Export | 0/TBD | Not started | - |
 | 5. Musically Meaningful Controls | 0/TBD | Not started | - |
