@@ -51,10 +51,12 @@ Plans:
   3. User can view dataset summary showing file count, total duration, sample rate consistency, and waveform thumbnails
   4. System validates dataset integrity and warns about corrupt files, sample rate mismatches, or insufficient file count
   5. System applies data augmentation automatically (pitch shift, time stretch, noise injection, loudness variation) to expand training data
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md — Audio I/O abstraction layer and dataset validation
+- [ ] 02-02-PLAN.md — Augmentation pipeline and preprocessing with caching
+- [ ] 02-03-PLAN.md — Dataset class, summary computation, and waveform thumbnails
 
 ### Phase 3: Core Training Engine
 **Goal**: Users can train a generative VAE model on small datasets (5-500 files) with overfitting prevention, progress monitoring, and checkpoint recovery.
@@ -196,7 +198,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Project Setup | 3/3 | ✓ Complete | 2026-02-12 |
-| 2. Data Pipeline Foundation | 0/TBD | Not started | - |
+| 2. Data Pipeline Foundation | 0/3 | Planned | - |
 | 3. Core Training Engine | 0/TBD | Not started | - |
 | 4. Audio Quality & Export | 0/TBD | Not started | - |
 | 5. Musically Meaningful Controls | 0/TBD | Not started | - |
