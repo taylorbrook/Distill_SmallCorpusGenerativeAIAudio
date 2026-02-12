@@ -34,10 +34,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. PyTorch 2.10.0 and TorchAudio load successfully with correct device selection
   3. Device falls back gracefully to CPU when no GPU is available
   4. Project structure exists with directories for models, datasets, and generated outputs
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md — Project scaffolding, packaging, and configuration system
+- [ ] 01-02-PLAN.md — Hardware detection, memory management, and GPU benchmarking
+- [ ] 01-03-PLAN.md — Environment validation, startup sequence, first-run experience, and entry points
 
 ### Phase 2: Data Pipeline Foundation
 **Goal**: Users can import audio files, view dataset summaries, and the system validates data integrity before training with aggressive augmentation ready.
@@ -193,7 +195,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Project Setup | 0/TBD | Not started | - |
+| 1. Project Setup | 0/3 | Planned | - |
 | 2. Data Pipeline Foundation | 0/TBD | Not started | - |
 | 3. Core Training Engine | 0/TBD | Not started | - |
 | 4. Audio Quality & Export | 0/TBD | Not started | - |
