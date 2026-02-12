@@ -11,6 +11,9 @@ dependencies = [
     "tomli-w>=1.1.0",
     "rich>=14.0",
     "psutil>=6.0",
+    "soundfile>=0.13.0",
+    "numpy>=1.26",
+    "matplotlib>=3.9",
 ]
 
 [project.scripts]
