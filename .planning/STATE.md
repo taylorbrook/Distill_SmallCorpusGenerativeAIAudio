@@ -19,9 +19,9 @@ Progress: [█████░░░░░] ~20%
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: 3 min
-- Total execution time: 0.23 hours
+- Total execution time: 0.28 hours
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [█████░░░░░] ~20%
 | Phase 01 P02 | 3min | 2 tasks, 3 files | 3min |
 | Phase 01 P03 | 3min | 2 tasks, 4 files | 3min |
 | Phase 02 P01 | 2min | 2 tasks, 5 files | 2min |
+| Phase 02 P02 | 3min | 2 tasks, 2 files | 3min |
 | Phase 02 P03 | 2min | 2 tasks, 5 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 3min, 3min, 2min, 2min
+- Last 5 plans: 3min, 3min, 2min, 3min, 2min
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -66,6 +67,11 @@ Recent decisions affecting current work:
 - [Phase 02]: Cache torchaudio.transforms.Resample instances per (orig_freq, new_freq) pair
 - [Phase 02]: Validation collects issues without raising -- Phase 1 error-collection pattern
 - [Phase 02]: collect_audio_files skips hidden files/dirs for clean dataset import
+- [Phase 02]: Pre-create SpeedPerturbation/AddNoise at init; PitchShift/Vol per-call (varying params)
+- [Phase 02]: PitchShift n_fft=2048 for 48kHz to avoid bass artifacts
+- [Phase 02]: Independent probability gating per augmentation (not all-or-nothing)
+- [Phase 02]: expand_dataset preserves unaugmented originals alongside augmented copies
+- [Phase 02]: preprocess_dataset skips corrupt files with warning (per-file try/except)
 - [Phase 02]: Dataset class stores only metadata -- waveforms deferred to preprocessing/training
 - [Phase 02]: Thumbnail mtime-based caching avoids redundant regeneration
 - [Phase 02]: matplotlib.use('Agg') before pyplot import for headless compatibility
@@ -82,5 +88,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Completed 02-03-PLAN.md (dataset management, summary, thumbnails)
+Stopped at: Completed 02-02-PLAN.md (augmentation and preprocessing pipeline)
 Resume file: None
