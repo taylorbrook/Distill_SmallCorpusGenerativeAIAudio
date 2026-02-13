@@ -82,6 +82,15 @@ class GenerationConfig:
     overlap_samples: int = 2400
     """Crossfade overlap in samples (50 ms at 48 kHz)."""
 
+    latent_vector: "np.ndarray | None" = None
+    """User-controlled latent vector from slider mapping.
+
+    When set, all chunks use this vector (with small per-chunk
+    perturbations for variation in multi-chunk generation).
+    Overrides random sampling.  When ``None``, behaviour is unchanged
+    (random latent vectors as before).
+    """
+
     def validate(self) -> None:
         """Validate configuration, raising ValueError on invalid settings."""
         if self.duration_s <= 0 or self.duration_s > self.max_duration_s:
@@ -109,6 +118,19 @@ class GenerationConfig:
                 f"bit_depth must be one of {list(BIT_DEPTH_MAP.keys())}, "
                 f"got {self.bit_depth!r}"
             )
+        if self.latent_vector is not None:
+            import numpy as np  # noqa: WPS433 -- lazy import
+
+            if not isinstance(self.latent_vector, np.ndarray):
+                raise ValueError(
+                    f"latent_vector must be a numpy ndarray, "
+                    f"got {type(self.latent_vector).__name__}"
+                )
+            if self.latent_vector.ndim != 1:
+                raise ValueError(
+                    f"latent_vector must be 1-D, "
+                    f"got {self.latent_vector.ndim}-D"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +190,98 @@ def _get_resampler(orig_freq: int, new_freq: int) -> object:
 
         _resampler_cache[key] = torchaudio.transforms.Resample(orig_freq, new_freq)
     return _resampler_cache[key]
+
+
+# ---------------------------------------------------------------------------
+# Slider-controlled chunk generation
+# ---------------------------------------------------------------------------
+
+
+def _generate_chunks_from_vector(
+    model: "ConvVAE",
+    spectrogram: "AudioSpectrogram",
+    latent_vector: "torch.Tensor",
+    num_chunks: int,
+    device: "torch.device",
+    seed: int,
+    chunk_samples: int = 48_000,
+    overlap_samples: int = 2400,
+) -> "np.ndarray":
+    """Generate audio from a user-provided latent vector.
+
+    Uses the provided latent vector as a base.  For multi-chunk
+    generation, adds small random perturbations (scaled by 0.1) to
+    each chunk so longer audio has variation while staying in the
+    same latent-space region.
+
+    Parameters
+    ----------
+    model : ConvVAE
+        Trained VAE model.
+    spectrogram : AudioSpectrogram
+        Spectrogram converter (for mel-to-waveform).
+    latent_vector : torch.Tensor
+        1-D latent vector on the target device.
+    num_chunks : int
+        Number of audio chunks to generate.
+    device : torch.device
+        Device the model is on.
+    seed : int
+        Random seed for reproducible per-chunk perturbations.
+    chunk_samples : int
+        Number of audio samples per chunk (default 48000 = 1 s at 48 kHz).
+    overlap_samples : int
+        Overlap for crossfade in samples (default 2400 = 50 ms at 48 kHz).
+
+    Returns
+    -------
+    np.ndarray
+        Concatenated audio as float32.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+    import numpy as np  # noqa: WPS433 -- lazy import
+
+    from small_dataset_audio.inference.chunking import crossfade_chunks
+
+    mel_shape = spectrogram.get_mel_shape(chunk_samples)
+    torch.manual_seed(seed)
+
+    was_training = model.training
+    model.eval()
+
+    waveforms: list[np.ndarray] = []
+    try:
+        with torch.no_grad():
+            for chunk_idx in range(num_chunks):
+                # Base vector with small perturbation for variety
+                if chunk_idx == 0:
+                    z = latent_vector.unsqueeze(0)  # [1, latent_dim]
+                else:
+                    perturbation = torch.randn_like(latent_vector) * 0.1
+                    z = (latent_vector + perturbation).unsqueeze(0)
+
+                # Ensure decoder is initialised
+                if model.decoder.fc is None:
+                    n_mels, time_frames = mel_shape
+                    pad_h = (16 - n_mels % 16) % 16
+                    pad_w = (16 - time_frames % 16) % 16
+                    spatial = (
+                        (n_mels + pad_h) // 16,
+                        (time_frames + pad_w) // 16,
+                    )
+                    model.decoder._init_linear(spatial)
+
+                # Decode latent vector to mel spectrogram
+                mel = model.decode(z, target_shape=mel_shape)
+
+                # Convert mel to waveform on CPU
+                wav = spectrogram.mel_to_waveform(mel.cpu())
+                waveforms.append(wav.squeeze().numpy().astype(np.float32))
+    finally:
+        if was_training:
+            model.train()
+
+    return crossfade_chunks(waveforms, overlap_samples)
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +369,29 @@ class GenerationPipeline:
         else:
             seed_used = int(torch.randint(0, 2**31, (1,)).item())
 
+        # 3.5. Prepare user-controlled latent vector (if provided)
+        latent_tensor: torch.Tensor | None = None
+        if config.latent_vector is not None:
+            latent_tensor = (
+                torch.from_numpy(config.latent_vector)
+                .float()
+                .to(self.device)
+            )
+
         # 4. Generate audio based on concat_mode
-        if config.concat_mode == "crossfade":
+        if latent_tensor is not None:
+            # Slider-controlled generation: use provided latent vector
+            audio = _generate_chunks_from_vector(
+                model=self.model,
+                spectrogram=self.spectrogram,
+                latent_vector=latent_tensor,
+                num_chunks=num_chunks,
+                device=self.device,
+                seed=seed_used,
+                chunk_samples=chunk_samples,
+                overlap_samples=config.overlap_samples,
+            )
+        elif config.concat_mode == "crossfade":
             audio = generate_chunks_crossfade(
                 model=self.model,
                 spectrogram=self.spectrogram,
@@ -287,7 +422,18 @@ class GenerationPipeline:
             channels = 2
         elif config.stereo_mode == "dual_seed":
             # Generate second audio stream with seed + 1
-            if config.concat_mode == "crossfade":
+            if latent_tensor is not None:
+                audio_right = _generate_chunks_from_vector(
+                    model=self.model,
+                    spectrogram=self.spectrogram,
+                    latent_vector=latent_tensor,
+                    num_chunks=num_chunks,
+                    device=self.device,
+                    seed=seed_used + 1,
+                    chunk_samples=chunk_samples,
+                    overlap_samples=config.overlap_samples,
+                )
+            elif config.concat_mode == "crossfade":
                 audio_right = generate_chunks_crossfade(
                     model=self.model,
                     spectrogram=self.spectrogram,
@@ -384,6 +530,9 @@ class GenerationPipeline:
 
         # Build generation config dict for sidecar
         config_dict = asdict(result.config)
+        # Convert numpy latent_vector to JSON-serialisable list
+        if config_dict.get("latent_vector") is not None:
+            config_dict["latent_vector"] = config_dict["latent_vector"].tolist()
 
         # Write sidecar JSON first (research pitfall #6)
         json_path = write_sidecar_json(
