@@ -1,7 +1,8 @@
-"""Audio I/O, preprocessing, augmentation, and thumbnails.
+"""Audio I/O, preprocessing, augmentation, thumbnails, and spectrogram.
 
 Public API re-exports from :mod:`audio.io`, :mod:`audio.validation`,
-:mod:`audio.augmentation`, :mod:`audio.preprocessing`, and :mod:`audio.thumbnails`.
+:mod:`audio.augmentation`, :mod:`audio.preprocessing`, :mod:`audio.thumbnails`,
+and :mod:`audio.spectrogram`.
 """
 
 from small_dataset_audio.audio.io import (
@@ -36,6 +37,10 @@ from small_dataset_audio.audio.thumbnails import (
     generate_waveform_thumbnail,
     generate_dataset_thumbnails,
 )
+from small_dataset_audio.audio.spectrogram import (
+    SpectrogramConfig,
+    AudioSpectrogram,
+)
 
 __all__ = [
     # io.py
@@ -65,4 +70,7 @@ __all__ = [
     # thumbnails.py
     "generate_waveform_thumbnail",
     "generate_dataset_thumbnails",
+    # spectrogram.py
+    "SpectrogramConfig",
+    "AudioSpectrogram",
 ]
