@@ -98,6 +98,10 @@ Recent decisions affecting current work:
 - [Phase 03]: Cancel event saves checkpoint immediately (no wait for epoch boundary)
 - [Phase 03]: Overfitting gap >20% triggers warning but continues training (user decides when to stop)
 - [Phase 03]: Training loop emits step-level and epoch-level metrics via callback for UI decoupling
+- [Phase 04]: 8th-order Butterworth with sosfiltfilt for zero-phase anti-aliasing (no phase distortion)
+- [Phase 04]: 50ms (2400 samples at 48kHz) crossfade overlap with Hann window
+- [Phase 04]: SLERP falls back to lerp when dot product > 0.9995 (near-parallel vectors)
+- [Phase 04]: Chunks processed one at a time to limit memory for long generation (up to 60s)
 - [Phase 04]: Peak normalize to -1 dBFS (0.891) not 1.0 for professional headroom
 - [Phase 04]: Stereo width parameter continuous 0.0-1.5 with clamping and warning
 - [Phase 04]: SNR frame-based (10ms) with RMS > 0.01 silence threshold
