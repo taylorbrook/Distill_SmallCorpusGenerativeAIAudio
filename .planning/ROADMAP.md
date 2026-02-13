@@ -70,10 +70,13 @@ Plans:
   5. System saves checkpoints during training for recovery and resumption
   6. Validation loss tracks within 20% of training loss (overfitting detection working)
   7. KL divergence remains above 0.5 (posterior collapse prevented)
-**Plans**: TBD
+**Plans:** 4 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md — Mel spectrogram representation layer, convolutional VAE model, and loss function
+- [ ] 03-02-PLAN.md — Training configuration with overfitting presets, PyTorch dataset, and metrics collection
+- [ ] 03-03-PLAN.md — Checkpoint save/load/retention and audio preview generation
+- [ ] 03-04-PLAN.md — Training loop, threaded runner with cancel/resume, and public API exports
 
 ### Phase 4: Audio Quality & Export
 **Goal**: Users can generate high-fidelity 48kHz/24-bit audio from trained models without aliasing artifacts and export as professional-quality WAV files.
@@ -199,7 +202,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Project Setup | 3/3 | ✓ Complete | 2026-02-12 |
 | 2. Data Pipeline Foundation | 3/3 | ✓ Complete | 2026-02-12 |
-| 3. Core Training Engine | 0/TBD | Not started | - |
+| 3. Core Training Engine | 0/4 | Not started | - |
 | 4. Audio Quality & Export | 0/TBD | Not started | - |
 | 5. Musically Meaningful Controls | 0/TBD | Not started | - |
 | 6. Model Persistence & Management | 0/TBD | Not started | - |
