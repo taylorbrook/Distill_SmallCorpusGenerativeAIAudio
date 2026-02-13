@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 3 of 10 (Core Training Engine)
-Plan: 3 of 4 in current phase
-Status: Executing phase 03
-Last activity: 2026-02-13 — Completed 03-03-PLAN.md (checkpoint management, audio preview)
+Plan: 4 of 4 in current phase
+Status: Completed phase 03
+Last activity: 2026-02-12 — Completed 03-04-PLAN.md (training loop and runner)
 
 Progress: [███████░░░] ~30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
+- Total plans completed: 11
 - Average duration: 3 min
-- Total execution time: 0.42 hours
+- Total execution time: 0.49 hours
 
 **By Phase:**
 
@@ -36,9 +36,10 @@ Progress: [███████░░░] ~30%
 | Phase 03 P01 | 3min | 2 tasks, 3 files | 3min |
 | Phase 03 P02 | 3min | 2 tasks, 3 files | 3min |
 | Phase 03 P03 | 2min | 2 tasks, 2 files | 2min |
+| Phase 03 P04 | 4min | 3 tasks, 5 files | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 3min, 3min, 3min, 2min
+- Last 5 plans: 3min, 3min, 2min, 4min, (avg 3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -91,6 +92,10 @@ Recent decisions affecting current work:
 - [Phase 03]: Retention policy ceiling of 4 (3 recent + 1 best); fewer when best overlaps recent
 - [Phase 03]: Peak normalization before WAV export prevents clipping from untrained decoder
 - [Phase 03]: Reconstruction previews limited to 2 items per epoch to control disk usage
+- [Phase 03]: NaN detection skips gradient update instead of crashing for MPS stability
+- [Phase 03]: Cancel event saves checkpoint immediately (no wait for epoch boundary)
+- [Phase 03]: Overfitting gap >20% triggers warning but continues training (user decides when to stop)
+- [Phase 03]: Training loop emits step-level and epoch-level metrics via callback for UI decoupling
 
 ### Pending Todos
 
@@ -102,6 +107,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-13
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-02-12
+Stopped at: Completed 03-04-PLAN.md (Phase 03 complete)
 Resume file: None
