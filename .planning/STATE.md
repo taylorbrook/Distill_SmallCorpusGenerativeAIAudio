@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 
 ## Current Position
 
-Phase: 4 of 10 (Audio Quality & Export)
-Plan: 2 of 3 in current phase
-Status: Executing phase 04
-Last activity: 2026-02-13 — Completed 04-02-PLAN.md (stereo processing & quality metrics)
+Phase: 4 of 10 (Audio Quality & Export) -- COMPLETE
+Plan: 3 of 3 in current phase (all done)
+Status: Phase 04 complete, ready for Phase 05
+Last activity: 2026-02-13 — Completed 04-03-PLAN.md (generation pipeline & export)
 
-Progress: [████████░░] ~37%
+Progress: [████████░░] ~40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13
+- Total plans completed: 14
 - Average duration: 3 min
-- Total execution time: 0.55 hours
+- Total execution time: 0.60 hours
 
 **By Phase:**
 
@@ -39,9 +39,10 @@ Progress: [████████░░] ~37%
 | Phase 03 P04 | 4min | 3 tasks, 5 files | 4min |
 | Phase 04 P01 | 2min | 2 tasks, 4 files | 2min |
 | Phase 04 P02 | 2min | 2 tasks, 2 files | 2min |
+| Phase 04 P03 | 3min | 2 tasks, 4 files | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 4min, 2min, 2min, (avg 2.5min)
+- Last 5 plans: 4min, 2min, 2min, 3min, (avg 2.75min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -107,6 +108,10 @@ Recent decisions affecting current work:
 - [Phase 04]: SNR frame-based (10ms) with RMS > 0.01 silence threshold
 - [Phase 04]: Vectorised clipping consecutive-run detection (np.diff, not Python loop)
 - [Phase 04]: Traffic light quality thresholds: green >30dB no-clip, yellow 15-30dB, red <15dB or >0.1% clip
+- [Phase 04]: All internal processing at 48kHz; resample only at end via cached torchaudio.transforms.Resample
+- [Phase 04]: Sidecar JSON written before WAV in export pipeline (research pitfall #6)
+- [Phase 04]: Dual-seed stereo uses seed and seed+1 for deterministic L/R channel generation
+- [Phase 04]: Auto-generated export filenames: gen_{timestamp}_seed{seed}.wav
 
 ### Pending Todos
 
@@ -119,5 +124,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 04-02-PLAN.md (stereo & quality metrics)
+Stopped at: Completed 04-03-PLAN.md (generation pipeline & export) -- Phase 04 complete
 Resume file: None
