@@ -406,7 +406,7 @@ def train(
             aug_config = AugmentationConfig(
                 expansion_ratio=config.regularization.augmentation_expansion,
             )
-            augmentation_pipeline = AugmentationPipeline(aug_config)
+            augmentation_pipeline = AugmentationPipeline(config=aug_config)
         except Exception:
             logger.warning("Failed to create augmentation pipeline", exc_info=True)
 

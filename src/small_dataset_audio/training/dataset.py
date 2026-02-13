@@ -133,6 +133,15 @@ class AudioTrainingDataset:
         # Apply augmentation with 50% probability
         if self.augmentation_pipeline is not None and random.random() < 0.5:
             chunk = self.augmentation_pipeline.augment(chunk)
+            # Re-enforce fixed length after augmentation (speed perturbation
+            # can change duration).
+            if chunk.shape[1] > self.chunk_samples:
+                chunk = chunk[:, : self.chunk_samples]
+            elif chunk.shape[1] < self.chunk_samples:
+                padding = torch.zeros(
+                    1, self.chunk_samples - chunk.shape[1], dtype=chunk.dtype,
+                )
+                chunk = torch.cat([chunk, padding], dim=1)
 
         return chunk
 
