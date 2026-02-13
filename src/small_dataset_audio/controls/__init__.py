@@ -5,4 +5,12 @@ via PCA discovery and audio feature correlation, enabling users to control
 generation with intuitive sliders instead of raw latent vectors.
 """
 
-__all__: list[str] = []
+from small_dataset_audio.controls.analyzer import AnalysisResult, LatentSpaceAnalyzer
+from small_dataset_audio.controls.features import FEATURE_NAMES, compute_audio_features
+
+__all__ = [
+    "AnalysisResult",
+    "LatentSpaceAnalyzer",
+    "compute_audio_features",
+    "FEATURE_NAMES",
+]
