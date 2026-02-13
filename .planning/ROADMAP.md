@@ -90,10 +90,12 @@ Plans:
   5. User can configure export sample rate (44.1kHz, 48kHz, 96kHz) and bit depth (16-bit, 24-bit, 32-bit float)
   6. User can configure mono or stereo output per generation
   7. Spectral analysis shows no aliasing above 20kHz
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md — Anti-aliasing filter and chunk-based generation (crossfade + latent interpolation)
+- [ ] 04-02-PLAN.md — Stereo processing (mid-side + dual-seed) and quality metrics (SNR + clipping)
+- [ ] 04-03-PLAN.md — GenerationPipeline orchestrator, WAV export with sidecar JSON, and public API
 
 ### Phase 5: Musically Meaningful Controls
 **Goal**: Users can control generation via sliders mapped to musically meaningful parameters (timbre, harmony, temporal, spatial) instead of opaque latent dimensions.
