@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 3 of 10 (Core Training Engine)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Executing phase 03
-Last activity: 2026-02-12 — Completed 03-01-PLAN.md (mel spectrogram + VAE model + loss functions)
+Last activity: 2026-02-13 — Completed 03-02-PLAN.md (training config, dataset, metrics)
 
-Progress: [██████░░░░] ~25%
+Progress: [██████░░░░] ~27%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
+- Total plans completed: 9
 - Average duration: 3 min
-- Total execution time: 0.33 hours
+- Total execution time: 0.38 hours
 
 **By Phase:**
 
@@ -34,9 +34,10 @@ Progress: [██████░░░░] ~25%
 | Phase 02 P02 | 3min | 2 tasks, 2 files | 3min |
 | Phase 02 P03 | 2min | 2 tasks, 5 files | 2min |
 | Phase 03 P01 | 3min | 2 tasks, 3 files | 3min |
+| Phase 03 P02 | 3min | 2 tasks, 3 files | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 3min, 2min, 3min, 3min
+- Last 5 plans: 3min, 2min, 3min, 3min, 3min
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -80,6 +81,11 @@ Recent decisions affecting current work:
 - [Phase 03]: Lazy linear init for encoder/decoder to handle variable mel time dimensions
 - [Phase 03]: Sigmoid decoder output (log1p-normalized mel is always >= 0)
 - [Phase 03]: Pad both height and width to multiple of 16 for robustness
+- [Phase 03]: Preview interval threshold at 50 epochs (short runs get preview every 2 epochs)
+- [Phase 03]: Dataset returns raw waveforms -- mel conversion on GPU in training loop
+- [Phase 03]: Chunk index built from metadata only (no waveform load during indexing)
+- [Phase 03]: Augmentation per-chunk with 50% probability for training variety
+- [Phase 03]: Fixed split seed (42) for reproducible train/val partitions
 
 ### Pending Todos
 
@@ -91,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-12
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-02-13
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
