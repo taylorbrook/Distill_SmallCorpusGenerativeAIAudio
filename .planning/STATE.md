@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 3 (Core Training Engine)
+**Current focus:** Phase 4 (Audio Quality & Export)
 
 ## Current Position
 
-Phase: 3 of 10 (Core Training Engine)
-Plan: 4 of 4 in current phase
-Status: Completed phase 03
-Last activity: 2026-02-12 — Completed 03-04-PLAN.md (training loop and runner)
+Phase: 4 of 10 (Audio Quality & Export)
+Plan: 2 of 3 in current phase
+Status: Executing phase 04
+Last activity: 2026-02-13 — Completed 04-02-PLAN.md (stereo processing & quality metrics)
 
-Progress: [███████░░░] ~30%
+Progress: [████████░░] ~37%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 13
 - Average duration: 3 min
-- Total execution time: 0.49 hours
+- Total execution time: 0.55 hours
 
 **By Phase:**
 
@@ -37,9 +37,11 @@ Progress: [███████░░░] ~30%
 | Phase 03 P02 | 3min | 2 tasks, 3 files | 3min |
 | Phase 03 P03 | 2min | 2 tasks, 2 files | 2min |
 | Phase 03 P04 | 4min | 3 tasks, 5 files | 4min |
+| Phase 04 P01 | 2min | 2 tasks, 4 files | 2min |
+| Phase 04 P02 | 2min | 2 tasks, 2 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 3min, 2min, 4min, (avg 3min)
+- Last 5 plans: 2min, 4min, 2min, 2min, (avg 2.5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -96,6 +98,11 @@ Recent decisions affecting current work:
 - [Phase 03]: Cancel event saves checkpoint immediately (no wait for epoch boundary)
 - [Phase 03]: Overfitting gap >20% triggers warning but continues training (user decides when to stop)
 - [Phase 03]: Training loop emits step-level and epoch-level metrics via callback for UI decoupling
+- [Phase 04]: Peak normalize to -1 dBFS (0.891) not 1.0 for professional headroom
+- [Phase 04]: Stereo width parameter continuous 0.0-1.5 with clamping and warning
+- [Phase 04]: SNR frame-based (10ms) with RMS > 0.01 silence threshold
+- [Phase 04]: Vectorised clipping consecutive-run detection (np.diff, not Python loop)
+- [Phase 04]: Traffic light quality thresholds: green >30dB no-clip, yellow 15-30dB, red <15dB or >0.1% clip
 
 ### Pending Todos
 
@@ -107,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-12
-Stopped at: Completed 03-04-PLAN.md (Phase 03 complete)
+Last session: 2026-02-13
+Stopped at: Completed 04-02-PLAN.md (stereo & quality metrics)
 Resume file: None
