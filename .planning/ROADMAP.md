@@ -111,10 +111,11 @@ Plans:
   7. Parameter sliders have range limits and visual indicators to prevent broken output
   8. User can set a random seed for reproducible generation
   9. Latent space dimensions are derived from PCA/feature extraction after training
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md — Audio feature extraction and LatentSpaceAnalyzer (PCA, correlation, safe ranges)
+- [ ] 05-02-PLAN.md — Slider-to-latent mapping, serialization, and GenerationPipeline integration
 
 ### Phase 6: Model Persistence & Management
 **Goal**: Users can save trained models with metadata, load them for generation, and browse a model library with search and filtering.
@@ -206,7 +207,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Data Pipeline Foundation | 3/3 | ✓ Complete | 2026-02-12 |
 | 3. Core Training Engine | 4/4 | ✓ Complete | 2026-02-12 |
 | 4. Audio Quality & Export | 3/3 | ✓ Complete | 2026-02-12 |
-| 5. Musically Meaningful Controls | 0/TBD | Not started | - |
+| 5. Musically Meaningful Controls | 0/2 | In Progress | - |
 | 6. Model Persistence & Management | 0/TBD | Not started | - |
 | 7. Presets & Generation History | 0/TBD | Not started | - |
 | 8. Gradio UI | 0/TBD | Not started | - |
@@ -215,4 +216,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-12 (Phase 4 complete)*
+*Last updated: 2026-02-13 (Phase 5 planned)*
