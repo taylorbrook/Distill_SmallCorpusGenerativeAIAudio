@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 3 of 10 (Core Training Engine)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: Executing phase 03
-Last activity: 2026-02-13 — Completed 03-02-PLAN.md (training config, dataset, metrics)
+Last activity: 2026-02-13 — Completed 03-03-PLAN.md (checkpoint management, audio preview)
 
-Progress: [██████░░░░] ~27%
+Progress: [███████░░░] ~30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: 3 min
-- Total execution time: 0.38 hours
+- Total execution time: 0.42 hours
 
 **By Phase:**
 
@@ -35,9 +35,10 @@ Progress: [██████░░░░] ~27%
 | Phase 02 P03 | 2min | 2 tasks, 5 files | 2min |
 | Phase 03 P01 | 3min | 2 tasks, 3 files | 3min |
 | Phase 03 P02 | 3min | 2 tasks, 3 files | 3min |
+| Phase 03 P03 | 2min | 2 tasks, 2 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 2min, 3min, 3min, 3min
+- Last 5 plans: 2min, 3min, 3min, 3min, 2min
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -86,6 +87,10 @@ Recent decisions affecting current work:
 - [Phase 03]: Chunk index built from metadata only (no waveform load during indexing)
 - [Phase 03]: Augmentation per-chunk with 50% probability for training variety
 - [Phase 03]: Fixed split seed (42) for reproducible train/val partitions
+- [Phase 03]: JSON sidecar (.meta.json) alongside .pt checkpoints for fast scanning without loading full state dicts
+- [Phase 03]: Retention policy ceiling of 4 (3 recent + 1 best); fewer when best overlaps recent
+- [Phase 03]: Peak normalization before WAV export prevents clipping from untrained decoder
+- [Phase 03]: Reconstruction previews limited to 2 items per epoch to control disk usage
 
 ### Pending Todos
 
@@ -98,5 +103,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 03-02-PLAN.md
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
