@@ -77,6 +77,17 @@ class AudioSpectrogram:
         # Keep a reference to torch for use in methods without re-importing
         self._torch = torch
 
+    def to(self, device: "torch.device") -> "AudioSpectrogram":
+        """Move the forward mel transform to the given device.
+
+        Only ``mel_transform`` is moved -- ``inverse_mel`` and ``griffin_lim``
+        remain on CPU (InverseMelScale requires CPU for ``torch.linalg.lstsq``).
+
+        Returns ``self`` for chaining.
+        """
+        self.mel_transform = self.mel_transform.to(device)
+        return self
+
     # ------------------------------------------------------------------
     # Forward: waveform -> mel
     # ------------------------------------------------------------------

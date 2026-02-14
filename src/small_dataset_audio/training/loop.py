@@ -350,6 +350,7 @@ def train(
         dropout=config.regularization.dropout,
     )
     model = model.to(device)
+    spectrogram.to(device)
 
     # Create optimiser
     optimizer = torch.optim.AdamW(
