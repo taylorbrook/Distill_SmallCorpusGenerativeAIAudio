@@ -193,12 +193,9 @@ try:
 except ImportError:
     pass
 
-try:
-    from small_dataset_audio.cli.generate import app as generate_app
+from small_dataset_audio.cli.generate import app as generate_app
 
-    app.add_typer(generate_app, name="generate", help="Generate audio from trained models")
-except ImportError:
-    pass
+app.add_typer(generate_app, name="generate", help="Generate audio from trained models")
 
 try:
     from small_dataset_audio.cli.train import app as train_app
