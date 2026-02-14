@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 8 complete -- All 5 plans executed, full Gradio UI with history/AB/entry-point, ready for Phase 9
+**Current focus:** Phase 9 in progress -- CLI interface with Typer, Plan 01 complete (CLI skeleton + bootstrap + ui command)
 
 ## Current Position
 
-Phase: 8 of 10 (Gradio UI) -- COMPLETE
-Plan: 5 of 5 in current phase (08-05 complete)
-Status: Phase 8 complete -- Full Gradio UI with history/AB/entry-point, all Phases 1-7 accessible
-Last activity: 2026-02-14 -- Phase 08-05 executed (History, A/B, Entry Point)
+Phase: 9 of 10 (CLI Interface)
+Plan: 1 of 3 in current phase (09-01 complete)
+Status: Phase 9 in progress -- CLI skeleton with Typer, bootstrap, ui subcommand
+Last activity: 2026-02-14 -- Phase 09-01 executed (CLI Skeleton + Bootstrap)
 
-Progress: [██████████████████░] ~86%
+Progress: [██████████████████░] ~88%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 25
+- Total plans completed: 26
 - Average duration: 3 min
-- Total execution time: 1.09 hours
+- Total execution time: 1.12 hours
 
 **By Phase:**
 
@@ -51,9 +51,10 @@ Progress: [██████████████████░] ~86%
 | Phase 08 P03 | 3min | 2 tasks, 2 files | 3min |
 | Phase 08 P04 | 4min | 2 tasks, 3 files | 4min |
 | Phase 08 P05 | 4min | 2 tasks, 5 files | 4min |
+| Phase 09 P01 | 2min | 2 tasks, 5 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 4min, 3min, 4min, 4min (avg 3.6min)
+- Last 5 plans: 4min, 3min, 4min, 4min, 2min (avg 3.4min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -166,6 +167,9 @@ Recent decisions affecting current work:
 - [Phase 08]: A/B dropdown choices use entry_id[:8] prefix for collision-free lookup from display string
 - [Phase 08]: launch_ui/create_app accept optional config/device to avoid duplicate detection when called from CLI
 - [Phase 08]: Accordion-based collapsible sections for secondary features (History, A/B) within Generate tab
+- [Phase 09]: Typer with no_args_is_help=False and invoke_without_command=True callback for backward-compatible bare sda
+- [Phase 09]: Module-level _cli_state dict to pass --device/--verbose/--config from callback to subcommands
+- [Phase 09]: try/except ImportError for generate/train/model sub-typers so plan 01 works before plans 02/03
 
 ### Pending Todos
 
@@ -178,5 +182,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-05-PLAN.md -- Phase 8 complete, full Gradio UI with all features
+Stopped at: Completed 09-01-PLAN.md -- CLI skeleton with Typer, bootstrap, ui subcommand
 Resume file: None
