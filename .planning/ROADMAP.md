@@ -163,10 +163,14 @@ Plans:
   7. GUI includes generation history with thumbnails
   8. GUI provides training progress monitoring with loss curves
   9. All features from Phases 1-7 are accessible through the interface
-**Plans**: TBD
+**Plans:** 5 plans
 
 Plans:
-- [ ] 08-01: TBD
+- [ ] 08-01-PLAN.md -- Gradio install, ui/ skeleton, AppState singleton, Data tab (import, stats, thumbnails)
+- [ ] 08-02-PLAN.md -- Train tab (config, live loss chart, preview audio, cancel/resume)
+- [ ] 08-03-PLAN.md -- Generate tab (sliders, generation, audio player, export, presets)
+- [ ] 08-04-PLAN.md -- Library tab (card grid, table view, model load/delete/save)
+- [ ] 08-05-PLAN.md -- History accordion, A/B comparison, guided navigation, app entry point
 
 ### Phase 9: CLI Interface
 **Goal**: Application provides a command-line interface for batch generation, scripting, and headless operation.
