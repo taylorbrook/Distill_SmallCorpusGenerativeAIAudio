@@ -370,7 +370,7 @@ def _toggle_stereo_width(stereo_mode: str):
     return gr.update(visible=(stereo_mode != "mono"))
 
 
-def _toggle_preset_name(evt):
+def _toggle_preset_name():
     """Show preset name textbox when saving."""
     return gr.update(visible=True)
 

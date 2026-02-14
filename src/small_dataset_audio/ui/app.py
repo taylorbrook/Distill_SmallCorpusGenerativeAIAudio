@@ -10,7 +10,6 @@ import gradio as gr
 
 from small_dataset_audio.ui.components.guided_nav import get_empty_state_message
 from small_dataset_audio.ui.tabs.data_tab import build_data_tab
-from small_dataset_audio.ui.tabs.generate_tab import build_generate_tab
 from small_dataset_audio.ui.tabs.train_tab import build_train_tab
 
 
@@ -40,7 +39,7 @@ def create_app() -> gr.Blocks:
             with gr.Tab("Train", id="train"):
                 build_train_tab()
             with gr.Tab("Generate", id="generate"):
-                build_generate_tab()
+                gr.Markdown(get_empty_state_message("generate"))
             with gr.Tab("Library", id="library"):
                 gr.Markdown(get_empty_state_message("library"))
 
