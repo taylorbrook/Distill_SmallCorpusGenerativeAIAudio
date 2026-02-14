@@ -1,4 +1,5 @@
-"""Generate tab: slider-controlled audio generation, playback, export, and presets.
+"""Generate tab: slider-controlled audio generation, playback, export, presets,
+history browsing, and A/B comparison.
 
 Provides the core user interaction surface -- the generate-listen-export
 workflow.  Slider controls map to the PCA-derived latent space from Phase 5.
@@ -6,8 +7,12 @@ Pre-creates ``MAX_SLIDERS`` Gradio sliders distributed across 3 columns
 (timbral / temporal / spatial); visibility updates dynamically when a model
 is loaded.
 
+Adds collapsible History accordion with waveform thumbnail gallery and
+playback, and A/B Comparison accordion with dual audio players and
+keep-winner preset save.
+
 Uses ``app_state`` singleton for backend access (GenerationPipeline,
-PresetManager, etc.).
+PresetManager, GenerationHistory, ABComparison, etc.).
 """
 
 from __future__ import annotations
@@ -155,6 +160,10 @@ def _generate_audio(*args):
     Arguments are unpacked as:
         slider_0 ... slider_{MAX_SLIDERS-1}, duration, stereo_mode,
         stereo_width, seed
+
+    Returns:
+        Tuple of (audio, badge, audio_visible, history_gallery, ab_choices_a,
+        ab_choices_b).
     """
     from small_dataset_audio.controls.mapping import SliderState, sliders_to_latent
     from small_dataset_audio.inference.generation import GenerationConfig
@@ -173,6 +182,9 @@ def _generate_audio(*args):
             None,
             "**No model loaded.** Go to the Library tab to load a model.",
             gr.update(visible=False),
+            gr.update(),  # history gallery
+            gr.update(),  # ab dropdown a
+            gr.update(),  # ab dropdown b
         )
 
     analysis = app_state.loaded_model.analysis
@@ -181,6 +193,9 @@ def _generate_audio(*args):
             None,
             "**Model has no latent space analysis.** Re-analyze the model.",
             gr.update(visible=False),
+            gr.update(),
+            gr.update(),
+            gr.update(),
         )
 
     n_active = analysis.n_active_components
@@ -213,6 +228,9 @@ def _generate_audio(*args):
             None,
             f"**Generation failed:** {exc}",
             gr.update(visible=False),
+            gr.update(),
+            gr.update(),
+            gr.update(),
         )
 
     # Store result in app_state for export
@@ -235,11 +253,18 @@ def _generate_audio(*args):
     # Build quality badge
     badge = _quality_badge_markdown(result.quality)
 
+    # Auto-refresh history gallery and A/B dropdown choices after generation
+    gallery_items = _build_history_gallery()
+    ab_choices = _build_ab_choices()
+
     # Return audio as (sample_rate, ndarray) tuple for gr.Audio
     return (
         (result.sample_rate, result.audio),
         badge,
         gr.update(visible=True),
+        gallery_items,
+        gr.update(choices=ab_choices, value=None),
+        gr.update(choices=ab_choices, value=None),
     )
 
 
@@ -376,11 +401,209 @@ def _toggle_preset_name():
 
 
 # ---------------------------------------------------------------------------
+# History handlers
+# ---------------------------------------------------------------------------
+
+
+def _build_history_gallery() -> list[tuple[str, str]]:
+    """Build gallery items from history entries.
+
+    Returns a list of (thumbnail_path, caption) tuples for gr.Gallery.
+    """
+    if app_state.history_store is None:
+        return []
+
+    entries = app_state.history_store.list_entries(limit=20)
+    items: list[tuple[str, str]] = []
+    for entry in entries:
+        thumb_path = app_state.history_store.history_dir / entry.thumbnail_file
+        if thumb_path.exists():
+            # Caption: seed + timestamp (compact)
+            ts_short = entry.timestamp[:16].replace("T", " ")
+            caption = f"seed:{entry.seed} | {ts_short}"
+            items.append((str(thumb_path), caption))
+    return items
+
+
+def _refresh_history():
+    """Refresh the history gallery and A/B dropdown choices.
+
+    Returns:
+        Tuple of (gallery_items, ab_choices_a, ab_choices_b).
+    """
+    gallery_items = _build_history_gallery()
+    ab_choices = _build_ab_choices()
+    return (
+        gallery_items,
+        gr.update(choices=ab_choices, value=None),
+        gr.update(choices=ab_choices, value=None),
+    )
+
+
+def _play_history_entry(evt: gr.SelectData):
+    """Play the audio file for a selected history gallery entry.
+
+    Returns the audio file path for the History Playback audio component.
+    """
+    if app_state.history_store is None:
+        return gr.update(visible=False, value=None)
+
+    entries = app_state.history_store.list_entries(limit=20)
+    idx = evt.index
+    if 0 <= idx < len(entries):
+        entry = entries[idx]
+        audio_path = app_state.history_store.history_dir / entry.audio_file
+        if audio_path.exists():
+            return gr.update(visible=True, value=str(audio_path))
+
+    return gr.update(visible=False, value=None)
+
+
+# ---------------------------------------------------------------------------
+# A/B Comparison handlers
+# ---------------------------------------------------------------------------
+
+
+def _build_ab_choices() -> list[str]:
+    """Build dropdown choices for A/B comparison from history entries.
+
+    Each choice is formatted as "seed:{seed} | {timestamp_short}" to match
+    the gallery caption, with the entry_id prefix for lookup.
+    """
+    if app_state.history_store is None:
+        return []
+
+    entries = app_state.history_store.list_entries(limit=20)
+    choices: list[str] = []
+    for entry in entries:
+        ts_short = entry.timestamp[:16].replace("T", " ")
+        label = f"{entry.entry_id[:8]} | seed:{entry.seed} | {ts_short}"
+        choices.append(label)
+    return choices
+
+
+def _find_entry_id_from_choice(choice: str) -> str | None:
+    """Extract the entry_id prefix from an A/B dropdown choice string."""
+    if not choice:
+        return None
+    # Format: "{entry_id[:8]} | seed:... | ..."
+    parts = choice.split(" | ")
+    if not parts:
+        return None
+    prefix = parts[0].strip()
+
+    # Find matching entry by prefix
+    if app_state.history_store is None:
+        return None
+    entries = app_state.history_store.list_entries(limit=20)
+    for entry in entries:
+        if entry.entry_id.startswith(prefix):
+            return entry.entry_id
+    return None
+
+
+def _start_comparison(entry_a_choice: str, entry_b_choice: str):
+    """Start A/B comparison between two selected history entries.
+
+    Returns:
+        Tuple of (audio_a, audio_b, status_msg).
+    """
+    from small_dataset_audio.history.comparison import ABComparison
+
+    if not entry_a_choice or not entry_b_choice:
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            "Select two entries to compare.",
+        )
+
+    entry_a_id = _find_entry_id_from_choice(entry_a_choice)
+    entry_b_id = _find_entry_id_from_choice(entry_b_choice)
+
+    if entry_a_id is None or entry_b_id is None:
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            "Could not find selected entries.",
+        )
+
+    if entry_a_id == entry_b_id:
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            "Select two different entries to compare.",
+        )
+
+    try:
+        comparison = ABComparison.from_two_entries(entry_a_id, entry_b_id)
+        app_state.ab_comparison = comparison
+        path_a, path_b = comparison.get_audio_paths(app_state.history_store)
+
+        return (
+            gr.update(visible=True, value=str(path_a) if path_a else None),
+            gr.update(visible=True, value=str(path_b) if path_b else None),
+            "Comparing A vs B. Listen and pick a winner!",
+        )
+    except Exception as exc:
+        logger.warning("A/B comparison failed: %s", exc)
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            f"Comparison failed: {exc}",
+        )
+
+
+def _keep_winner(side: str):
+    """Save the winning side's parameters as a preset.
+
+    Args:
+        side: "a" or "b".
+
+    Returns:
+        Status message string.
+    """
+    if app_state.ab_comparison is None:
+        return "No active comparison. Start a comparison first."
+
+    if app_state.history_store is None or app_state.preset_manager is None:
+        return "History or preset manager not available."
+
+    try:
+        # Generate a preset name from the winner
+        winner_entry_id = (
+            app_state.ab_comparison.entry_a_id
+            if side == "a"
+            else app_state.ab_comparison.entry_b_id
+        )
+        if winner_entry_id is None:
+            return "Winner is a live generation -- cannot save as preset."
+
+        entry = app_state.history_store.get(winner_entry_id)
+        if entry is None:
+            return "Winner entry not found in history."
+
+        preset_name = f"AB Winner (seed:{entry.seed})"
+
+        app_state.ab_comparison.keep_winner(
+            winner=side,
+            preset_name=preset_name,
+            history=app_state.history_store,
+            preset_manager=app_state.preset_manager,
+        )
+
+        return f"Saved winner ({side.upper()}) as preset: {preset_name}"
+
+    except Exception as exc:
+        logger.warning("Keep winner failed: %s", exc)
+        return f"Failed to save winner: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Tab builder
 # ---------------------------------------------------------------------------
 
 
-def build_generate_tab() -> None:
+def build_generate_tab() -> dict:
     """Build the Generate tab UI within the current Blocks context.
 
     Layout:
@@ -393,6 +616,11 @@ def build_generate_tab() -> None:
       - Audio player with quality badge
       - Export controls
       - Preset management
+      - History accordion (collapsible)
+      - A/B Comparison accordion (collapsible)
+
+    Returns:
+        Component reference dict for cross-tab wiring.
     """
     # Empty state message
     empty_msg = gr.Markdown(
@@ -533,6 +761,56 @@ def build_generate_tab() -> None:
             save_preset_btn = gr.Button("Save Preset", size="sm")
             delete_preset_btn = gr.Button("Delete Preset", size="sm", variant="stop")
 
+        # ----- History accordion (collapsible) -----
+        with gr.Accordion("Generation History", open=False):
+            history_gallery = gr.Gallery(
+                label="History",
+                columns=4,
+                height=300,
+                visible=True,
+            )
+            refresh_history_btn = gr.Button("Refresh History", size="sm")
+            history_playback = gr.Audio(
+                label="History Playback",
+                visible=False,
+                interactive=False,
+            )
+
+        # ----- A/B Comparison accordion (collapsible) -----
+        with gr.Accordion("A/B Comparison", open=False):
+            gr.Markdown("Select two generations from history to compare.")
+            with gr.Row():
+                ab_dropdown_a = gr.Dropdown(
+                    label="Entry A",
+                    choices=[],
+                    value=None,
+                )
+                ab_dropdown_b = gr.Dropdown(
+                    label="Entry B",
+                    choices=[],
+                    value=None,
+                )
+            compare_btn = gr.Button("Compare", variant="primary")
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("**A**")
+                    ab_audio_a = gr.Audio(
+                        label="Generation A",
+                        visible=False,
+                        interactive=False,
+                    )
+                with gr.Column():
+                    gr.Markdown("**B**")
+                    ab_audio_b = gr.Audio(
+                        label="Generation B",
+                        visible=False,
+                        interactive=False,
+                    )
+            with gr.Row():
+                keep_a_btn = gr.Button("Keep A as Preset")
+                keep_b_btn = gr.Button("Keep B as Preset")
+            ab_status = gr.Markdown(value="")
+
     # ----- Wire event handlers -----
 
     # Stereo width visibility toggle
@@ -549,11 +827,12 @@ def build_generate_tab() -> None:
         outputs=[seed_input],
     )
 
-    # Generate audio
+    # Generate audio (now also refreshes history gallery and A/B dropdowns)
     generate_btn.click(
         fn=_generate_audio,
         inputs=sliders + [duration_input, stereo_mode_dd, stereo_width_slider, seed_input],
-        outputs=[audio_output, quality_badge, audio_output],
+        outputs=[audio_output, quality_badge, audio_output,
+                 history_gallery, ab_dropdown_a, ab_dropdown_b],
     )
 
     # Export audio
@@ -586,6 +865,44 @@ def build_generate_tab() -> None:
         fn=_delete_preset,
         inputs=[preset_dd],
         outputs=[preset_dd],
+    )
+
+    # ----- History event wiring -----
+
+    # Refresh history button
+    refresh_history_btn.click(
+        fn=_refresh_history,
+        inputs=None,
+        outputs=[history_gallery, ab_dropdown_a, ab_dropdown_b],
+    )
+
+    # Click on gallery thumbnail plays the audio
+    history_gallery.select(
+        fn=_play_history_entry,
+        inputs=None,
+        outputs=[history_playback],
+    )
+
+    # ----- A/B Comparison event wiring -----
+
+    # Compare button
+    compare_btn.click(
+        fn=_start_comparison,
+        inputs=[ab_dropdown_a, ab_dropdown_b],
+        outputs=[ab_audio_a, ab_audio_b, ab_status],
+    )
+
+    # Keep A / Keep B buttons
+    keep_a_btn.click(
+        fn=lambda: _keep_winner("a"),
+        inputs=None,
+        outputs=[ab_status],
+    )
+
+    keep_b_btn.click(
+        fn=lambda: _keep_winner("b"),
+        inputs=None,
+        outputs=[ab_status],
     )
 
     # Return components that need external wiring (model loading)
