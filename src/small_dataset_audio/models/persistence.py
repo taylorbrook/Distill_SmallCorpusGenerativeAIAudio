@@ -314,8 +314,9 @@ def load_model(
     latent_dim = saved.get("latent_dim", 64)
     model = ConvVAE(latent_dim=latent_dim)
 
-    # CRITICAL: Initialize both encoder and decoder linear layers
-    # BEFORE load_state_dict. Compute spatial shape from spectrogram config.
+    # CRITICAL: Initialize decoder (and encoder if present in state_dict)
+    # linear layers BEFORE load_state_dict.  Compute spatial shape from
+    # spectrogram config.
     n_mels = spec_config.n_mels
     time_frames = spec_config.sample_rate // spec_config.hop_length + 1
 
@@ -329,12 +330,15 @@ def load_model(
     spatial = (padded_h // 16, padded_w // 16)
     model.decoder._init_linear(spatial)
 
-    # Init encoder linear layers
-    flatten_dim = 256 * spatial[0] * spatial[1]
-    model.encoder._init_linear(flatten_dim)
+    # Init encoder linear layers only if they exist in the state_dict
+    # (trained models have them; sample-only models may not)
+    state_dict = saved["model_state_dict"]
+    if "encoder.fc_mu.weight" in state_dict:
+        flatten_dim = 256 * spatial[0] * spatial[1]
+        model.encoder._init_linear(flatten_dim)
 
     # Load weights
-    model.load_state_dict(saved["model_state_dict"])
+    model.load_state_dict(state_dict)
     torch_device = torch.device(device)
     model = model.to(torch_device)
     model.eval()
