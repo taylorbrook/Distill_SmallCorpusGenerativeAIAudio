@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 6 complete, ready for Phase 7
+**Current focus:** Phase 7 in progress -- presets, generation history, A/B comparison
 
 ## Current Position
 
-Phase: 6 of 10 (Model Persistence & Management) -- COMPLETE
-Plan: 1 of 1 in current phase (all done)
-Status: Phase 06 complete — model persistence, library catalog, save/load/delete/search
-Last activity: 2026-02-13 — Phase 06-01 executed (model persistence & library management)
+Phase: 7 of 10 (Presets, Generation History & A/B Comparison)
+Plan: 1 of 3 in current phase (07-01 complete)
+Status: Phase 07 in progress -- preset management complete, history and A/B comparison next
+Last activity: 2026-02-14 -- Phase 07-01 executed (preset management system)
 
-Progress: [██████████░] ~60%
+Progress: [████████████░] ~65%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
+- Total plans completed: 18
 - Average duration: 3 min
-- Total execution time: 0.72 hours
+- Total execution time: 0.75 hours
 
 **By Phase:**
 
@@ -43,9 +43,10 @@ Progress: [██████████░] ~60%
 | Phase 05 P01 | 3min | 2 tasks, 5 files | 3min |
 | Phase 05 P02 | 3min | 2 tasks, 4 files | 3min |
 | Phase 06 P01 | 4min | 3 tasks, 4 files | 4min |
+| Phase 07 P01 | 2min | 2 tasks, 3 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 3min, 3min, 3min, 4min (avg 3.2min)
+- Last 5 plans: 3min, 3min, 3min, 4min, 2min (avg 3.0min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -129,6 +130,9 @@ Recent decisions affecting current work:
 - [Phase 06]: Saved model format strips optimizer/scheduler state -- ~6 MB vs ~12 MB for checkpoints
 - [Phase 06]: UUID model IDs for collision-free identification without counter management
 - [Phase 06]: weights_only=False for torch.load -- our dicts contain numpy arrays and Python primitives
+- [Phase 07]: Copied _write_index_atomic pattern locally in presets/manager.py (module independence from catalog.py)
+- [Phase 07]: Virtual folders stored as list of dicts with name+created (not just strings) for future metadata
+- [Phase 07]: Case-insensitive folder name duplicate check to prevent confusing near-duplicates
 
 ### Pending Todos
 
@@ -140,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-13
-Stopped at: Completed 06-01-PLAN.md -- Phase 06 complete, ready for Phase 07 (Gradio Interface)
+Last session: 2026-02-14
+Stopped at: Completed 07-01-PLAN.md -- preset management system, ready for 07-02 (generation history)
 Resume file: None
