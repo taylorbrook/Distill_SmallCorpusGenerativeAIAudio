@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 9 in progress -- CLI interface with Typer, Plans 01-02 complete (skeleton + generate/model commands)
+**Current focus:** Phase 9 complete -- CLI interface with Typer fully implemented (all 3 plans done)
 
 ## Current Position
 
-Phase: 9 of 10 (CLI Interface)
-Plan: 2 of 3 in current phase (09-02 complete)
-Status: Phase 9 in progress -- generate and model CLI commands implemented
-Last activity: 2026-02-14 -- Phase 09-02 executed (Generate + Model Commands)
+Phase: 9 of 10 (CLI Interface) -- COMPLETE
+Plan: 3 of 3 in current phase (09-03 complete)
+Status: Phase 9 complete -- all CLI commands implemented and verified
+Last activity: 2026-02-14 -- Phase 09-03 executed (Train Command + CLI Integration)
 
-Progress: [███████████████████░] ~90%
+Progress: [███████████████████░] ~93%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 27
+- Total plans completed: 28
 - Average duration: 3 min
 - Total execution time: 1.12 hours
 
@@ -53,9 +53,10 @@ Progress: [███████████████████░] ~90%
 | Phase 08 P05 | 4min | 2 tasks, 5 files | 4min |
 | Phase 09 P01 | 2min | 2 tasks, 5 files | 2min |
 | Phase 09 P02 | 2min | 2 tasks, 3 files | 2min |
+| Phase 09 P03 | 2min | 2 tasks, 2 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 4min, 4min, 2min, 2min (avg 3.0min)
+- Last 5 plans: 4min, 4min, 2min, 2min, 2min (avg 2.8min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -174,6 +175,10 @@ Recent decisions affecting current work:
 - [Phase 09]: resolve_model uses 3-tier lookup: .sda file path, UUID, then name search with ambiguity detection
 - [Phase 09]: All CLI Rich console output to stderr; stdout reserved for file paths or JSON (enables piping)
 - [Phase 09]: delete command uses persistence.delete_model (handles both file + index removal)
+- [Phase 09]: Typer callback(invoke_without_command=True) for single-command sub-typer avoids nested command names
+- [Phase 09]: Direct call to train() not TrainingRunner for CLI (no background thread needed)
+- [Phase 09]: Exit code 3 for cancelled training, 1 for errors, 0 for success
+- [Phase 09]: Removed all try/except ImportError guards in __init__.py now that all CLI modules exist
 
 ### Pending Todos
 
@@ -186,5 +191,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 09-02-PLAN.md -- sda generate and sda model commands
+Stopped at: Completed 09-03-PLAN.md -- Train CLI command + full CLI integration verification
 Resume file: None
