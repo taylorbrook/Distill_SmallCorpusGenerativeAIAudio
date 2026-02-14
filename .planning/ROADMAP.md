@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Audio Quality & Export** - 48kHz fidelity, anti-aliasing, basic generation, WAV export *(completed 2026-02-12)*
 - [x] **Phase 5: Musically Meaningful Controls** - Latent space disentanglement and PCA mapping to musical parameters *(completed 2026-02-13)*
 - [x] **Phase 6: Model Persistence & Management** - Save/load models with metadata, model library *(completed 2026-02-13)*
-- [ ] **Phase 7: Presets & Generation History** - User workflow support for exploration
+- [x] **Phase 7: Presets & Generation History** - User workflow support for exploration *(completed 2026-02-13)*
 - [ ] **Phase 8: Gradio UI** - Interactive interface with sliders, playback, file management
 - [ ] **Phase 9: CLI Interface** - Batch generation and scripting for power users
 - [ ] **Phase 10: Multi-Format Export & Spatial Audio** - Advanced output options (MP3/FLAC/OGG, stereo field, binaural)
@@ -145,9 +145,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Preset management with model-scoped CRUD and virtual folder organization
-- [ ] 07-02-PLAN.md — Generation history storage with WAV files, waveform thumbnails, and parameter snapshots
-- [ ] 07-03-PLAN.md — A/B comparison runtime state and final public API wiring
+- [x] 07-01-PLAN.md — Preset management with model-scoped CRUD and virtual folder organization
+- [x] 07-02-PLAN.md — Generation history storage with WAV files, waveform thumbnails, and parameter snapshots
+- [x] 07-03-PLAN.md — A/B comparison runtime state and final public API wiring
 
 ### Phase 8: Gradio UI
 **Goal**: Application provides a complete Gradio-based GUI with sliders, audio playback, file management, and all core features accessible through the interface.
@@ -211,11 +211,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. Audio Quality & Export | 3/3 | ✓ Complete | 2026-02-12 |
 | 5. Musically Meaningful Controls | 2/2 | ✓ Complete | 2026-02-13 |
 | 6. Model Persistence & Management | 1/1 | ✓ Complete | 2026-02-13 |
-| 7. Presets & Generation History | 0/3 | In progress | - |
+| 7. Presets & Generation History | 3/3 | ✓ Complete | 2026-02-13 |
 | 8. Gradio UI | 0/TBD | Not started | - |
 | 9. CLI Interface | 0/TBD | Not started | - |
 | 10. Multi-Format Export & Spatial Audio | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-13 (Phase 7 planned)*
+*Last updated: 2026-02-13 (Phase 7 complete)*
