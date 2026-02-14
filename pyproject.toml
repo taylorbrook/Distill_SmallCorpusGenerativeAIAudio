@@ -17,10 +17,11 @@ dependencies = [
     "scipy>=1.12",
     "scikit-learn>=1.8",
     "gradio>=5.0,<7.0",
+    "typer>=0.23,<1.0",
 ]
 
 [project.scripts]
-sda = "small_dataset_audio.app:main"
+sda = "small_dataset_audio.cli:main"
 
 [build-system]
 requires = ["hatchling"]
