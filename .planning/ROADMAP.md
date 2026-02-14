@@ -142,10 +142,12 @@ Plans:
   3. User can browse, rename, and delete saved presets
   4. User can view a history of past generations with waveform thumbnails and parameter snapshots
   5. User can A/B compare two generations from history (play side-by-side)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 07-01: TBD
+- [ ] 07-01-PLAN.md — Preset management with model-scoped CRUD and virtual folder organization
+- [ ] 07-02-PLAN.md — Generation history storage with WAV files, waveform thumbnails, and parameter snapshots
+- [ ] 07-03-PLAN.md — A/B comparison runtime state and final public API wiring
 
 ### Phase 8: Gradio UI
 **Goal**: Application provides a complete Gradio-based GUI with sliders, audio playback, file management, and all core features accessible through the interface.
@@ -209,11 +211,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. Audio Quality & Export | 3/3 | ✓ Complete | 2026-02-12 |
 | 5. Musically Meaningful Controls | 2/2 | ✓ Complete | 2026-02-13 |
 | 6. Model Persistence & Management | 1/1 | ✓ Complete | 2026-02-13 |
-| 7. Presets & Generation History | 0/TBD | Not started | - |
+| 7. Presets & Generation History | 0/3 | In progress | - |
 | 8. Gradio UI | 0/TBD | Not started | - |
 | 9. CLI Interface | 0/TBD | Not started | - |
 | 10. Multi-Format Export & Spatial Audio | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-13 (Phase 6 complete)*
+*Last updated: 2026-02-13 (Phase 7 planned)*
