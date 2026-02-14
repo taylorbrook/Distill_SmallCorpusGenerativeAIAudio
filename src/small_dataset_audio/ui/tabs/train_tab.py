@@ -220,7 +220,6 @@ def build_train_tab() -> None:
                 label=f"Preview {i + 1}",
                 visible=False,
                 interactive=False,
-                show_download_button=False,
             )
             preview_audios.append(audio)
 
