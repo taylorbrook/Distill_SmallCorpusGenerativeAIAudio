@@ -166,9 +166,9 @@ def _load_model_handler(selected_name: str) -> tuple:
             model_id=entry.model_id,
             presets_dir=app_state.presets_dir,
         )
+        app_state.history_dir.mkdir(parents=True, exist_ok=True)
         app_state.history_store = GenerationHistory(
             history_dir=app_state.history_dir,
-            model_id=entry.model_id,
         )
 
         logger.info("Loaded model '%s' from library", entry.name)

@@ -271,9 +271,14 @@ def main(argv: list[str] | None = None) -> None:
         resolved = resolve_path(path_str, base_dir=config_path.parent)
         resolved.mkdir(parents=True, exist_ok=True)
 
-    # Ready message
+    # Launch the Gradio UI
     console.print()
     console.print(
         f"[bold green]Small Dataset Audio v{__version__} ready.[/bold green] "
         f"({device.type.upper()})"
     )
+    console.print("Launching Gradio UI...")
+
+    from small_dataset_audio.ui import launch_ui
+
+    launch_ui(config=config, device=device)

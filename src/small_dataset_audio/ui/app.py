@@ -2,10 +2,20 @@
 
 Builds the 4-tab layout (Data, Train, Generate, Library), wires tab
 builders, and provides the :func:`launch_ui` entry point.  Cross-tab
-wiring connects the Library load action to Generate tab slider updates.
+wiring connects:
+
+- Library load -> Generate tab slider updates
+- Data import -> Train tab empty-state/controls visibility
+- Library load -> Generate tab empty-state/controls visibility
+
+Accepts optional pre-loaded ``config`` and ``device`` so the main
+application entry point (``sda`` command) can pass through startup
+results without duplicating config load and device detection.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import gradio as gr
 
@@ -15,21 +25,33 @@ from small_dataset_audio.ui.tabs.library_tab import build_library_tab
 from small_dataset_audio.ui.tabs.train_tab import build_train_tab
 
 
-def create_app() -> gr.Blocks:
+def create_app(
+    config: dict[str, Any] | None = None,
+    device: Any = None,
+) -> gr.Blocks:
     """Build the complete Gradio Blocks application.
 
     Initialises application state from config before assembling the
     layout.  After all tabs are built, wires cross-tab events so that
     loading a model from the Library also updates the Generate tab
     sliders.  Returns the Blocks object (does not launch).
+
+    Parameters
+    ----------
+    config : dict | None
+        Pre-loaded config dict.  If ``None``, loads from disk.
+    device : torch.device | None
+        Pre-selected device.  If ``None``, auto-detects.
     """
     from small_dataset_audio.config.settings import load_config
     from small_dataset_audio.hardware.device import select_device
     from small_dataset_audio.ui.state import init_state
     from small_dataset_audio.ui.tabs.generate_tab import _update_sliders_for_model
 
-    config = load_config()
-    device = select_device(config.get("hardware", {}).get("device", "auto"))
+    if config is None:
+        config = load_config()
+    if device is None:
+        device = select_device(config.get("hardware", {}).get("device", "auto"))
     init_state(config, device)
 
     with gr.Blocks(
@@ -68,9 +90,20 @@ def create_app() -> gr.Blocks:
     return app
 
 
-def launch_ui() -> None:
-    """Load config, select device, build app, and launch in browser."""
-    app = create_app()
+def launch_ui(
+    config: dict[str, Any] | None = None,
+    device: Any = None,
+) -> None:
+    """Build app and launch in browser.
+
+    Parameters
+    ----------
+    config : dict | None
+        Pre-loaded config dict (forwarded to ``create_app``).
+    device : torch.device | None
+        Pre-selected device (forwarded to ``create_app``).
+    """
+    app = create_app(config=config, device=device)
     app.launch(
         server_name="127.0.0.1",
         server_port=7860,
