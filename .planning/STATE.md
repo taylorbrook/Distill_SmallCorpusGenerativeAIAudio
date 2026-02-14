@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 7 of 10 (Presets, Generation History & A/B Comparison)
-Plan: 1 of 3 in current phase (07-01 complete)
-Status: Phase 07 in progress -- preset management complete, history and A/B comparison next
-Last activity: 2026-02-14 -- Phase 07-01 executed (preset management system)
+Plan: 2 of 3 in current phase (07-01, 07-02 complete)
+Status: Phase 07 in progress -- preset management and generation history complete, A/B comparison next
+Last activity: 2026-02-14 -- Phase 07-02 executed (generation history storage)
 
-Progress: [████████████░] ~65%
+Progress: [█████████████░] ~68%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 18
+- Total plans completed: 19
 - Average duration: 3 min
-- Total execution time: 0.75 hours
+- Total execution time: 0.80 hours
 
 **By Phase:**
 
@@ -44,9 +44,10 @@ Progress: [████████████░] ~65%
 | Phase 05 P02 | 3min | 2 tasks, 4 files | 3min |
 | Phase 06 P01 | 4min | 3 tasks, 4 files | 4min |
 | Phase 07 P01 | 2min | 2 tasks, 3 files | 2min |
+| Phase 07 P02 | 3min | 2 tasks, 2 files | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 3min, 3min, 4min, 2min (avg 3.0min)
+- Last 5 plans: 3min, 3min, 4min, 2min, 3min (avg 3.0min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -133,6 +134,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Copied _write_index_atomic pattern locally in presets/manager.py (module independence from catalog.py)
 - [Phase 07]: Virtual folders stored as list of dicts with name+created (not just strings) for future metadata
 - [Phase 07]: Case-insensitive folder name duplicate check to prevent confusing near-duplicates
+- [Phase 07]: Copied _write_index_atomic pattern locally in history/store.py (module independence from catalog.py)
+- [Phase 07]: Smaller thumbnail dimensions (400x60) for history entries vs dataset thumbnails (800x120)
+- [Phase 07]: repair_history reports orphan audio files but does NOT delete them (user may want them)
 
 ### Pending Todos
 
@@ -145,5 +149,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-01-PLAN.md -- preset management system, ready for 07-02 (generation history)
+Stopped at: Completed 07-02-PLAN.md -- generation history storage, ready for 07-03 (A/B comparison)
 Resume file: None
