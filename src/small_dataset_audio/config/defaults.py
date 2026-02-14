@@ -17,6 +17,8 @@ DEFAULT_CONFIG: dict = {
         "datasets": "data/datasets",
         "models": "data/models",
         "generated": "data/generated",
+        "presets": "data/presets",
+        "history": "data/history",
     },
     "hardware": {
         "device": "auto",          # "auto", "mps", "cuda", "cpu"
