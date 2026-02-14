@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 8 in progress -- Generate tab with slider-controlled generation, audio, export, presets complete
+**Current focus:** Phase 8 in progress -- Library tab with dual-view and cross-tab wiring complete, ready for 08-05
 
 ## Current Position
 
 Phase: 8 of 10 (Gradio UI)
-Plan: 3 of 5 in current phase (08-03 complete)
-Status: 08-03 complete -- Generate tab with slider-controlled generation, audio playback, export, presets
-Last activity: 2026-02-14 -- Phase 08-03 executed (Generate tab)
+Plan: 4 of 5 in current phase (08-04 complete)
+Status: 08-04 complete -- Library tab with card grid/table dual-view, load/delete/save, cross-tab Generate slider updates
+Last activity: 2026-02-14 -- Phase 08-04 executed (Library tab)
 
-Progress: [████████████████░] ~80%
+Progress: [█████████████████░] ~82%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 23
+- Total plans completed: 24
 - Average duration: 3 min
-- Total execution time: 0.95 hours
+- Total execution time: 1.02 hours
 
 **By Phase:**
 
@@ -49,9 +49,10 @@ Progress: [████████████████░] ~80%
 | Phase 08 P01 | 3min | 2 tasks, 8 files | 3min |
 | Phase 08 P02 | 4min | 2 tasks, 3 files | 4min |
 | Phase 08 P03 | 3min | 2 tasks, 2 files | 3min |
+| Phase 08 P04 | 4min | 2 tasks, 3 files | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 2min, 3min, 4min, 3min (avg 3.0min)
+- Last 5 plans: 2min, 3min, 4min, 3min, 4min (avg 3.2min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -157,6 +158,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Last generation result stored in metrics_buffer for export access
 - [Phase 08]: Preset manager and history store initialized lazily on first model load
 - [Phase 08]: Training callback stores events in app_state.metrics_buffer; Timer reads and builds chart
+- [Phase 08]: Dropdown-based model selection paired with card grid (gr.HTML click events are limited)
+- [Phase 08]: Library load handler reloads ModelLibrary from disk after delete/save for catalog consistency
+- [Phase 08]: Cross-tab wiring via component dict returns from tab builders (load_btn.click chains to _update_sliders_for_model)
 
 ### Pending Todos
 
@@ -169,5 +173,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-03-PLAN.md -- Generate tab done, ready for 08-04 (Library tab)
+Stopped at: Completed 08-04-PLAN.md -- Library tab done, ready for 08-05 (polish/integration)
 Resume file: None
