@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 8 in progress -- Library tab with dual-view and cross-tab wiring complete, ready for 08-05
+**Current focus:** Phase 8 complete -- All 5 plans executed, full Gradio UI with history/AB/entry-point, ready for Phase 9
 
 ## Current Position
 
-Phase: 8 of 10 (Gradio UI)
-Plan: 4 of 5 in current phase (08-04 complete)
-Status: 08-04 complete -- Library tab with card grid/table dual-view, load/delete/save, cross-tab Generate slider updates
-Last activity: 2026-02-14 -- Phase 08-04 executed (Library tab)
+Phase: 8 of 10 (Gradio UI) -- COMPLETE
+Plan: 5 of 5 in current phase (08-05 complete)
+Status: Phase 8 complete -- Full Gradio UI with history/AB/entry-point, all Phases 1-7 accessible
+Last activity: 2026-02-14 -- Phase 08-05 executed (History, A/B, Entry Point)
 
-Progress: [█████████████████░] ~82%
+Progress: [██████████████████░] ~86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 24
+- Total plans completed: 25
 - Average duration: 3 min
-- Total execution time: 1.02 hours
+- Total execution time: 1.09 hours
 
 **By Phase:**
 
@@ -50,9 +50,10 @@ Progress: [█████████████████░] ~82%
 | Phase 08 P02 | 4min | 2 tasks, 3 files | 4min |
 | Phase 08 P03 | 3min | 2 tasks, 2 files | 3min |
 | Phase 08 P04 | 4min | 2 tasks, 3 files | 4min |
+| Phase 08 P05 | 4min | 2 tasks, 5 files | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 3min, 4min, 3min, 4min (avg 3.2min)
+- Last 5 plans: 3min, 4min, 3min, 4min, 4min (avg 3.6min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -161,6 +162,10 @@ Recent decisions affecting current work:
 - [Phase 08]: Dropdown-based model selection paired with card grid (gr.HTML click events are limited)
 - [Phase 08]: Library load handler reloads ModelLibrary from disk after delete/save for catalog consistency
 - [Phase 08]: Cross-tab wiring via component dict returns from tab builders (load_btn.click chains to _update_sliders_for_model)
+- [Phase 08]: History gallery uses (thumbnail_path, caption) tuples with seed+timestamp for informative browsing
+- [Phase 08]: A/B dropdown choices use entry_id[:8] prefix for collision-free lookup from display string
+- [Phase 08]: launch_ui/create_app accept optional config/device to avoid duplicate detection when called from CLI
+- [Phase 08]: Accordion-based collapsible sections for secondary features (History, A/B) within Generate tab
 
 ### Pending Todos
 
@@ -173,5 +178,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-04-PLAN.md -- Library tab done, ready for 08-05 (polish/integration)
+Stopped at: Completed 08-05-PLAN.md -- Phase 8 complete, full Gradio UI with all features
 Resume file: None
