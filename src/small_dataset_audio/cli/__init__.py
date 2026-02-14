@@ -204,12 +204,9 @@ try:
 except ImportError:
     pass
 
-try:
-    from small_dataset_audio.cli.model import app as model_app
+from small_dataset_audio.cli.model import app as model_app
 
-    app.add_typer(model_app, name="model", help="Manage saved models")
-except ImportError:
-    pass
+app.add_typer(model_app, name="model", help="Manage saved models")
 
 # ---------------------------------------------------------------------------
 # Entry point callable
