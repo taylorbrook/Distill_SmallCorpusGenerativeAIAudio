@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Model Persistence & Management** - Save/load models with metadata, model library *(completed 2026-02-13)*
 - [x] **Phase 7: Presets & Generation History** - User workflow support for exploration *(completed 2026-02-13)*
 - [x] **Phase 8: Gradio UI** - Interactive interface with sliders, playback, file management *(completed 2026-02-13)*
-- [ ] **Phase 9: CLI Interface** - Batch generation and scripting for power users
+- [x] **Phase 9: CLI Interface** - Batch generation and scripting for power users *(completed 2026-02-14)*
 - [ ] **Phase 10: Multi-Format Export & Spatial Audio** - Advanced output options (MP3/FLAC/OGG, stereo field, binaural)
 
 ## Phase Details
@@ -185,9 +185,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 09-01-PLAN.md — CLI skeleton with Typer, bootstrap function, entry point refactoring, sda ui command
-- [ ] 09-02-PLAN.md — Generate command with batch/preset support, model management commands (list/info/delete)
-- [ ] 09-03-PLAN.md — Train command with Rich progress bars and SIGINT handling, full CLI integration verification
+- [x] 09-01-PLAN.md — CLI skeleton with Typer, bootstrap function, entry point refactoring, sda ui command
+- [x] 09-02-PLAN.md — Generate command with batch/preset support, model management commands (list/info/delete)
+- [x] 09-03-PLAN.md — Train command with Rich progress bars and SIGINT handling, full CLI integration verification
 
 ### Phase 10: Multi-Format Export & Spatial Audio
 **Goal**: Users can export audio in multiple formats (MP3, FLAC, OGG) and generate spatial audio output (stereo field, binaural).
@@ -219,9 +219,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 6. Model Persistence & Management | 1/1 | ✓ Complete | 2026-02-13 |
 | 7. Presets & Generation History | 3/3 | ✓ Complete | 2026-02-13 |
 | 8. Gradio UI | 5/5 | ✓ Complete | 2026-02-13 |
-| 9. CLI Interface | 0/3 | In progress | - |
+| 9. CLI Interface | 3/3 | ✓ Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-14 (Phase 9 planned)*
+*Last updated: 2026-02-14 (Phase 9 complete)*
