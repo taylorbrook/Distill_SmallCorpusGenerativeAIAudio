@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 9 in progress -- CLI interface with Typer, Plan 01 complete (CLI skeleton + bootstrap + ui command)
+**Current focus:** Phase 9 in progress -- CLI interface with Typer, Plans 01-02 complete (skeleton + generate/model commands)
 
 ## Current Position
 
 Phase: 9 of 10 (CLI Interface)
-Plan: 1 of 3 in current phase (09-01 complete)
-Status: Phase 9 in progress -- CLI skeleton with Typer, bootstrap, ui subcommand
-Last activity: 2026-02-14 -- Phase 09-01 executed (CLI Skeleton + Bootstrap)
+Plan: 2 of 3 in current phase (09-02 complete)
+Status: Phase 9 in progress -- generate and model CLI commands implemented
+Last activity: 2026-02-14 -- Phase 09-02 executed (Generate + Model Commands)
 
-Progress: [██████████████████░] ~88%
+Progress: [███████████████████░] ~90%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
+- Total plans completed: 27
 - Average duration: 3 min
 - Total execution time: 1.12 hours
 
@@ -52,9 +52,10 @@ Progress: [██████████████████░] ~88%
 | Phase 08 P04 | 4min | 2 tasks, 3 files | 4min |
 | Phase 08 P05 | 4min | 2 tasks, 5 files | 4min |
 | Phase 09 P01 | 2min | 2 tasks, 5 files | 2min |
+| Phase 09 P02 | 2min | 2 tasks, 3 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 4min, 3min, 4min, 4min, 2min (avg 3.4min)
+- Last 5 plans: 3min, 4min, 4min, 2min, 2min (avg 3.0min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -170,6 +171,9 @@ Recent decisions affecting current work:
 - [Phase 09]: Typer with no_args_is_help=False and invoke_without_command=True callback for backward-compatible bare sda
 - [Phase 09]: Module-level _cli_state dict to pass --device/--verbose/--config from callback to subcommands
 - [Phase 09]: try/except ImportError for generate/train/model sub-typers so plan 01 works before plans 02/03
+- [Phase 09]: resolve_model uses 3-tier lookup: .sda file path, UUID, then name search with ambiguity detection
+- [Phase 09]: All CLI Rich console output to stderr; stdout reserved for file paths or JSON (enables piping)
+- [Phase 09]: delete command uses persistence.delete_model (handles both file + index removal)
 
 ### Pending Todos
 
@@ -182,5 +186,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 09-01-PLAN.md -- CLI skeleton with Typer, bootstrap, ui subcommand
+Stopped at: Completed 09-02-PLAN.md -- sda generate and sda model commands
 Resume file: None
