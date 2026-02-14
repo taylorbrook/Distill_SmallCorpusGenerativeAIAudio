@@ -182,10 +182,12 @@ Plans:
   3. CLI supports scripting workflows (generate multiple variations with different seeds)
   4. CLI provides progress output suitable for logging
   5. CLI can run headless on remote machines or servers
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 09-01: TBD
+- [ ] 09-01-PLAN.md — CLI skeleton with Typer, bootstrap function, entry point refactoring, sda ui command
+- [ ] 09-02-PLAN.md — Generate command with batch/preset support, model management commands (list/info/delete)
+- [ ] 09-03-PLAN.md — Train command with Rich progress bars and SIGINT handling, full CLI integration verification
 
 ### Phase 10: Multi-Format Export & Spatial Audio
 **Goal**: Users can export audio in multiple formats (MP3, FLAC, OGG) and generate spatial audio output (stereo field, binaural).
@@ -217,9 +219,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 6. Model Persistence & Management | 1/1 | ✓ Complete | 2026-02-13 |
 | 7. Presets & Generation History | 3/3 | ✓ Complete | 2026-02-13 |
 | 8. Gradio UI | 5/5 | ✓ Complete | 2026-02-13 |
-| 9. CLI Interface | 0/TBD | Not started | - |
+| 9. CLI Interface | 0/3 | In progress | - |
 | 10. Multi-Format Export & Spatial Audio | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-13 (Phase 8 complete)*
+*Last updated: 2026-02-14 (Phase 9 planned)*
