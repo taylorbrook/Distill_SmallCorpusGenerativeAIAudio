@@ -186,23 +186,17 @@ def _launch_gui(
 # Register sub-typers (gracefully skip missing modules during development)
 # ---------------------------------------------------------------------------
 
-try:
-    from small_dataset_audio.cli.ui import app as ui_app
+from small_dataset_audio.cli.ui import app as ui_app
 
-    app.add_typer(ui_app, name="ui", help="Launch the Gradio web UI")
-except ImportError:
-    pass
+app.add_typer(ui_app, name="ui", help="Launch the Gradio web UI")
 
 from small_dataset_audio.cli.generate import app as generate_app
 
 app.add_typer(generate_app, name="generate", help="Generate audio from trained models")
 
-try:
-    from small_dataset_audio.cli.train import app as train_app
+from small_dataset_audio.cli.train import app as train_app
 
-    app.add_typer(train_app, name="train", help="Train models on audio datasets")
-except ImportError:
-    pass
+app.add_typer(train_app, name="train", help="Train models on audio datasets")
 
 from small_dataset_audio.cli.model import app as model_app
 
