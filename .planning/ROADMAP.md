@@ -127,10 +127,10 @@ Plans:
   3. User can browse a model library with metadata and search/filter capabilities
   4. User can delete models from the library
   5. Loading a model restores both weights and latent space mappings (parameter sliders work immediately)
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] 06-01-PLAN.md — Model persistence (save/load/delete .sda files), model library catalog with JSON index and search/filter
 
 ### Phase 7: Presets & Generation History
 **Goal**: Users can save slider configurations as presets, recall them, and view a history of past generations with parameter snapshots and A/B comparison.
@@ -208,7 +208,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Core Training Engine | 4/4 | ✓ Complete | 2026-02-12 |
 | 4. Audio Quality & Export | 3/3 | ✓ Complete | 2026-02-12 |
 | 5. Musically Meaningful Controls | 2/2 | ✓ Complete | 2026-02-13 |
-| 6. Model Persistence & Management | 0/TBD | Not started | - |
+| 6. Model Persistence & Management | 0/1 | In Progress | - |
 | 7. Presets & Generation History | 0/TBD | Not started | - |
 | 8. Gradio UI | 0/TBD | Not started | - |
 | 9. CLI Interface | 0/TBD | Not started | - |
@@ -216,4 +216,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-13 (Phase 5 complete)*
+*Last updated: 2026-02-13 (Phase 6 planned)*
