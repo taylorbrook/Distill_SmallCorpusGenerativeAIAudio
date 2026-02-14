@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 7 complete -- presets, generation history, A/B comparison all done
+**Current focus:** Phase 8 in progress -- Gradio UI foundation with Data tab complete
 
 ## Current Position
 
-Phase: 7 of 10 (Presets, Generation History & A/B Comparison)
-Plan: 3 of 3 in current phase (07-01, 07-02, 07-03 complete)
-Status: Phase 07 complete -- all three plans executed (presets, history, A/B comparison)
-Last activity: 2026-02-14 -- Phase 07-03 executed (A/B comparison)
+Phase: 8 of 10 (Gradio UI)
+Plan: 1 of 5 in current phase (08-01 complete)
+Status: 08-01 complete -- Gradio installed, AppState singleton, 4-tab layout, Data tab functional
+Last activity: 2026-02-14 -- Phase 08-01 executed (Gradio foundation + Data tab)
 
-Progress: [██████████████░] ~72%
+Progress: [███████████████░] ~76%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
+- Total plans completed: 21
 - Average duration: 3 min
 - Total execution time: 0.83 hours
 
@@ -46,9 +46,10 @@ Progress: [██████████████░] ~72%
 | Phase 07 P01 | 2min | 2 tasks, 3 files | 2min |
 | Phase 07 P02 | 3min | 2 tasks, 2 files | 3min |
 | Phase 07 P03 | 2min | 2 tasks, 2 files | 2min |
+| Phase 08 P01 | 3min | 2 tasks, 8 files | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 4min, 2min, 3min, 2min (avg 2.8min)
+- Last 5 plans: 4min, 2min, 3min, 2min, 3min (avg 2.8min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -141,6 +142,10 @@ Recent decisions affecting current work:
 - [Phase 07]: ABComparison is ephemeral runtime state (not persisted) -- A/B UI state, not disk data
 - [Phase 07]: keep_winner raises ValueError for live generation (must be in history before preset save)
 - [Phase 07]: TYPE_CHECKING guard for cross-module imports avoids circular dependencies in history/comparison.py
+- [Phase 08]: Module-level AppState singleton (not gr.State) for non-deepcopyable backend objects
+- [Phase 08]: TYPE_CHECKING guards for all heavy imports (torch, backend classes) in ui/state.py
+- [Phase 08]: create_app() calls init_state internally -- state ready before UI builds
+- [Phase 08]: Duplicate filename avoidance with counter suffix during file import to datasets_dir
 
 ### Pending Todos
 
@@ -153,5 +158,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-03-PLAN.md -- Phase 07 complete, ready for Phase 08 (Gradio UI)
+Stopped at: Completed 08-01-PLAN.md -- Gradio foundation + Data tab done, ready for 08-02 (Train tab)
 Resume file: None
