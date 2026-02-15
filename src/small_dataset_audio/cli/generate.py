@@ -158,6 +158,13 @@ def generate(
         Optional[str],
         typer.Option("--preset", "-p", help="Preset name to load (model-scoped)"),
     ] = None,
+    slider: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--slider",
+            help="Set slider position as INDEX:VALUE (e.g., --slider '0:5' --slider '1:-3'). Range: -10 to 10.",
+        ),
+    ] = None,
     output_dir: Annotated[
         Optional[Path],
         typer.Option(
@@ -308,6 +315,12 @@ def generate(
 
     # ---- Handle blend mode ----
     if blend:
+        if slider is not None:
+            console.print(
+                "[yellow]Warning:[/yellow] --slider is not supported with --blend. "
+                "Using neutral slider positions for blend."
+            )
+
         from small_dataset_audio.inference.blending import BlendEngine
 
         engine = BlendEngine()
@@ -458,6 +471,51 @@ def generate(
                 latent_vector = sliders_to_latent(slider_state, loaded.analysis)
                 console.print(
                     f"[green]Preset loaded:[/green] {preset_entry.name}"
+                )
+
+        # Handle --slider option (direct slider position control)
+        if slider is not None and latent_vector is None:
+            if loaded.analysis is None:
+                console.print(
+                    "[yellow]Warning:[/yellow] Model has no latent analysis. "
+                    "--slider ignored, using random latent vectors."
+                )
+            else:
+                from small_dataset_audio.controls.mapping import (
+                    SliderState,
+                    sliders_to_latent,
+                )
+
+                n_active = loaded.analysis.n_active_components
+                positions = [0] * n_active  # default to center (neutral)
+
+                for s in slider:
+                    if ":" not in s:
+                        raise typer.BadParameter(
+                            f"Invalid slider format '{s}'. Expected INDEX:VALUE (e.g., '0:5')"
+                        )
+                    idx_str, val_str = s.split(":", 1)
+                    try:
+                        idx = int(idx_str)
+                        val = int(val_str)
+                    except ValueError:
+                        raise typer.BadParameter(
+                            f"Invalid slider values in '{s}'. INDEX and VALUE must be integers."
+                        )
+                    if idx < 0 or idx >= n_active:
+                        raise typer.BadParameter(
+                            f"Slider index {idx} out of range. Model has {n_active} active components (0-{n_active - 1})."
+                        )
+                    if val < -10 or val > 10:
+                        raise typer.BadParameter(
+                            f"Slider value {val} out of range. Must be between -10 and 10."
+                        )
+                    positions[idx] = val
+
+                slider_state = SliderState(positions=positions, n_components=n_active)
+                latent_vector = sliders_to_latent(slider_state, loaded.analysis)
+                console.print(
+                    f"[green]Sliders applied:[/green] {len(slider)} position(s) set"
                 )
 
         gen_config = GenerationConfig(
