@@ -2,7 +2,7 @@
 
 *Small Custom-Corpus Generative AI Audio*
 
-A generative audio tool that trains VAE models on your own small audio collections (5-500 files) and lets you explore the learned sound space through musically meaningful parameter controls. The musical equivalent of [Autolume](https://metacreation.net/autolume/) — but for audio instead of visuals.
+A generative audio tool that trains VAE models on your own small audio collections (5-500 files) and lets you explore the learned sound space through musically meaningful parameter controls.
 
 Train on your recordings, twist the sliders, discover sounds that are unmistakably *yours* but entirely new.
 
