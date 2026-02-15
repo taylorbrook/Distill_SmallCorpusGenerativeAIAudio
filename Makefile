@@ -2,7 +2,7 @@
 .PHONY: help setup run test lint format clean benchmark
 
 PYTHON := uv run python
-MODULE := small_dataset_audio
+MODULE := distill
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

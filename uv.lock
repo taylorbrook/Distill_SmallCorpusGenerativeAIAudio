@@ -621,6 +621,65 @@ wheels = [
 ]
 
 [[package]]
+name = "distill"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "gradio" },
+    { name = "lameenc" },
+    { name = "matplotlib" },
+    { name = "mutagen" },
+    { name = "numpy" },
+    { name = "psutil" },
+    { name = "rich" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "sofar" },
+    { name = "soundfile" },
+    { name = "tomli-w" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
+    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
+    { name = "torchaudio", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
+    { name = "torchaudio", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gradio", specifier = ">=5.0,<7.0" },
+    { name = "lameenc", specifier = ">=1.7" },
+    { name = "matplotlib", specifier = ">=3.9" },
+    { name = "mutagen", specifier = ">=1.47" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "psutil", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=14.0" },
+    { name = "scikit-learn", specifier = ">=1.8" },
+    { name = "scipy", specifier = ">=1.12" },
+    { name = "sofar", specifier = ">=1.1" },
+    { name = "soundfile", specifier = ">=0.13.0" },
+    { name = "tomli-w", specifier = ">=1.1.0" },
+    { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.10.0,<2.11" },
+    { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.10.0,<2.11", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchaudio", marker = "sys_platform != 'linux'", specifier = ">=2.10.0,<2.11" },
+    { name = "torchaudio", marker = "sys_platform == 'linux'", specifier = ">=2.10.0,<2.11", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "typer", specifier = ">=0.23,<1.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.9" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.129.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2199,65 +2258,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
-]
-
-[[package]]
-name = "small-dataset-audio"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "gradio" },
-    { name = "lameenc" },
-    { name = "matplotlib" },
-    { name = "mutagen" },
-    { name = "numpy" },
-    { name = "psutil" },
-    { name = "rich" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "sofar" },
-    { name = "soundfile" },
-    { name = "tomli-w" },
-    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
-    { name = "torchaudio", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torchaudio", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gradio", specifier = ">=5.0,<7.0" },
-    { name = "lameenc", specifier = ">=1.7" },
-    { name = "matplotlib", specifier = ">=3.9" },
-    { name = "mutagen", specifier = ">=1.47" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "psutil", specifier = ">=6.0" },
-    { name = "rich", specifier = ">=14.0" },
-    { name = "scikit-learn", specifier = ">=1.8" },
-    { name = "scipy", specifier = ">=1.12" },
-    { name = "sofar", specifier = ">=1.1" },
-    { name = "soundfile", specifier = ">=0.13.0" },
-    { name = "tomli-w", specifier = ">=1.1.0" },
-    { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.10.0,<2.11" },
-    { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.10.0,<2.11", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "torchaudio", marker = "sys_platform != 'linux'", specifier = ">=2.10.0,<2.11" },
-    { name = "torchaudio", marker = "sys_platform == 'linux'", specifier = ">=2.10.0,<2.11", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "typer", specifier = ">=0.23,<1.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "ruff", specifier = ">=0.9" },
 ]
 
 [[package]]
