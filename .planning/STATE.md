@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 11 IN PROGRESS -- Wire latent analysis into training loop (plan 01 of 02 complete)
+**Current focus:** Phase 11 COMPLETE -- All latent analysis wired, CLI auto-save and slider control integrated
 
 ## Current Position
 
 Phase: 11 of 11 (Wire Latent Analysis)
-Plan: 1 of 2 in current phase (11-01 complete)
-Status: Post-training analysis wired into train() and checkpoint; generate_tab model_name bugs fixed
-Last activity: 2026-02-15 -- Phase 11-01 executed (Wire Analysis + Bug Fix)
+Plan: 2 of 2 in current phase (11-02 complete)
+Status: CLI train auto-saves models; CLI generate supports --slider; all integration gaps closed
+Last activity: 2026-02-15 -- Phase 11-02 executed (CLI Auto-Save + Slider Control)
 
-Progress: [████████████████████] 97%
+Progress: [████████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 34
+- Total plans completed: 35
 - Average duration: 3 min
-- Total execution time: 1.47 hours
+- Total execution time: 1.50 hours
 
 **By Phase:**
 
@@ -60,9 +60,10 @@ Progress: [████████████████████] 97%
 | Phase 10 P04 | 4min | 2 tasks, 3 files | 4min |
 | Phase 10 P05 | 5min | 2 tasks, 2 files | 5min |
 | Phase 11 P01 | 2min | 2 tasks, 3 files | 2min |
+| Phase 11 P02 | 2min | 2 tasks, 2 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 4min, 3min, 4min, 5min, 2min (avg 3.6min)
+- Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -213,6 +214,9 @@ Recent decisions affecting current work:
 - [Phase 11]: Analysis runs on ALL training files (not split) for maximum PCA coverage
 - [Phase 11]: num_workers=0 on analysis DataLoader to avoid multiprocessing issues at end of training
 - [Phase 11]: Re-save final checkpoint with analysis rather than separate file
+- [Phase 11]: Auto-save is try/except wrapped so failure does not crash CLI
+- [Phase 11]: Preset takes priority over --slider when both provided (latent_vector is None guard)
+- [Phase 11]: Blend mode warns that --slider is not supported (neutral positions used)
 
 ### Pending Todos
 
@@ -225,5 +229,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 11-01-PLAN.md -- Wire latent analysis into training loop and fix model_name bugs
+Stopped at: Completed 11-02-PLAN.md -- CLI auto-save and slider control (Phase 11 complete, all plans done)
 Resume file: None
