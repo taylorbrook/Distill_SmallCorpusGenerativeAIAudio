@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 10 COMPLETE -- Multi-format export and spatial audio (all 5 plans complete)
+**Current focus:** Phase 11 IN PROGRESS -- Wire latent analysis into training loop (plan 01 of 02 complete)
 
 ## Current Position
 
-Phase: 10 of 10 (Multi-Format Export & Spatial Audio)
-Plan: 5 of 5 in current phase (10-05 complete)
-Status: Phase 10 COMPLETE -- CLI integration with format, spatial, blend, and metadata options
-Last activity: 2026-02-15 -- Phase 10-05 executed (CLI Integration)
+Phase: 11 of 11 (Wire Latent Analysis)
+Plan: 1 of 2 in current phase (11-01 complete)
+Status: Post-training analysis wired into train() and checkpoint; generate_tab model_name bugs fixed
+Last activity: 2026-02-15 -- Phase 11-01 executed (Wire Analysis + Bug Fix)
 
-Progress: [████████████████████] 100%
+Progress: [████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 33
+- Total plans completed: 34
 - Average duration: 3 min
-- Total execution time: 1.44 hours
+- Total execution time: 1.47 hours
 
 **By Phase:**
 
@@ -59,9 +59,10 @@ Progress: [████████████████████] 100%
 | Phase 10 P03 | 3min | 2 tasks, 2 files | 3min |
 | Phase 10 P04 | 4min | 2 tasks, 3 files | 4min |
 | Phase 10 P05 | 5min | 2 tasks, 2 files | 5min |
+| Phase 11 P01 | 2min | 2 tasks, 3 files | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 4min, 3min, 4min, 5min (avg 3.8min)
+- Last 5 plans: 4min, 3min, 4min, 5min, 2min (avg 3.6min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -209,6 +210,9 @@ Recent decisions affecting current work:
 - [Phase 10]: Deprecated --stereo maps to --spatial-mode only when spatial_mode still at default ("mono")
 - [Phase 10]: Blend primary model gets weight=50.0 by default alongside user-specified blend models
 - [Phase 10]: JSON CLI output uses "file" key (not "wav") and includes "format" for multi-format awareness
+- [Phase 11]: Analysis runs on ALL training files (not split) for maximum PCA coverage
+- [Phase 11]: num_workers=0 on analysis DataLoader to avoid multiprocessing issues at end of training
+- [Phase 11]: Re-save final checkpoint with analysis rather than separate file
 
 ### Pending Todos
 
@@ -221,5 +225,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 10-05-PLAN.md -- CLI integration for multi-format export, spatial audio, and blending
+Stopped at: Completed 11-01-PLAN.md -- Wire latent analysis into training loop and fix model_name bugs
 Resume file: None
