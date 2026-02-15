@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 10 in progress -- Multi-format export and spatial audio (plan 03 of 5 complete)
+**Current focus:** Phase 10 COMPLETE -- Multi-format export and spatial audio (all 5 plans complete)
 
 ## Current Position
 
 Phase: 10 of 10 (Multi-Format Export & Spatial Audio)
-Plan: 3 of 5 in current phase (10-03 complete)
-Status: Plan 10-03 complete -- multi-model blending engine with latent-space and audio-domain modes
-Last activity: 2026-02-15 -- Phase 10-03 executed (Multi-Model Blending)
+Plan: 5 of 5 in current phase (10-05 complete)
+Status: Phase 10 COMPLETE -- CLI integration with format, spatial, blend, and metadata options
+Last activity: 2026-02-15 -- Phase 10-05 executed (CLI Integration)
 
-Progress: [████████████████████] ~96%
+Progress: [████████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 31
+- Total plans completed: 33
 - Average duration: 3 min
-- Total execution time: 1.29 hours
+- Total execution time: 1.44 hours
 
 **By Phase:**
 
@@ -57,9 +57,11 @@ Progress: [████████████████████] ~96%
 | Phase 10 P01 | 3min | 2 tasks, 5 files | 3min |
 | Phase 10 P02 | 4min | 2 tasks, 5 files | 4min |
 | Phase 10 P03 | 3min | 2 tasks, 2 files | 3min |
+| Phase 10 P04 | 4min | 2 tasks, 3 files | 4min |
+| Phase 10 P05 | 5min | 2 tasks, 2 files | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 2min, 3min, 4min, 3min (avg 2.8min)
+- Last 5 plans: 3min, 4min, 3min, 4min, 5min (avg 3.8min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -198,6 +200,10 @@ Recent decisions affecting current work:
 - [Phase 10]: Early reflection pattern for stereo depth effect (0-40ms delay, 0.15 mix level)
 - [Phase 10]: Width control blends linearly between center and full binaural separation
 - [Phase 10]: migrate_stereo_config maps old Phase 4 stereo_mode/stereo_width to new SpatialConfig
+- [Phase 10]: CLI spatial processing applied post-generation (generate mono, then apply_spatial) for clean separation
+- [Phase 10]: Deprecated --stereo maps to --spatial-mode only when spatial_mode still at default ("mono")
+- [Phase 10]: Blend primary model gets weight=50.0 by default alongside user-specified blend models
+- [Phase 10]: JSON CLI output uses "file" key (not "wav") and includes "format" for multi-format awareness
 
 ### Pending Todos
 
@@ -210,5 +216,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 10-02-PLAN.md -- Spatial audio system with HRTF binaural and stereo/mono modes
+Stopped at: Completed 10-05-PLAN.md -- CLI integration for multi-format export, spatial audio, and blending
 Resume file: None
