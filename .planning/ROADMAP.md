@@ -199,10 +199,14 @@ Plans:
   3. User can generate binaural audio output for headphone listening
   4. User can load multiple models simultaneously and blend their outputs with configurable ratios
   5. Exported files maintain metadata (model name, preset name, parameters, seed)
-**Plans**: TBD
+**Plans:** 5 plans
 
 Plans:
-- [ ] 10-01: TBD
+- [ ] 10-01-PLAN.md -- Multi-format export engine (MP3/FLAC/OGG encoders + metadata embedding via mutagen)
+- [ ] 10-02-PLAN.md -- Spatial audio system (stereo/binaural/mono modes with width+depth, HRTF convolution)
+- [ ] 10-03-PLAN.md -- Multi-model blending engine (latent-space + audio-domain, union sliders, weight normalization)
+- [ ] 10-04-PLAN.md -- GenerationPipeline + Gradio UI integration (format selector, spatial controls, blend panel)
+- [ ] 10-05-PLAN.md -- CLI integration (--format, --spatial-mode, --blend options + final verification)
 
 ## Progress
 
@@ -220,7 +224,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Presets & Generation History | 3/3 | ✓ Complete | 2026-02-13 |
 | 8. Gradio UI | 5/5 | ✓ Complete | 2026-02-13 |
 | 9. CLI Interface | 3/3 | ✓ Complete | 2026-02-14 |
-| 10. Multi-Format Export & Spatial Audio | 0/TBD | Not started | - |
+| 10. Multi-Format Export & Spatial Audio | 0/5 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
