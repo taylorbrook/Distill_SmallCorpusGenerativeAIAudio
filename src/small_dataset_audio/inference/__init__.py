@@ -2,7 +2,8 @@
 
 Public API re-exports from :mod:`inference.generation`,
 :mod:`inference.export`, :mod:`inference.chunking`,
-:mod:`inference.stereo`, and :mod:`inference.quality`.
+:mod:`inference.stereo`, :mod:`inference.spatial`,
+:mod:`inference.quality`, and :mod:`inference.blending`.
 """
 
 from small_dataset_audio.inference.generation import (
@@ -11,7 +12,10 @@ from small_dataset_audio.inference.generation import (
     GenerationPipeline,
 )
 from small_dataset_audio.inference.export import (
+    ExportFormat,
+    FORMAT_EXTENSIONS,
     export_wav,
+    export_audio,
     write_sidecar_json,
     BIT_DEPTH_MAP,
     SAMPLE_RATE_OPTIONS,
@@ -32,6 +36,12 @@ from small_dataset_audio.inference.quality import (
     detect_clipping,
     compute_quality_score,
 )
+from small_dataset_audio.inference.blending import (
+    BlendMode,
+    BlendEngine,
+    ModelSlot,
+    MAX_BLEND_MODELS,
+)
 
 __all__ = [
     # generation.py
@@ -39,7 +49,10 @@ __all__ = [
     "GenerationResult",
     "GenerationPipeline",
     # export.py
+    "ExportFormat",
+    "FORMAT_EXTENSIONS",
     "export_wav",
+    "export_audio",
     "write_sidecar_json",
     "BIT_DEPTH_MAP",
     "SAMPLE_RATE_OPTIONS",
@@ -56,4 +69,9 @@ __all__ = [
     "compute_snr_db",
     "detect_clipping",
     "compute_quality_score",
+    # blending.py
+    "BlendMode",
+    "BlendEngine",
+    "ModelSlot",
+    "MAX_BLEND_MODELS",
 ]
