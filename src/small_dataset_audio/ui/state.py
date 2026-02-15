@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from small_dataset_audio.data.summary import DatasetSummary
     from small_dataset_audio.history.comparison import ABComparison
     from small_dataset_audio.history.store import GenerationHistory
+    from small_dataset_audio.inference.blending import BlendEngine
     from small_dataset_audio.inference.generation import GenerationPipeline
     from small_dataset_audio.library.catalog import ModelLibrary
     from small_dataset_audio.models.persistence import LoadedModel
@@ -60,6 +61,11 @@ class AppState:
 
     # A/B comparison state
     ab_comparison: Optional[ABComparison] = None
+
+    # Multi-model blending
+    blend_engine: Optional[BlendEngine] = None
+    loaded_models: list = field(default_factory=list)
+    """Tracking list for multiple loaded model references in blend mode."""
 
     # Device
     device: Optional[torch.device] = None

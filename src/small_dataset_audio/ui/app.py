@@ -5,6 +5,7 @@ builders, and provides the :func:`launch_ui` entry point.  Cross-tab
 wiring connects:
 
 - Library load -> Generate tab slider updates
+- Library load -> Generate tab blend model dropdown refresh
 - Data import -> Train tab empty-state/controls visibility
 - Library load -> Generate tab empty-state/controls visibility
 
@@ -46,7 +47,10 @@ def create_app(
     from small_dataset_audio.config.settings import load_config
     from small_dataset_audio.hardware.device import select_device
     from small_dataset_audio.ui.state import init_state
-    from small_dataset_audio.ui.tabs.generate_tab import _update_sliders_for_model
+    from small_dataset_audio.ui.tabs.generate_tab import (
+        _update_sliders_for_model,
+        _refresh_blend_model_choices,
+    )
 
     if config is None:
         config = load_config()
@@ -85,6 +89,10 @@ def create_app(
                     gen_refs["empty_msg"],
                 ]
             ),
+        ).then(
+            fn=_refresh_blend_model_choices,
+            inputs=None,
+            outputs=gen_refs["blend_model_dds"],
         )
 
     return app

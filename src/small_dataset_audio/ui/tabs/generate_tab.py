@@ -1,5 +1,6 @@
-"""Generate tab: slider-controlled audio generation, playback, export, presets,
-history browsing, and A/B comparison.
+"""Generate tab: slider-controlled audio generation, playback, multi-format
+export, spatial audio controls, multi-model blending, presets, history
+browsing, and A/B comparison.
 
 Provides the core user interaction surface -- the generate-listen-export
 workflow.  Slider controls map to the PCA-derived latent space from Phase 5.
@@ -7,12 +8,13 @@ Pre-creates ``MAX_SLIDERS`` Gradio sliders distributed across 3 columns
 (timbral / temporal / spatial); visibility updates dynamically when a model
 is loaded.
 
-Adds collapsible History accordion with waveform thumbnail gallery and
-playback, and A/B Comparison accordion with dual audio players and
-keep-winner preset save.
+Phase 10 additions:
+- Output mode selector (mono/stereo/binaural) with spatial width+depth sliders
+- Export format dropdown (WAV/MP3/FLAC/OGG) with editable metadata fields
+- Multi-model blend accordion with up to 4 model slots and weight sliders
 
 Uses ``app_state`` singleton for backend access (GenerationPipeline,
-PresetManager, GenerationHistory, ABComparison, etc.).
+PresetManager, GenerationHistory, ABComparison, BlendEngine, etc.).
 """
 
 from __future__ import annotations
@@ -31,6 +33,9 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# Maximum blend model slots
+MAX_BLEND_SLOTS = 4
 
 # Maximum PCA components any model will have
 MAX_SLIDERS = 12
@@ -158,8 +163,8 @@ def _generate_audio(*args):
     """Generate audio from slider values and generation config.
 
     Arguments are unpacked as:
-        slider_0 ... slider_{MAX_SLIDERS-1}, duration, stereo_mode,
-        stereo_width, seed
+        slider_0 ... slider_{MAX_SLIDERS-1}, duration, output_mode,
+        spatial_width, spatial_depth, seed
 
     Returns:
         Tuple of (audio, badge, audio_visible, history_gallery, ab_choices_a,
@@ -167,14 +172,15 @@ def _generate_audio(*args):
     """
     from small_dataset_audio.controls.mapping import SliderState, sliders_to_latent
     from small_dataset_audio.inference.generation import GenerationConfig
-    from small_dataset_audio.inference.quality import compute_quality_score
+    from small_dataset_audio.inference.spatial import SpatialConfig, SpatialMode
 
     # Unpack arguments
     slider_values = list(args[:MAX_SLIDERS])
     duration = args[MAX_SLIDERS]
-    stereo_mode = args[MAX_SLIDERS + 1]
-    stereo_width = args[MAX_SLIDERS + 2]
-    seed_val = args[MAX_SLIDERS + 3]
+    output_mode = args[MAX_SLIDERS + 1]
+    spatial_width = args[MAX_SLIDERS + 2]
+    spatial_depth = args[MAX_SLIDERS + 3]
+    seed_val = args[MAX_SLIDERS + 4]
 
     # Validate model loaded
     if app_state.loaded_model is None or app_state.pipeline is None:
@@ -210,28 +216,53 @@ def _generate_audio(*args):
     # Parse seed
     seed = int(seed_val) if seed_val is not None and seed_val != "" else None
 
-    # Build GenerationConfig
+    # Build SpatialConfig from output mode, width, depth
+    spatial_mode = SpatialMode(output_mode)
+    spatial_config = SpatialConfig(
+        mode=spatial_mode,
+        width=float(spatial_width),
+        depth=float(spatial_depth),
+    )
+
+    # Build GenerationConfig with new spatial config
     config = GenerationConfig(
         latent_vector=latent_vector,
         duration_s=float(duration),
-        stereo_mode=stereo_mode,
-        stereo_width=float(stereo_width),
+        spatial=spatial_config,
         seed=seed,
     )
 
-    # Generate
-    try:
-        result = app_state.pipeline.generate(config)
-    except Exception as exc:
-        logger.exception("Generation failed")
-        return (
-            None,
-            f"**Generation failed:** {exc}",
-            gr.update(visible=False),
-            gr.update(),
-            gr.update(),
-            gr.update(),
-        )
+    # Check if blend engine has active models
+    if (
+        app_state.blend_engine is not None
+        and len(app_state.blend_engine.get_active_slots()) > 0
+    ):
+        try:
+            result = app_state.blend_engine.blend_generate(positions, config)
+        except Exception as exc:
+            logger.exception("Blend generation failed")
+            return (
+                None,
+                f"**Blend generation failed:** {exc}",
+                gr.update(visible=False),
+                gr.update(),
+                gr.update(),
+                gr.update(),
+            )
+    else:
+        # Single model generation
+        try:
+            result = app_state.pipeline.generate(config)
+        except Exception as exc:
+            logger.exception("Generation failed")
+            return (
+                None,
+                f"**Generation failed:** {exc}",
+                gr.update(visible=False),
+                gr.update(),
+                gr.update(),
+                gr.update(),
+            )
 
     # Store result in app_state for export
     app_state.metrics_buffer["last_result"] = result
@@ -268,16 +299,26 @@ def _generate_audio(*args):
     )
 
 
-def _export_audio(sample_rate_str: str, bit_depth: str, filename: str):
-    """Export the last generated audio as a WAV file."""
-    from small_dataset_audio.inference.export import export_wav
+def _export_audio(
+    sample_rate_str: str,
+    bit_depth: str,
+    filename: str,
+    export_format: str,
+    meta_artist: str,
+    meta_album: str,
+    meta_title: str,
+):
+    """Export the last generated audio in the selected format with metadata."""
+    from small_dataset_audio.inference.export import ExportFormat, FORMAT_EXTENSIONS
+    from small_dataset_audio.audio.metadata import build_export_metadata
 
     last_result = app_state.metrics_buffer.get("last_result")
     if last_result is None:
         return "No audio to export. Generate audio first."
 
-    # Parse sample rate
-    sr = int(sample_rate_str)
+    # Resolve export format
+    fmt = ExportFormat(export_format)
+    extension = FORMAT_EXTENSIONS[fmt]
 
     # Build output path
     output_dir = app_state.generated_dir
@@ -285,24 +326,63 @@ def _export_audio(sample_rate_str: str, bit_depth: str, filename: str):
 
     if filename and filename.strip():
         fname = filename.strip()
-        if not fname.endswith(".wav"):
-            fname = fname + ".wav"
+        # Strip any existing extension and apply the correct one
+        for ext in (".wav", ".mp3", ".flac", ".ogg"):
+            if fname.lower().endswith(ext):
+                fname = fname[:-len(ext)]
+                break
+        fname = fname + extension
     else:
         from datetime import datetime, timezone
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        fname = f"gen_{timestamp}_seed{last_result.seed_used}.wav"
+        fname = f"gen_{timestamp}_seed{last_result.seed_used}{extension}"
 
     output_path = output_dir / fname
 
+    # Build metadata for tag embedding
+    model_name = "unknown"
+    if app_state.loaded_model is not None:
+        model_name = app_state.loaded_model.metadata.model_name
+
+    overrides = {}
+    if meta_artist and meta_artist.strip():
+        overrides["artist"] = meta_artist.strip()
+    if meta_album and meta_album.strip():
+        overrides["album"] = meta_album.strip()
+    if meta_title and meta_title.strip():
+        overrides["title"] = meta_title.strip()
+
+    metadata = build_export_metadata(
+        model_name=model_name,
+        seed=last_result.seed_used,
+        overrides=overrides if overrides else None,
+    )
+
     try:
-        export_wav(
-            audio=last_result.audio,
-            path=output_path,
-            sample_rate=sr,
-            bit_depth=bit_depth,
-        )
-        return f"Exported to `{output_path}`"
+        if app_state.pipeline is not None:
+            audio_path, json_path = app_state.pipeline.export(
+                result=last_result,
+                output_dir=output_dir,
+                filename=fname,
+                export_format=fmt,
+                metadata=metadata,
+            )
+        else:
+            # Fallback: direct export without pipeline
+            from small_dataset_audio.inference.export import export_audio
+
+            export_audio(
+                audio=last_result.audio,
+                path=output_path,
+                sample_rate=int(sample_rate_str),
+                format=fmt,
+                bit_depth=bit_depth,
+                metadata=metadata,
+            )
+            audio_path = output_path
+
+        return f"Exported {export_format.upper()} to `{audio_path}`"
     except Exception as exc:
         logger.exception("Export failed")
         return f"**Export failed:** {exc}"
@@ -390,14 +470,80 @@ def _randomize_seed():
     return random.randint(0, 2**31)
 
 
-def _toggle_stereo_width(stereo_mode: str):
-    """Show/hide stereo width slider based on stereo mode."""
-    return gr.update(visible=(stereo_mode != "mono"))
+def _toggle_spatial_controls(output_mode: str):
+    """Show/hide spatial width and depth sliders based on output mode."""
+    show = output_mode != "mono"
+    return gr.update(visible=show), gr.update(visible=show)
+
+
+def _toggle_bit_depth(export_format: str):
+    """Show bit depth dropdown only for WAV format."""
+    return gr.update(visible=(export_format == "wav"))
 
 
 def _toggle_preset_name():
     """Show preset name textbox when saving."""
     return gr.update(visible=True)
+
+
+# ---------------------------------------------------------------------------
+# Blend panel handlers
+# ---------------------------------------------------------------------------
+
+# Track how many blend rows are visible (module-level counter)
+_blend_visible_count = 1
+
+
+def _add_blend_row():
+    """Reveal the next hidden blend model row.
+
+    Returns status markdown + visibility updates for all MAX_BLEND_SLOTS rows.
+    """
+    global _blend_visible_count  # noqa: WPS420
+    if _blend_visible_count < MAX_BLEND_SLOTS:
+        _blend_visible_count += 1
+    status = f"{_blend_visible_count} model slot(s) active."
+    updates = [status]
+    for i in range(MAX_BLEND_SLOTS):
+        updates.append(gr.update(visible=(i < _blend_visible_count)))
+    return updates
+
+
+def _remove_blend_row():
+    """Hide the last visible blend model row.
+
+    Returns status markdown + visibility updates for all MAX_BLEND_SLOTS rows.
+    """
+    global _blend_visible_count  # noqa: WPS420
+    if _blend_visible_count > 1:
+        _blend_visible_count -= 1
+    status = f"{_blend_visible_count} model slot(s) active."
+    if _blend_visible_count == 1:
+        status = "Single model mode (blend inactive)."
+    updates = [status]
+    for i in range(MAX_BLEND_SLOTS):
+        updates.append(gr.update(visible=(i < _blend_visible_count)))
+    return updates
+
+
+def _refresh_blend_model_choices():
+    """Refresh all blend model dropdown choices from ModelLibrary.
+
+    Returns gr.update for each of MAX_BLEND_SLOTS dropdowns.
+    Called via cross-tab wiring when library content changes.
+    """
+    choices: list[str] = []
+    if app_state.model_library is not None:
+        try:
+            entries = app_state.model_library.list_models()
+            choices = [e.model_name for e in entries]
+        except Exception:
+            logger.warning("Failed to list models for blend dropdowns")
+
+    updates = []
+    for _ in range(MAX_BLEND_SLOTS):
+        updates.append(gr.update(choices=choices))
+    return updates
 
 
 # ---------------------------------------------------------------------------
@@ -609,12 +755,13 @@ def build_generate_tab() -> dict:
     Layout:
     - Empty state message (shown when no model loaded)
     - Controls section (hidden until model loaded):
+      - Multi-model blend accordion (collapsible)
       - Sliders in 3 columns (timbral / temporal / spatial)
-      - Generation config (duration, stereo mode, stereo width)
+      - Generation config (duration, output mode, spatial width/depth)
       - Seed row
       - Generate button
       - Audio player with quality badge
-      - Export controls
+      - Export controls (format selector, metadata, sample rate, bit depth)
       - Preset management
       - History accordion (collapsible)
       - A/B Comparison accordion (collapsible)
@@ -631,6 +778,43 @@ def build_generate_tab() -> dict:
     # Controls section -- hidden until model loaded
     with gr.Column(visible=False) as controls_section:
         gr.Markdown("## Generate")
+
+        # ----- Multi-model blend accordion (collapsible) -----
+        with gr.Accordion("Multi-Model Blend", open=False):
+            blend_mode_radio = gr.Radio(
+                choices=["latent", "audio"],
+                value="latent",
+                label="Blend Mode",
+            )
+            # Pre-create up to 4 model rows (hidden by default)
+            blend_model_dds: list[gr.Dropdown] = []
+            blend_weight_sliders: list[gr.Slider] = []
+            blend_rows: list[gr.Row] = []
+            for slot_i in range(MAX_BLEND_SLOTS):
+                with gr.Row(visible=(slot_i == 0)) as blend_row:
+                    blend_dd = gr.Dropdown(
+                        label=f"Model {slot_i + 1}",
+                        choices=[],
+                        value=None,
+                        interactive=True,
+                    )
+                    blend_w = gr.Slider(
+                        minimum=0,
+                        maximum=100,
+                        step=1,
+                        value=25,
+                        label=f"Weight {slot_i + 1}",
+                        interactive=True,
+                    )
+                    blend_model_dds.append(blend_dd)
+                    blend_weight_sliders.append(blend_w)
+                    blend_rows.append(blend_row)
+            with gr.Row():
+                add_blend_model_btn = gr.Button("Add Model", size="sm")
+                remove_blend_model_btn = gr.Button("Remove Last", size="sm")
+            blend_status = gr.Markdown(
+                value="Single model mode (blend inactive)."
+            )
 
         # ----- Slider section: 3 columns -----
         gr.Markdown("### Parameters")
@@ -687,17 +871,25 @@ def build_generate_tab() -> dict:
                 maximum=60.0,
                 precision=1,
             )
-            stereo_mode_dd = gr.Dropdown(
-                choices=["mono", "mid_side", "dual_seed"],
+            output_mode_dd = gr.Dropdown(
+                choices=["mono", "stereo", "binaural"],
                 value="mono",
-                label="Stereo Mode",
+                label="Output Mode",
             )
-            stereo_width_slider = gr.Slider(
+            spatial_width_slider = gr.Slider(
                 minimum=0.0,
                 maximum=1.5,
                 step=0.1,
                 value=0.7,
-                label="Stereo Width",
+                label="Spatial Width",
+                visible=False,
+            )
+            spatial_depth_slider = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                step=0.1,
+                value=0.5,
+                label="Spatial Depth",
                 visible=False,
             )
 
@@ -726,6 +918,11 @@ def build_generate_tab() -> dict:
                 quality_badge = gr.Markdown(value="")
             with gr.Column(scale=1):
                 gr.Markdown("### Export")
+                export_format_dd = gr.Dropdown(
+                    choices=["wav", "mp3", "flac", "ogg"],
+                    value="wav",
+                    label="Format",
+                )
                 export_sr_dd = gr.Dropdown(
                     choices=["44100", "48000", "96000"],
                     value="48000",
@@ -735,12 +932,26 @@ def build_generate_tab() -> dict:
                     choices=["16-bit", "24-bit", "32-bit float"],
                     value="24-bit",
                     label="Bit Depth",
+                    visible=True,
                 )
                 export_filename = gr.Textbox(
                     label="Filename",
                     placeholder="auto-generated",
                 )
-                export_btn = gr.Button("Export WAV", variant="secondary")
+                with gr.Accordion("Export Metadata", open=False):
+                    meta_artist = gr.Textbox(
+                        label="Artist",
+                        value="SDA Generator",
+                    )
+                    meta_album = gr.Textbox(
+                        label="Album",
+                        placeholder="model name",
+                    )
+                    meta_title = gr.Textbox(
+                        label="Title",
+                        placeholder="auto-generated",
+                    )
+                export_btn = gr.Button("Export", variant="secondary")
                 export_status = gr.Markdown(value="")
 
         # ----- Preset section -----
@@ -813,11 +1024,18 @@ def build_generate_tab() -> dict:
 
     # ----- Wire event handlers -----
 
-    # Stereo width visibility toggle
-    stereo_mode_dd.change(
-        fn=_toggle_stereo_width,
-        inputs=[stereo_mode_dd],
-        outputs=[stereo_width_slider],
+    # Spatial controls visibility toggle
+    output_mode_dd.change(
+        fn=_toggle_spatial_controls,
+        inputs=[output_mode_dd],
+        outputs=[spatial_width_slider, spatial_depth_slider],
+    )
+
+    # Bit depth visibility based on export format
+    export_format_dd.change(
+        fn=_toggle_bit_depth,
+        inputs=[export_format_dd],
+        outputs=[export_bd_dd],
     )
 
     # Randomize seed
@@ -827,18 +1045,32 @@ def build_generate_tab() -> dict:
         outputs=[seed_input],
     )
 
-    # Generate audio (now also refreshes history gallery and A/B dropdowns)
+    # Generate audio (now uses output_mode, spatial_width, spatial_depth)
     generate_btn.click(
         fn=_generate_audio,
-        inputs=sliders + [duration_input, stereo_mode_dd, stereo_width_slider, seed_input],
+        inputs=sliders + [
+            duration_input,
+            output_mode_dd,
+            spatial_width_slider,
+            spatial_depth_slider,
+            seed_input,
+        ],
         outputs=[audio_output, quality_badge, audio_output,
                  history_gallery, ab_dropdown_a, ab_dropdown_b],
     )
 
-    # Export audio
+    # Export audio (now includes format and metadata)
     export_btn.click(
         fn=_export_audio,
-        inputs=[export_sr_dd, export_bd_dd, export_filename],
+        inputs=[
+            export_sr_dd,
+            export_bd_dd,
+            export_filename,
+            export_format_dd,
+            meta_artist,
+            meta_album,
+            meta_title,
+        ],
         outputs=[export_status],
     )
 
@@ -865,6 +1097,21 @@ def build_generate_tab() -> dict:
         fn=_delete_preset,
         inputs=[preset_dd],
         outputs=[preset_dd],
+    )
+
+    # ----- Blend panel event wiring -----
+
+    # Add/remove blend model rows
+    add_blend_model_btn.click(
+        fn=_add_blend_row,
+        inputs=None,
+        outputs=[blend_status] + blend_rows,
+    )
+
+    remove_blend_model_btn.click(
+        fn=_remove_blend_row,
+        inputs=None,
+        outputs=[blend_status] + blend_rows,
     )
 
     # ----- History event wiring -----
@@ -906,10 +1153,10 @@ def build_generate_tab() -> dict:
     )
 
     # Return components that need external wiring (model loading)
-    # Store references for update_sliders_for_model
     return {
         "sliders": sliders,
         "preset_dd": preset_dd,
         "controls_section": controls_section,
         "empty_msg": empty_msg,
+        "blend_model_dds": blend_model_dds,
     }
