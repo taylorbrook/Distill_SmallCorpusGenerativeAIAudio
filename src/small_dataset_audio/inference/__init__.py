@@ -31,6 +31,13 @@ from small_dataset_audio.inference.stereo import (
     create_dual_seed_stereo,
     peak_normalize,
 )
+from small_dataset_audio.inference.spatial import (
+    SpatialMode,
+    SpatialConfig,
+    apply_spatial,
+    apply_spatial_to_dual_seed,
+    migrate_stereo_config,
+)
 from small_dataset_audio.inference.quality import (
     compute_snr_db,
     detect_clipping,
@@ -65,6 +72,12 @@ __all__ = [
     "apply_mid_side_widening",
     "create_dual_seed_stereo",
     "peak_normalize",
+    # spatial.py
+    "SpatialMode",
+    "SpatialConfig",
+    "apply_spatial",
+    "apply_spatial_to_dual_seed",
+    "migrate_stereo_config",
     # quality.py
     "compute_snr_db",
     "detect_clipping",
