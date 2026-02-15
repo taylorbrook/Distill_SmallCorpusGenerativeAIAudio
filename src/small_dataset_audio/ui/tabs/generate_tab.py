@@ -273,7 +273,7 @@ def _generate_audio(*args):
             app_state.history_store.add_to_history(
                 result=result,
                 model_id=app_state.loaded_model.metadata.model_id,
-                model_name=app_state.loaded_model.metadata.model_name,
+                model_name=app_state.loaded_model.metadata.name,
                 slider_positions=positions,
                 n_components=n_active,
                 preset_name="custom",
@@ -343,7 +343,7 @@ def _export_audio(
     # Build metadata for tag embedding
     model_name = "unknown"
     if app_state.loaded_model is not None:
-        model_name = app_state.loaded_model.metadata.model_name
+        model_name = app_state.loaded_model.metadata.name
 
     overrides = {}
     if meta_artist and meta_artist.strip():
@@ -536,7 +536,7 @@ def _refresh_blend_model_choices():
     if app_state.model_library is not None:
         try:
             entries = app_state.model_library.list_models()
-            choices = [e.model_name for e in entries]
+            choices = [e.name for e in entries]
         except Exception:
             logger.warning("Failed to list models for blend dropdowns")
 
