@@ -44,6 +44,16 @@ from small_dataset_audio.audio.spectrogram import (
 from small_dataset_audio.audio.filters import (
     apply_anti_alias_filter,
 )
+from small_dataset_audio.audio.hrtf import (
+    HRTFData,
+    load_hrtf,
+    apply_binaural,
+    clear_hrtf_cache,
+)
+from small_dataset_audio.audio.metadata import (
+    embed_metadata,
+    build_export_metadata,
+)
 
 __all__ = [
     # io.py
@@ -78,4 +88,12 @@ __all__ = [
     "AudioSpectrogram",
     # filters.py
     "apply_anti_alias_filter",
+    # hrtf.py
+    "HRTFData",
+    "load_hrtf",
+    "apply_binaural",
+    "clear_hrtf_cache",
+    # metadata.py
+    "embed_metadata",
+    "build_export_metadata",
 ]
