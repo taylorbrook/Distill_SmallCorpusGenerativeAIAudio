@@ -2,7 +2,7 @@
 
 ## Overview
 
-This roadmap follows a risk-first progression: establish a robust small-dataset training pipeline with overfitting prevention, validate 48kHz audio quality, build the core innovation (musically meaningful parameter controls via latent space disentanglement), then wrap in usable interfaces. The 10-phase structure reflects comprehensive depth, delivering a research-grade generative audio tool that learns from personal datasets as small as 5-500 files and generates high-fidelity output with controllable exploration.
+This roadmap follows a risk-first progression: establish a robust small-dataset training pipeline with overfitting prevention, validate 48kHz audio quality, build the core innovation (musically meaningful parameter controls via latent space disentanglement), then wrap in usable interfaces. The 11-phase structure reflects comprehensive depth, delivering a research-grade generative audio tool that learns from personal datasets as small as 5-500 files and generates high-fidelity output with controllable exploration. Phase 11 is a gap closure phase added after milestone audit.
 
 ## Phases
 
@@ -22,6 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 8: Gradio UI** - Interactive interface with sliders, playback, file management *(completed 2026-02-13)*
 - [x] **Phase 9: CLI Interface** - Batch generation and scripting for power users *(completed 2026-02-14)*
 - [x] **Phase 10: Multi-Format Export & Spatial Audio** - Advanced output options (MP3/FLAC/OGG, stereo field, binaural) *(completed 2026-02-15)*
+- [ ] **Phase 11: Wire Latent Space Analysis** - Connect LatentSpaceAnalyzer to training, save, load, and CLI flows *(gap closure)*
 
 ## Phase Details
 
@@ -208,10 +209,22 @@ Plans:
 - [x] 10-04-PLAN.md -- GenerationPipeline + Gradio UI integration (format selector, spatial controls, blend panel)
 - [x] 10-05-PLAN.md -- CLI integration (--format, --spatial-mode, --blend options + final verification)
 
+### Phase 11: Wire Latent Space Analysis
+**Goal**: Connect LatentSpaceAnalyzer to application flow so musically meaningful slider controls work end-to-end after training, on model save, and on model load.
+**Depends on**: Phase 10
+**Requirements**: GEN-02, GEN-03, GEN-04, GEN-05, GEN-06, GEN-07, GEN-08
+**Gap Closure:** Closes gaps from v1.0 milestone audit (7 requirements, 1 integration)
+**Success Criteria** (what must be TRUE):
+  1. LatentSpaceAnalyzer.analyze() runs automatically after training completes (UI and CLI)
+  2. Analysis result is saved with model in .sda file
+  3. Loading a model restores analysis result and sliders appear immediately
+  4. Slider controls affect generation output in both Gradio UI and CLI
+  5. All 7 GEN requirements (GEN-02 through GEN-08) are satisfied end-to-end
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -225,7 +238,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. Gradio UI | 5/5 | ✓ Complete | 2026-02-13 |
 | 9. CLI Interface | 3/3 | ✓ Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | 5/5 | ✓ Complete | 2026-02-15 |
+| 11. Wire Latent Space Analysis | 0/? | Pending | — |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-15 (Phase 10 complete — ALL PHASES DONE)*
+*Last updated: 2026-02-15 (Phase 11 added — gap closure from milestone audit)*

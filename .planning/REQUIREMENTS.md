@@ -128,13 +128,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TRAIN-05 | Phase 3 | Pending |
 | TRAIN-06 | Phase 3 | Pending |
 | GEN-01 | Phase 4 | Pending |
-| GEN-02 | Phase 5 | Pending |
-| GEN-03 | Phase 5 | Pending |
-| GEN-04 | Phase 5 | Pending |
-| GEN-05 | Phase 5 | Pending |
-| GEN-06 | Phase 5 | Pending |
-| GEN-07 | Phase 5 | Pending |
-| GEN-08 | Phase 5 | Pending |
+| GEN-02 | Phase 5, 11 | Pending |
+| GEN-03 | Phase 5, 11 | Pending |
+| GEN-04 | Phase 5, 11 | Pending |
+| GEN-05 | Phase 5, 11 | Pending |
+| GEN-06 | Phase 5, 11 | Pending |
+| GEN-07 | Phase 5, 11 | Pending |
+| GEN-08 | Phase 5, 11 | Pending |
 | GEN-09 | Phase 5 | Pending |
 | OUT-01 | Phase 4 | Pending |
 | OUT-02 | Phase 4 | Pending |
