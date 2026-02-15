@@ -220,6 +220,11 @@ Plans:
   3. Loading a model restores analysis result and sliders appear immediately
   4. Slider controls affect generation output in both Gradio UI and CLI
   5. All 7 GEN requirements (GEN-02 through GEN-08) are satisfied end-to-end
+**Plans:** 2 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — Wire analysis into training loop, checkpoint persistence, and fix metadata.model_name bug
+- [ ] 11-02-PLAN.md — CLI auto-save model after training and --slider support for CLI generate
 
 ## Progress
 
@@ -238,8 +243,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. Gradio UI | 5/5 | ✓ Complete | 2026-02-13 |
 | 9. CLI Interface | 3/3 | ✓ Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | 5/5 | ✓ Complete | 2026-02-15 |
-| 11. Wire Latent Space Analysis | 0/? | Pending | — |
+| 11. Wire Latent Space Analysis | 0/2 | Planned | — |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-15 (Phase 11 added — gap closure from milestone audit)*
+*Last updated: 2026-02-15 (Phase 11 planned — 2 plans in 2 waves)*
