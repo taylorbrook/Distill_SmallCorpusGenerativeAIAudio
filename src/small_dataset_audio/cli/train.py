@@ -13,10 +13,13 @@ function body for fast ``sda train --help`` response.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(invoke_without_command=True)
 
@@ -43,6 +46,10 @@ def train_cmd(
     device: str = typer.Option("auto", "--device", help="Compute device: auto, mps, cuda, cpu"),
     config: Annotated[Optional[Path], typer.Option("--config", help="Config file path")] = None,
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
+    model_name: Annotated[
+        Optional[str],
+        typer.Option("--model-name", help="Name for saved model (default: dataset_name_timestamp)"),
+    ] = None,
 ) -> None:
     """Train a model on an audio dataset."""
     import json as json_mod
@@ -224,9 +231,52 @@ def train_cmd(
         console.print("\n[yellow]Training cancelled.[/yellow] Checkpoint saved.")
         raise typer.Exit(code=3)
 
+    # ------------------------------------------------------------------
+    # Auto-save model to library
+    # ------------------------------------------------------------------
+    best_checkpoint = result.get("best_checkpoint_path")
+    saved_model_path = None
+    auto_name = None
+
+    if best_checkpoint is not None:
+        from small_dataset_audio.models.persistence import ModelMetadata, save_model_from_checkpoint
+
+        # Generate model name: user override or dataset_name_timestamp
+        if model_name:
+            auto_name = model_name
+        else:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            auto_name = f"{dataset_dir.name}_{ts}"
+
+        meta = ModelMetadata(
+            name=auto_name,
+            dataset_name=dataset_dir.name,
+            dataset_file_count=len(file_paths),
+            training_date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        )
+
+        try:
+            models_base = resolve_path(
+                app_config["paths"].get("models", "data/models"),
+                base_dir=config_path.parent,
+            )
+            models_base.mkdir(parents=True, exist_ok=True)
+
+            saved_model_path = save_model_from_checkpoint(
+                checkpoint_path=best_checkpoint,
+                metadata=meta,
+                models_dir=models_base,
+            )
+            console.print(f"\n[bold green]Model saved to library![/bold green]")
+            console.print(f"  Name: {auto_name}")
+            console.print(f"  Path: {saved_model_path}")
+            console.print(f"  ID:   {meta.model_id}")
+        except Exception as exc:
+            console.print(f"\n[yellow]Warning:[/yellow] Failed to auto-save model: {exc}")
+            logger.warning("Auto-save model failed", exc_info=True)
+
     # Build result summary
     metrics_history = result.get("metrics_history")
-    best_checkpoint = result.get("best_checkpoint_path")
 
     epochs_completed = 0
     final_train_loss = 0.0
@@ -250,6 +300,8 @@ def train_cmd(
         "final_val_loss": final_val_loss,
         "best_val_loss": best_val_loss,
         "best_epoch": best_epoch,
+        "model_path": str(saved_model_path) if saved_model_path else None,
+        "model_name": auto_name if saved_model_path else None,
     }
 
     if json_output:
@@ -263,6 +315,8 @@ def train_cmd(
         console.print(f"  Best val loss:    {best_val_loss:.4f} (epoch {best_epoch})")
         if best_checkpoint:
             console.print(f"  Best checkpoint:  {best_checkpoint}")
+        if saved_model_path:
+            console.print(f"  Model:            {saved_model_path}")
         console.print(f"  Output dir:       {output_dir}")
         # Machine-readable output to stdout
         print(str(output_dir))
