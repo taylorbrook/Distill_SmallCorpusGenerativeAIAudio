@@ -1,15 +1,19 @@
-"""Generation pipeline orchestrating chunk synthesis, stereo, and export.
+"""Generation pipeline orchestrating chunk synthesis, spatial audio, and export.
 
 The :class:`GenerationPipeline` is the primary interface for generating audio
-from trained models.  It ties together chunk generation, stereo processing,
-anti-aliasing, quality metrics, and WAV export into a single coherent API.
+from trained models.  It ties together chunk generation, spatial processing,
+anti-aliasing, quality metrics, and multi-format export into a single
+coherent API.
 
 Design notes:
 - Lazy imports for ``torch``, ``numpy``, ``torchaudio`` (project pattern).
 - All internal audio processing at 48 kHz; resample only at the very end.
 - Resampler instances cached in a module-level dict (Phase 2 pattern).
-- Peak normalisation applied after stereo processing to catch any clipping
+- Peak normalisation applied after spatial processing to catch any clipping
   introduced by mid-side widening (research pitfall #3).
+- SpatialConfig replaces old stereo_mode/stereo_width; backward compat
+  preserved via migrate_stereo_config (Phase 10).
+- export_audio dispatches to WAV/MP3/FLAC/OGG with metadata embedding.
 """
 
 from __future__ import annotations
@@ -22,7 +26,10 @@ from typing import TYPE_CHECKING
 
 from small_dataset_audio.inference.export import (
     BIT_DEPTH_MAP,
+    FORMAT_EXTENSIONS,
     SAMPLE_RATE_OPTIONS,
+    ExportFormat,
+    export_audio,
     export_wav,
     write_sidecar_json,
 )
@@ -30,6 +37,8 @@ from small_dataset_audio.inference.export import (
 if TYPE_CHECKING:
     import numpy as np
     import torch
+
+    from small_dataset_audio.inference.spatial import SpatialConfig
 
 # Module-level resampler cache (project pattern from Phase 2)
 _resampler_cache: dict[tuple[int, int], object] = {}
@@ -45,8 +54,8 @@ class GenerationConfig:
     """Configuration for audio generation.
 
     All user-facing options for the generation pipeline: duration,
-    concatenation mode, stereo mode, sample rate, bit depth, and
-    reproducibility seed.
+    concatenation mode, spatial mode, sample rate, bit depth, export
+    format, and reproducibility seed.
     """
 
     duration_s: float = 1.0
@@ -64,11 +73,24 @@ class GenerationConfig:
     concat_mode: str = "crossfade"
     """Concatenation mode: ``"crossfade"`` or ``"latent_interpolation"``."""
 
+    # -- Deprecated: use ``spatial`` instead ---------------------------------
     stereo_mode: str = "mono"
-    """Stereo mode: ``"mono"``, ``"mid_side"``, or ``"dual_seed"``."""
+    """DEPRECATED: Use ``spatial`` field.  Kept for backward compatibility."""
 
     stereo_width: float = 0.7
-    """Width for mid-side stereo mode (0.0-1.5)."""
+    """DEPRECATED: Use ``spatial`` field.  Kept for backward compatibility."""
+    # ------------------------------------------------------------------------
+
+    spatial: "SpatialConfig | None" = None
+    """Spatial audio config (mode/width/depth).
+
+    When set, replaces old ``stereo_mode`` / ``stereo_width`` behaviour.
+    When ``None``, the pipeline transparently migrates the legacy fields
+    via :func:`migrate_stereo_config`.
+    """
+
+    export_format: str = "wav"
+    """Export format string: ``"wav"``, ``"mp3"``, ``"flac"``, or ``"ogg"``."""
 
     sample_rate: int = 48_000
     """Output sample rate in Hz."""
@@ -91,6 +113,8 @@ class GenerationConfig:
     (random latent vectors as before).
     """
 
+    _VALID_EXPORT_FORMATS = ("wav", "mp3", "flac", "ogg")
+
     def validate(self) -> None:
         """Validate configuration, raising ValueError on invalid settings."""
         if self.duration_s <= 0 or self.duration_s > self.max_duration_s:
@@ -103,10 +127,21 @@ class GenerationConfig:
                 f"concat_mode must be 'crossfade' or 'latent_interpolation', "
                 f"got {self.concat_mode!r}"
             )
-        if self.stereo_mode not in ("mono", "mid_side", "dual_seed"):
+        # Validate spatial config (or legacy stereo fields)
+        if self.spatial is not None:
+            self.spatial.validate()
+        else:
+            # Legacy validation for backward compatibility
+            if self.stereo_mode not in ("mono", "mid_side", "dual_seed"):
+                raise ValueError(
+                    f"stereo_mode must be 'mono', 'mid_side', or 'dual_seed', "
+                    f"got {self.stereo_mode!r}"
+                )
+        # Validate export format
+        if self.export_format not in self._VALID_EXPORT_FORMATS:
             raise ValueError(
-                f"stereo_mode must be 'mono', 'mid_side', or 'dual_seed', "
-                f"got {self.stereo_mode!r}"
+                f"export_format must be one of {self._VALID_EXPORT_FORMATS}, "
+                f"got {self.export_format!r}"
             )
         if self.sample_rate not in SAMPLE_RATE_OPTIONS:
             raise ValueError(
@@ -131,6 +166,19 @@ class GenerationConfig:
                     f"latent_vector must be 1-D, "
                     f"got {self.latent_vector.ndim}-D"
                 )
+
+    def get_spatial_config(self) -> "SpatialConfig":
+        """Return SpatialConfig, migrating from legacy fields if needed.
+
+        Returns
+        -------
+        SpatialConfig
+            Effective spatial configuration for this generation.
+        """
+        if self.spatial is not None:
+            return self.spatial
+        from small_dataset_audio.inference.spatial import migrate_stereo_config  # noqa: WPS433
+        return migrate_stereo_config(self.stereo_mode, self.stereo_width)
 
 
 # ---------------------------------------------------------------------------
@@ -321,13 +369,14 @@ class GenerationPipeline:
 
         Pipeline stages:
         1. Validate config
-        2. Generate chunks (crossfade or latent interpolation)
-        3. Apply anti-aliasing filter
-        4. Apply stereo processing (if not mono)
-        5. Peak normalize (after stereo to catch clipping)
-        6. Resample to target sample rate (if different from 48 kHz)
-        7. Compute quality score
-        8. Trim to exact requested duration
+        2. Resolve spatial config (new or migrated from legacy fields)
+        3. Generate chunks (crossfade or latent interpolation)
+        4. Apply anti-aliasing filter
+        5. Apply spatial processing (mono/stereo/binaural)
+        6. Peak normalize (after spatial to catch clipping)
+        7. Resample to target sample rate (if different from 48 kHz)
+        8. Compute quality score
+        9. Trim to exact requested duration
 
         Parameters
         ----------
@@ -346,10 +395,11 @@ class GenerationPipeline:
             generate_chunks_crossfade,
             generate_chunks_latent_interp,
         )
-        from small_dataset_audio.inference.stereo import (
-            apply_mid_side_widening,
-            create_dual_seed_stereo,
-            peak_normalize,
+        from small_dataset_audio.inference.stereo import peak_normalize
+        from small_dataset_audio.inference.spatial import (
+            SpatialMode,
+            apply_spatial,
+            apply_spatial_to_dual_seed,
         )
         from small_dataset_audio.audio.filters import apply_anti_alias_filter
         from small_dataset_audio.inference.quality import compute_quality_score
@@ -357,19 +407,22 @@ class GenerationPipeline:
         # 1. Validate config
         config.validate()
 
-        # 2. Compute chunk parameters
+        # 2. Resolve spatial config
+        spatial_config = config.get_spatial_config()
+
+        # 3. Compute chunk parameters
         internal_sr = 48_000  # all processing at 48 kHz
         num_chunks = math.ceil(config.duration_s / config.chunk_duration_s)
         chunk_samples = int(config.chunk_duration_s * internal_sr)
 
-        # 3. Set seed
+        # 4. Set seed
         seed_used: int
         if config.seed is not None:
             seed_used = config.seed
         else:
             seed_used = int(torch.randint(0, 2**31, (1,)).item())
 
-        # 3.5. Prepare user-controlled latent vector (if provided)
+        # 4.5. Prepare user-controlled latent vector (if provided)
         latent_tensor: torch.Tensor | None = None
         if config.latent_vector is not None:
             latent_tensor = (
@@ -378,7 +431,7 @@ class GenerationPipeline:
                 .to(self.device)
             )
 
-        # 4. Generate audio based on concat_mode
+        # 5. Generate audio based on concat_mode
         if latent_tensor is not None:
             # Slider-controlled generation: use provided latent vector
             audio = _generate_chunks_from_vector(
@@ -412,55 +465,55 @@ class GenerationPipeline:
                 steps_between=config.steps_between,
             )
 
-        # 5. Apply anti-aliasing filter (always at internal sample rate)
+        # 6. Apply anti-aliasing filter (always at internal sample rate)
         audio = apply_anti_alias_filter(audio, internal_sr)
 
-        # 6. Apply stereo processing
+        # 7. Apply spatial processing
         channels = 1
-        if config.stereo_mode == "mid_side":
-            audio = apply_mid_side_widening(audio, config.stereo_width, internal_sr)
-            channels = 2
-        elif config.stereo_mode == "dual_seed":
-            # Generate second audio stream with seed + 1
-            if latent_tensor is not None:
-                audio_right = _generate_chunks_from_vector(
-                    model=self.model,
-                    spectrogram=self.spectrogram,
-                    latent_vector=latent_tensor,
-                    num_chunks=num_chunks,
-                    device=self.device,
-                    seed=seed_used + 1,
-                    chunk_samples=chunk_samples,
-                    overlap_samples=config.overlap_samples,
+        if spatial_config.mode == SpatialMode.MONO:
+            # No spatial processing needed
+            pass
+        elif spatial_config.mode == SpatialMode.STEREO:
+            # Check if we need dual-seed generation (backward compat with
+            # old "dual_seed" stereo mode or when explicitly requested)
+            is_dual_seed = (
+                config.spatial is None and config.stereo_mode == "dual_seed"
+            )
+            if is_dual_seed:
+                # Generate right channel with seed+1
+                audio_right = self._generate_right_channel(
+                    config, latent_tensor, num_chunks, seed_used,
+                    chunk_samples, internal_sr,
                 )
-            elif config.concat_mode == "crossfade":
-                audio_right = generate_chunks_crossfade(
-                    model=self.model,
-                    spectrogram=self.spectrogram,
-                    num_chunks=num_chunks,
-                    device=self.device,
-                    seed=seed_used + 1,
-                    chunk_samples=chunk_samples,
-                    overlap_samples=config.overlap_samples,
+                audio_right = apply_anti_alias_filter(audio_right, internal_sr)
+                audio = apply_spatial_to_dual_seed(
+                    audio, audio_right, spatial_config, internal_sr,
                 )
             else:
-                audio_right = generate_chunks_latent_interp(
-                    model=self.model,
-                    spectrogram=self.spectrogram,
-                    num_chunks=num_chunks,
-                    device=self.device,
-                    seed=seed_used + 1,
-                    chunk_samples=chunk_samples,
-                    steps_between=config.steps_between,
+                audio = apply_spatial(audio, spatial_config, internal_sr)
+            channels = 2
+        elif spatial_config.mode == SpatialMode.BINAURAL:
+            # For binaural: if dual-seed origin, combine to mono first
+            is_dual_seed = (
+                config.spatial is None and config.stereo_mode == "dual_seed"
+            )
+            if is_dual_seed:
+                audio_right = self._generate_right_channel(
+                    config, latent_tensor, num_chunks, seed_used,
+                    chunk_samples, internal_sr,
                 )
-            audio_right = apply_anti_alias_filter(audio_right, internal_sr)
-            audio = create_dual_seed_stereo(audio, audio_right)
+                audio_right = apply_anti_alias_filter(audio_right, internal_sr)
+                audio = apply_spatial_to_dual_seed(
+                    audio, audio_right, spatial_config, internal_sr,
+                )
+            else:
+                audio = apply_spatial(audio, spatial_config, internal_sr)
             channels = 2
 
-        # 7. Peak normalize after stereo (catches clipping from mid-side)
+        # 8. Peak normalize after spatial (catches clipping from widening)
         audio = peak_normalize(audio, target_peak=0.891)
 
-        # 8. Resample if target sample rate differs from internal 48 kHz
+        # 9. Resample if target sample rate differs from internal 48 kHz
         if config.sample_rate != internal_sr:
             resampler = _get_resampler(internal_sr, config.sample_rate)
             audio_tensor = torch.from_numpy(audio).float()
@@ -472,10 +525,10 @@ class GenerationPipeline:
             else:
                 audio = audio_tensor.numpy()
 
-        # 9. Compute quality score
+        # 10. Compute quality score
         quality = compute_quality_score(audio, config.sample_rate)
 
-        # 10. Trim to exact requested duration
+        # 11. Trim to exact requested duration
         target_samples = int(config.duration_s * config.sample_rate)
         if audio.ndim == 1:
             audio = audio[:target_samples]
@@ -494,13 +547,83 @@ class GenerationPipeline:
             channels=channels,
         )
 
+    def _generate_right_channel(
+        self,
+        config: GenerationConfig,
+        latent_tensor: "torch.Tensor | None",
+        num_chunks: int,
+        seed_used: int,
+        chunk_samples: int,
+        internal_sr: int,
+    ) -> "np.ndarray":
+        """Generate the right channel for dual-seed stereo.
+
+        Parameters
+        ----------
+        config : GenerationConfig
+            Generation configuration.
+        latent_tensor : torch.Tensor | None
+            User-provided latent vector (or None).
+        num_chunks : int
+            Number of chunks to generate.
+        seed_used : int
+            Base seed (right channel uses seed + 1).
+        chunk_samples : int
+            Samples per chunk.
+        internal_sr : int
+            Internal sample rate (48 kHz).
+
+        Returns
+        -------
+        np.ndarray
+            Right channel audio.
+        """
+        from small_dataset_audio.inference.chunking import (
+            generate_chunks_crossfade,
+            generate_chunks_latent_interp,
+        )
+
+        if latent_tensor is not None:
+            return _generate_chunks_from_vector(
+                model=self.model,
+                spectrogram=self.spectrogram,
+                latent_vector=latent_tensor,
+                num_chunks=num_chunks,
+                device=self.device,
+                seed=seed_used + 1,
+                chunk_samples=chunk_samples,
+                overlap_samples=config.overlap_samples,
+            )
+        elif config.concat_mode == "crossfade":
+            return generate_chunks_crossfade(
+                model=self.model,
+                spectrogram=self.spectrogram,
+                num_chunks=num_chunks,
+                device=self.device,
+                seed=seed_used + 1,
+                chunk_samples=chunk_samples,
+                overlap_samples=config.overlap_samples,
+            )
+        else:
+            return generate_chunks_latent_interp(
+                model=self.model,
+                spectrogram=self.spectrogram,
+                num_chunks=num_chunks,
+                device=self.device,
+                seed=seed_used + 1,
+                chunk_samples=chunk_samples,
+                steps_between=config.steps_between,
+            )
+
     def export(
         self,
         result: GenerationResult,
         output_dir: Path,
         filename: str | None = None,
+        export_format: "ExportFormat | None" = None,
+        metadata: dict | None = None,
     ) -> tuple[Path, Path]:
-        """Export a generation result as WAV with sidecar JSON.
+        """Export a generation result in the specified format with sidecar JSON.
 
         Parameters
         ----------
@@ -509,34 +632,58 @@ class GenerationPipeline:
         output_dir : Path
             Directory for output files.  Created if it doesn't exist.
         filename : str | None
-            WAV filename (without extension).  Auto-generated if ``None``.
+            Base filename (without extension).  Auto-generated if ``None``.
+        export_format : ExportFormat | None
+            Target format.  If ``None``, uses the format from
+            ``result.config.export_format``.
+        metadata : dict | None
+            Metadata dict for tag embedding.  If ``None``, no tags are
+            embedded (WAV format never embeds tags regardless).
 
         Returns
         -------
         tuple[Path, Path]
-            ``(wav_path, json_path)`` of the exported files.
+            ``(audio_path, json_path)`` of the exported files.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve export format
+        if export_format is None:
+            export_format = ExportFormat(result.config.export_format)
+
+        # Get correct file extension
+        extension = FORMAT_EXTENSIONS[export_format]
+
         # Auto-generate filename if not provided
         if filename is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            filename = f"gen_{timestamp}_seed{result.seed_used}.wav"
-        elif not filename.endswith(".wav"):
-            filename = filename + ".wav"
+            filename = f"gen_{timestamp}_seed{result.seed_used}{extension}"
+        else:
+            # Strip any existing extension and apply the correct one
+            base = filename
+            for ext in (".wav", ".mp3", ".flac", ".ogg"):
+                if base.lower().endswith(ext):
+                    base = base[:-len(ext)]
+                    break
+            filename = base + extension
 
-        wav_path = output_dir / filename
+        audio_path = output_dir / filename
 
         # Build generation config dict for sidecar
         config_dict = asdict(result.config)
         # Convert numpy latent_vector to JSON-serialisable list
         if config_dict.get("latent_vector") is not None:
             config_dict["latent_vector"] = config_dict["latent_vector"].tolist()
+        # Convert SpatialConfig to dict if present
+        if config_dict.get("spatial") is not None:
+            spatial_dict = config_dict["spatial"]
+            if hasattr(spatial_dict, "__dict__"):
+                config_dict["spatial"] = vars(spatial_dict)
 
         # Write sidecar JSON first (research pitfall #6)
         json_path = write_sidecar_json(
-            wav_path=wav_path,
+            wav_path=audio_path,
             model_name=self.model_name,
             generation_config=config_dict,
             seed=result.seed_used,
@@ -547,12 +694,14 @@ class GenerationPipeline:
             channels=result.channels,
         )
 
-        # Export WAV
-        export_wav(
+        # Export audio in selected format
+        export_audio(
             audio=result.audio,
-            path=wav_path,
+            path=audio_path,
             sample_rate=result.sample_rate,
+            format=export_format,
             bit_depth=result.config.bit_depth,
+            metadata=metadata,
         )
 
-        return (wav_path, json_path)
+        return (audio_path, json_path)
