@@ -200,6 +200,11 @@ Recent decisions affecting current work:
 - [Phase 10]: Early reflection pattern for stereo depth effect (0-40ms delay, 0.15 mix level)
 - [Phase 10]: Width control blends linearly between center and full binaural separation
 - [Phase 10]: migrate_stereo_config maps old Phase 4 stereo_mode/stereo_width to new SpatialConfig
+- [Phase 10]: GenerationConfig.get_spatial_config() transparently migrates legacy stereo fields to SpatialConfig
+- [Phase 10]: Dual-seed detection for backward compat only (spatial is None and stereo_mode is dual_seed)
+- [Phase 10]: Export button renamed from Export WAV to Export (format-aware dispatch)
+- [Phase 10]: Bit depth dropdown hidden for non-WAV formats (MP3/FLAC/OGG have fixed encoding)
+- [Phase 10]: Module-level _blend_visible_count counter for blend row visibility state in Gradio
 - [Phase 10]: CLI spatial processing applied post-generation (generate mono, then apply_spatial) for clean separation
 - [Phase 10]: Deprecated --stereo maps to --spatial-mode only when spatial_mode still at default ("mono")
 - [Phase 10]: Blend primary model gets weight=50.0 by default alongside user-specified blend models
