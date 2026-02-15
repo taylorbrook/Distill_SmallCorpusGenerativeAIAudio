@@ -612,6 +612,52 @@ def train(
     except Exception:
         logger.warning("Final checkpoint management failed", exc_info=True)
 
+    # Run latent space analysis
+    analysis_result = None
+    try:
+        from small_dataset_audio.controls.analyzer import LatentSpaceAnalyzer
+        from small_dataset_audio.controls.serialization import analysis_to_dict
+        from small_dataset_audio.training.dataset import AudioTrainingDataset
+        from torch.utils.data import DataLoader as TorchDataLoader
+
+        logger.info("Running latent space analysis...")
+        analyzer = LatentSpaceAnalyzer()
+
+        # Use ALL training files (not split) for maximum PCA coverage
+        analysis_dataset = AudioTrainingDataset(
+            file_paths=file_paths,
+            chunk_samples=int(1.0 * 48_000),
+            augmentation_pipeline=None,
+        )
+        analysis_loader = TorchDataLoader(
+            analysis_dataset,
+            batch_size=config.batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
+
+        analysis_result = analyzer.analyze(
+            model=model,
+            dataloader=analysis_loader,
+            spectrogram=spectrogram,
+            device=device,
+        )
+        logger.info(
+            "Analysis complete: %d active components, %.1f%% variance explained",
+            analysis_result.n_active_components,
+            sum(analysis_result.explained_variance_ratio) * 100,
+        )
+
+        # Re-save the final checkpoint WITH analysis included
+        analysis_dict = analysis_to_dict(analysis_result)
+        _save_checkpoint_safe(
+            checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
+            final_train, final_val, final_kl, config, spec_config, metrics_history,
+            latent_analysis=analysis_dict,
+        )
+    except Exception:
+        logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
+
     # Emit completion event
     if callback is not None:
         callback(TrainingCompleteEvent(
@@ -636,6 +682,7 @@ def train(
         "metrics_history": metrics_history,
         "output_dir": output_dir,
         "best_checkpoint_path": best_ckpt,
+        "analysis": analysis_result,
     }
 
 
@@ -657,6 +704,7 @@ def _save_checkpoint_safe(
     config: "TrainingConfig",
     spec_config: "SpectrogramConfig",
     metrics_history: "MetricsHistory",
+    latent_analysis: dict | None = None,
 ) -> None:
     """Save a checkpoint, catching and logging any errors."""
     from dataclasses import asdict as _asdict
@@ -678,6 +726,7 @@ def _save_checkpoint_safe(
             training_config=_asdict(config),
             spectrogram_config=_asdict(spec_config),
             metrics_history_dict=metrics_history.to_dict(),
+            latent_analysis=latent_analysis,
         )
     except Exception:
         logger.warning("Failed to save checkpoint at epoch %d", epoch, exc_info=True)
