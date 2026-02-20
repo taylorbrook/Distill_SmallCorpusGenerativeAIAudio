@@ -3,8 +3,8 @@
 Provides the core VAE loss (reconstruction + KL divergence) with two
 mechanisms to prevent posterior collapse:
 
-1. **KL annealing:** Linearly increase the KL weight from 0 to 1 over
-   a warmup fraction of training.
+1. **KL annealing:** Linearly increase the KL weight from 0 to
+   ``kl_weight_max`` (beta) over a warmup fraction of training.
 2. **Free bits:** Per-dimension KL floor that ensures each latent
    dimension encodes some information.
 
@@ -74,8 +74,9 @@ def get_kl_weight(
     epoch: int,
     total_epochs: int,
     warmup_fraction: float = 0.3,
+    kl_weight_max: float = 1.0,
 ) -> float:
-    """Linear KL annealing: weight from 0 to 1 over warmup fraction.
+    """Linear KL annealing: weight from 0 to *kl_weight_max* over warmup fraction.
 
     Parameters
     ----------
@@ -85,16 +86,19 @@ def get_kl_weight(
         Total number of training epochs.
     warmup_fraction : float
         Fraction of training over which to anneal (default 0.3 = 30%).
+    kl_weight_max : float
+        Maximum KL weight (beta). Values < 1.0 create a beta-VAE that
+        prioritises reconstruction over KL regularisation.
 
     Returns
     -------
     float
-        KL weight between 0.0 and 1.0.
+        KL weight between 0.0 and *kl_weight_max*.
     """
     warmup_epochs = int(total_epochs * warmup_fraction)
     if warmup_epochs == 0:
-        return 1.0
-    return min(1.0, epoch / warmup_epochs)
+        return kl_weight_max
+    return min(kl_weight_max, kl_weight_max * epoch / warmup_epochs)
 
 
 def compute_kl_divergence(mu: torch.Tensor, logvar: torch.Tensor) -> float:

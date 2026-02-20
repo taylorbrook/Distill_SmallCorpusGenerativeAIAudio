@@ -163,7 +163,9 @@ def train_epoch(
         if step % 10 == 0 or epoch == 0:
             print(
                 f"[TRAIN] Epoch {epoch} step {step + 1}/{total_steps}  "
-                f"loss={total.item():.4f}  step_time={step_time:.2f}s",
+                f"loss={total.item():.4f}  recon={recon_loss.item():.4f}  "
+                f"kl={kl_loss.item():.4f}  kl_w={kl_weight:.3f}  "
+                f"step_time={step_time:.2f}s",
                 flush=True,
             )
 
@@ -454,7 +456,10 @@ def train(
         print(f"[TRAIN] Starting epoch {epoch + 1}/{config.max_epochs}", flush=True)
 
         # KL weight (annealing)
-        kl_weight = get_kl_weight(epoch, config.max_epochs, config.kl_warmup_fraction)
+        kl_weight = get_kl_weight(
+            epoch, config.max_epochs, config.kl_warmup_fraction,
+            kl_weight_max=config.kl_weight_max,
+        )
 
         # Train epoch
         train_results = train_epoch(
@@ -625,7 +630,10 @@ def train(
     final_epoch = config.max_epochs - 1
     final_train = metrics_history.epoch_metrics[-1].train_loss if metrics_history.epoch_metrics else 0.0
     final_val = metrics_history.epoch_metrics[-1].val_loss if metrics_history.epoch_metrics else 0.0
-    final_kl = get_kl_weight(final_epoch, config.max_epochs, config.kl_warmup_fraction)
+    final_kl = get_kl_weight(
+        final_epoch, config.max_epochs, config.kl_warmup_fraction,
+        kl_weight_max=config.kl_weight_max,
+    )
 
     _save_checkpoint_safe(
         checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,

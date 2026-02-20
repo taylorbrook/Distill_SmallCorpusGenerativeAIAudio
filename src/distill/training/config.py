@@ -162,6 +162,7 @@ class TrainingConfig:
     max_epochs: int = 200
     learning_rate: float = 1e-3
     kl_warmup_fraction: float = 0.3
+    kl_weight_max: float = 0.01
     free_bits: float = 0.1
     val_fraction: float = 0.2
     chunk_duration_s: float = 1.0

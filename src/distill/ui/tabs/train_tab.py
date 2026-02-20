@@ -55,21 +55,21 @@ _PRESET_DEFAULTS: dict[str, dict[str, float | int]] = {
         "learning_rate": 5e-4,
         "dropout": 0.4,
         "weight_decay": 0.05,
-        "kl_weight_max": 0.5,
+        "kl_weight_max": 0.005,
     },
     "Balanced": {
         "max_epochs": 200,
         "learning_rate": 1e-3,
         "dropout": 0.2,
         "weight_decay": 0.01,
-        "kl_weight_max": 0.3,
+        "kl_weight_max": 0.01,
     },
     "Aggressive": {
         "max_epochs": 500,
         "learning_rate": 2e-3,
         "dropout": 0.1,
         "weight_decay": 0.001,
-        "kl_weight_max": 0.2,
+        "kl_weight_max": 0.02,
     },
 }
 
@@ -197,9 +197,9 @@ def build_train_tab() -> dict:
             kl_weight_slider = gr.Slider(
                 minimum=0.0,
                 maximum=1.0,
-                step=0.1,
-                value=0.3,
-                label="KL Warmup Fraction",
+                step=0.01,
+                value=0.01,
+                label="KL Weight (Beta)",
             )
 
         # -- Control buttons ----------------------------------------------
@@ -282,7 +282,7 @@ def build_train_tab() -> dict:
         learning_rate: float,
         dropout: float,
         weight_decay: float,
-        kl_warmup: float,
+        kl_weight_max: float,
         preset_name: str,
     ) -> list:
         """Start training in a background thread."""
@@ -303,7 +303,7 @@ def build_train_tab() -> dict:
         config.learning_rate = float(learning_rate)
         config.regularization.dropout = float(dropout)
         config.regularization.weight_decay = float(weight_decay)
-        config.kl_warmup_fraction = float(kl_warmup)
+        config.kl_weight_max = float(kl_weight_max)
 
         # Map preset
         if preset_name in _PRESET_MAP:
@@ -388,7 +388,7 @@ def build_train_tab() -> dict:
         learning_rate: float,
         dropout: float,
         weight_decay: float,
-        kl_warmup: float,
+        kl_weight_max: float,
         preset_name: str,
     ) -> list:
         """Resume training from the best existing checkpoint."""
@@ -420,7 +420,7 @@ def build_train_tab() -> dict:
         config.learning_rate = float(learning_rate)
         config.regularization.dropout = float(dropout)
         config.regularization.weight_decay = float(weight_decay)
-        config.kl_warmup_fraction = float(kl_warmup)
+        config.kl_weight_max = float(kl_weight_max)
 
         if preset_name in _PRESET_MAP:
             config.preset = _PRESET_MAP[preset_name]
