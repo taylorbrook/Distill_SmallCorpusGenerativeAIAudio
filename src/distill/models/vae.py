@@ -145,7 +145,7 @@ class ConvDecoder(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout2d(dropout),
             nn.ConvTranspose2d(32, 1, 3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid(),  # output is log1p-normalised mel (always >= 0)
+            nn.Softplus(),  # output >= 0, unbounded above -- matches log1p mel range
         )
 
     def _init_linear(self, spatial_shape: tuple[int, int]) -> None:

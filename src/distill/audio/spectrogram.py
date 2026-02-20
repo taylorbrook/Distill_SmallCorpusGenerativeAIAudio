@@ -69,7 +69,7 @@ class AudioSpectrogram:
         )
         self.griffin_lim = GriffinLim(
             n_fft=c.n_fft,
-            n_iter=64,
+            n_iter=128,
             hop_length=c.hop_length,
             power=c.power,
         )
