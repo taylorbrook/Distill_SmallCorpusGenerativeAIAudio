@@ -53,7 +53,7 @@ def train_epoch(
     kl_weight: float,
     device: "torch.device",
     gradient_clip_norm: float,
-    free_bits: float = 0.5,
+    free_bits: float = 0.1,
     epoch: int = 0,
     callback: "MetricsCallback | None" = None,
     cancel_event: "threading.Event | None" = None,
@@ -206,7 +206,7 @@ def validate_epoch(
     spectrogram: "AudioSpectrogram",
     kl_weight: float,
     device: "torch.device",
-    free_bits: float = 0.5,
+    free_bits: float = 0.1,
 ) -> dict:
     """Run one validation epoch.
 
@@ -364,6 +364,19 @@ def train(
     )
     model = model.to(device)
     spectrogram.to(device)
+
+    # Initialize lazy linear layers before any load_state_dict call
+    # (required for checkpoint resume -- lazy layers must be materialized first)
+    n_mels = spec_config.n_mels
+    time_frames = spec_config.sample_rate // spec_config.hop_length + 1
+    pad_h = (16 - n_mels % 16) % 16
+    pad_w = (16 - time_frames % 16) % 16
+    padded_h = n_mels + pad_h
+    padded_w = time_frames + pad_w
+    spatial = (padded_h // 16, padded_w // 16)
+    model.decoder._init_linear(spatial)
+    flatten_dim = 256 * spatial[0] * spatial[1]
+    model.encoder._init_linear(flatten_dim)
 
     # Create optimiser
     optimizer = torch.optim.AdamW(

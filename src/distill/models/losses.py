@@ -28,7 +28,7 @@ def vae_loss(
     mu: torch.Tensor,
     logvar: torch.Tensor,
     kl_weight: float = 1.0,
-    free_bits: float = 0.5,
+    free_bits: float = 0.1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute VAE loss with free bits and KL annealing weight.
 

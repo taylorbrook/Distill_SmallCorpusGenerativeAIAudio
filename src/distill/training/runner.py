@@ -140,6 +140,8 @@ class TrainingRunner:
         device: "torch.device",
         checkpoint_path: Path,
         callback: "MetricsCallback | None" = None,
+        models_dir: "Path | None" = None,
+        dataset_name: str = "",
     ) -> None:
         """Resume training from a checkpoint.
 
@@ -160,6 +162,10 @@ class TrainingRunner:
             Path to the ``.pt`` checkpoint file to resume from.
         callback:
             Optional metrics event subscriber.
+        models_dir:
+            Directory to save the .distill model file into.
+        dataset_name:
+            Name of the dataset (used for model metadata).
 
         Raises
         ------
@@ -176,7 +182,8 @@ class TrainingRunner:
 
         self._thread = threading.Thread(
             target=self._run_training,
-            args=(config, file_paths, output_dir, device, callback, checkpoint_path),
+            args=(config, file_paths, output_dir, device, callback, checkpoint_path,
+                  models_dir, dataset_name),
             daemon=True,
             name="training-runner-resume",
         )

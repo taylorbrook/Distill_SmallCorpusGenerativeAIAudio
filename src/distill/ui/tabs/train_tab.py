@@ -196,8 +196,8 @@ def build_train_tab() -> dict:
             )
             kl_weight_slider = gr.Slider(
                 minimum=0.0,
-                maximum=1.0,
-                step=0.01,
+                maximum=0.1,
+                step=0.001,
                 value=0.01,
                 label="KL Weight (Beta)",
             )
@@ -443,6 +443,8 @@ def build_train_tab() -> dict:
                 device=app_state.device,
                 checkpoint_path=best_ckpt,
                 callback=_training_callback,
+                models_dir=app_state.models_dir,
+                dataset_name=ds.name,
             )
         except RuntimeError as exc:
             app_state.training_active = False

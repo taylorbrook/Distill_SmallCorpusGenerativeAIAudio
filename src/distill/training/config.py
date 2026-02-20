@@ -130,7 +130,7 @@ class TrainingConfig:
     learning_rate:
         Initial learning rate for AdamW optimizer.
     kl_warmup_fraction:
-        Fraction of total epochs over which KL weight ramps from 0 to 1.
+        Fraction of total epochs over which KL weight ramps from 0 to kl_weight_max.
     free_bits:
         Minimum KL per latent dimension (prevents posterior collapse).
     val_fraction:
@@ -249,7 +249,7 @@ def get_adaptive_config(file_count: int) -> TrainingConfig:
         max_epochs=int(params["max_epochs"]),
         learning_rate=params["learning_rate"],  # type: ignore[arg-type]
         kl_warmup_fraction=params["kl_warmup_fraction"],  # type: ignore[arg-type]
-        free_bits=0.5,
+        free_bits=0.1,
         val_fraction=val_fraction,
         chunk_duration_s=1.0,
         preset=preset,
