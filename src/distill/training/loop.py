@@ -159,6 +159,14 @@ def train_epoch(
 
         step_time = time.time() - step_start
 
+        # Log progress every 10 steps (or every step in first epoch)
+        if step % 10 == 0 or epoch == 0:
+            print(
+                f"[TRAIN] Epoch {epoch} step {step + 1}/{total_steps}  "
+                f"loss={total.item():.4f}  step_time={step_time:.2f}s",
+                flush=True,
+            )
+
         # Emit step metrics
         if callback is not None:
             callback(StepMetrics(
@@ -334,6 +342,7 @@ def train(
     # -----------------------------------------------------------------
     # Setup
     # -----------------------------------------------------------------
+    print(f"[TRAIN] train() called: {len(file_paths)} files, device={device}", flush=True)
     output_dir = Path(output_dir)
     checkpoint_dir = output_dir / "checkpoints"
     preview_dir = output_dir / "previews"
@@ -407,17 +416,29 @@ def train(
             aug_config = AugmentationConfig(
                 expansion_ratio=config.regularization.augmentation_expansion,
             )
+            # Disable PitchShift -- it runs on CPU during data loading
+            # (even with CUDA training) and is unusably slow at 48kHz
+            # (minutes per chunk via STFT).
+            aug_config.pitch_shift_probability = 0.0
+            print("[TRAIN] PitchShift disabled (too slow for real-time data loading)", flush=True)
+            print(f"[TRAIN] Creating augmentation pipeline...", flush=True)
             augmentation_pipeline = AugmentationPipeline(config=aug_config)
-        except Exception:
+            print(f"[TRAIN] Augmentation pipeline ready", flush=True)
+        except Exception as exc:
+            print(f"[TRAIN] Augmentation failed: {exc}", flush=True)
             logger.warning("Failed to create augmentation pipeline", exc_info=True)
 
     train_loader, val_loader = create_data_loaders(
         file_paths, config, augmentation_pipeline,
     )
 
-    logger.info(
-        "Training: %d train chunks, %d val chunks, batch_size=%d",
-        len(train_loader.dataset), len(val_loader.dataset), config.batch_size,
+    train_chunks = len(train_loader.dataset)
+    val_chunks = len(val_loader.dataset)
+    num_batches = len(train_loader)
+    print(
+        f"[TRAIN] {train_chunks} train chunks, {val_chunks} val chunks, "
+        f"batch_size={config.batch_size}, {num_batches} batches/epoch",
+        flush=True,
     )
 
     # -----------------------------------------------------------------
@@ -428,6 +449,7 @@ def train(
 
     for epoch in range(start_epoch, config.max_epochs):
         epoch_start = time.time()
+        print(f"[TRAIN] Starting epoch {epoch + 1}/{config.max_epochs}", flush=True)
 
         # KL weight (annealing)
         kl_weight = get_kl_weight(epoch, config.max_epochs, config.kl_warmup_fraction)

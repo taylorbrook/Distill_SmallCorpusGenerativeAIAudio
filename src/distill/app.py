@@ -218,6 +218,22 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     console = Console()
 
+    # Configure logging so training/inference messages are visible
+    import logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setLevel(log_level)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+        root_logger.addHandler(handler)
+    # Ensure distill loggers propagate
+    logging.getLogger("distill").setLevel(log_level)
+
     # Determine config path
     config_path = args.config if args.config else get_config_path()
 

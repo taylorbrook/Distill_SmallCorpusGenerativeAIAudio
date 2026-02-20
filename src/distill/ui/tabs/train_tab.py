@@ -134,7 +134,7 @@ def _get_checkpoint_dir() -> Path:
 # -------------------------------------------------------------------
 
 
-def build_train_tab() -> None:
+def build_train_tab() -> dict:
     """Build the Train tab UI within the current Blocks context.
 
     Layout:
@@ -144,6 +144,9 @@ def build_train_tab() -> None:
     - Loss chart (gr.Plot) + stats panel (gr.Markdown)
     - Timer for polling
     - 20 preview audio slots
+
+    Returns:
+        Dict of component references for cross-tab wiring.
     """
     # Empty state
     empty_state = gr.Markdown(
@@ -477,6 +480,27 @@ def build_train_tab() -> None:
         previews = buf.get("previews", [])
         is_complete = buf.get("complete", False)
 
+        # Detect training thread crash: thread died without emitting
+        # a TrainingCompleteEvent (exception was caught by runner).
+        runner = app_state.training_runner
+        if (
+            runner is not None
+            and not runner.is_running
+            and not is_complete
+            and app_state.training_active
+        ):
+            app_state.training_active = False
+            error_msg = "**Training failed.**"
+            if runner.last_error is not None:
+                error_msg += f"\n\n`{runner.last_error}`"
+            return [
+                gr.update(),                    # loss_plot
+                error_msg,                      # stats_md
+                gr.Timer(active=False),         # timer
+                gr.update(interactive=True),    # start_btn
+                gr.update(interactive=False),   # cancel_btn
+            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+
         # Build loss chart
         chart = build_loss_chart(epoch_metrics)
 
@@ -541,3 +565,10 @@ def build_train_tab() -> None:
         inputs=None,
         outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
     )
+
+    return {
+        "empty_state": empty_state,
+        "train_ui": train_ui,
+        "resume_btn": resume_btn,
+        "check_dataset_ready": _check_dataset_ready,
+    }

@@ -70,6 +70,10 @@ class AudioTrainingDataset:
         self.sample_rate = sample_rate
         self.augmentation_pipeline = augmentation_pipeline
 
+        # Cache loaded waveforms in memory to avoid reloading from disk
+        # for every chunk.  Small corpus (5-500 files) fits comfortably.
+        self._waveform_cache: dict[int, "torch.Tensor"] = {}
+
         # Build chunk index: list of (file_idx, chunk_start_sample)
         self._chunk_index: list[tuple[int, int]] = []
         self._build_chunk_index()
@@ -104,18 +108,21 @@ class AudioTrainingDataset:
         """
         import torch  # noqa: WPS433
 
-        from distill.audio.io import load_audio
-
         file_idx, chunk_start = self._chunk_index[idx]
-        filepath = self.file_paths[file_idx]
 
-        # Load full file (load_audio handles resampling + format)
-        audio_file = load_audio(filepath, target_sample_rate=self.sample_rate)
-        waveform = audio_file.waveform  # [channels, samples]
+        # Use cached waveform (loaded once, reused for all chunks)
+        if file_idx not in self._waveform_cache:
+            from distill.audio.io import load_audio
 
-        # Convert to mono if multi-channel
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
+            filepath = self.file_paths[file_idx]
+            audio_file = load_audio(filepath, target_sample_rate=self.sample_rate)
+            waveform = audio_file.waveform  # [channels, samples]
+            # Convert to mono if multi-channel
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            self._waveform_cache[file_idx] = waveform
+
+        waveform = self._waveform_cache[file_idx]
 
         # Extract chunk
         chunk_end = chunk_start + self.chunk_samples
@@ -228,7 +235,7 @@ def create_data_loaders(
         val_files = [train_files.pop()]
 
     chunk_samples = int(config.chunk_duration_s * 48_000)
-    pin_memory = config.device != "cpu"
+    pin_memory = config.device not in ("cpu", "auto")
 
     train_dataset = AudioTrainingDataset(
         file_paths=train_files,

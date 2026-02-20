@@ -54,8 +54,11 @@ def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
     if not file_paths:
         return "No files provided.", [], None
 
-    # Ensure import directory exists
+    # Clear and recreate import directory so each import starts fresh
+    # (previous files accumulate otherwise, inflating stats)
     import_dir = app_state.datasets_dir / "imported"
+    if import_dir.exists():
+        shutil.rmtree(import_dir)
     import_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy files to import directory
@@ -182,7 +185,7 @@ def _handle_thumbnail_click(evt: gr.SelectData) -> str | None:
     return None
 
 
-def build_data_tab() -> None:
+def build_data_tab() -> dict:
     """Build the Data tab UI within the current Blocks context.
 
     Layout:
@@ -191,6 +194,9 @@ def build_data_tab() -> None:
     - Stats panel (hidden until import)
     - Waveform thumbnail gallery (hidden until import)
     - Audio player (hidden until thumbnail click)
+
+    Returns:
+        Dict of component references for cross-tab wiring.
     """
     gr.Markdown("## Data")
 
@@ -228,13 +234,13 @@ def build_data_tab() -> None:
     # Wire events
     outputs = [stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
 
-    file_upload.upload(
+    file_upload_event = file_upload.upload(
         fn=_handle_file_upload,
         inputs=[file_upload],
         outputs=outputs,
     )
 
-    folder_btn.upload(
+    folder_upload_event = folder_btn.upload(
         fn=_handle_folder_upload,
         inputs=[folder_btn],
         outputs=outputs,
@@ -245,3 +251,8 @@ def build_data_tab() -> None:
         inputs=None,
         outputs=[audio_player],
     )
+
+    return {
+        "file_upload_event": file_upload_event,
+        "folder_upload_event": folder_upload_event,
+    }

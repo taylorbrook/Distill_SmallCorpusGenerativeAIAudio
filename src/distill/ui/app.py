@@ -66,15 +66,35 @@ def create_app(
 
         with gr.Tabs():
             with gr.Tab("Data", id="data"):
-                build_data_tab()
+                data_refs = build_data_tab()
             with gr.Tab("Train", id="train"):
-                build_train_tab()
+                train_refs = build_train_tab()
             with gr.Tab("Generate", id="generate"):
                 gen_refs = build_generate_tab()
             with gr.Tab("Library", id="library"):
                 lib_refs = build_library_tab()
 
         # -- Cross-tab wiring --
+
+        # After importing files in Data tab, update Train tab visibility.
+        # The Data import handler sets app_state.current_dataset, then this
+        # chained .then() reads it and toggles empty-state / training UI.
+        _train_outputs = [
+            train_refs["empty_state"],
+            train_refs["train_ui"],
+            train_refs["resume_btn"],
+        ]
+        data_refs["file_upload_event"].then(
+            fn=train_refs["check_dataset_ready"],
+            inputs=None,
+            outputs=_train_outputs,
+        )
+        data_refs["folder_upload_event"].then(
+            fn=train_refs["check_dataset_ready"],
+            inputs=None,
+            outputs=_train_outputs,
+        )
+
         # After loading a model from Library, update Generate tab sliders.
         # The Library load handler sets app_state, then this chained event
         # reads app_state and updates slider visibility/labels.
