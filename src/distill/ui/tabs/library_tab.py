@@ -417,17 +417,14 @@ def build_library_tab() -> dict[str, Any]:
         outputs=refresh_outputs,
     )
 
-    # Initial load on tab render (use a Blocks load event)
-    # We trigger a refresh when the tab is first visited
-    app_state_check = gr.State(value=False)
-
-    def _on_load(_checked: bool) -> tuple:
-        """Refresh library on first tab load."""
-        return _refresh_library("")
-
-    # Wire a load-on-render via the app Blocks.load mechanism
-    # (This is handled by the tab being built -- the initial state
-    # is set correctly by the visible defaults above.)
+    # Refresh library on page load so newly trained models appear
+    app_context = gr.context.Context.root_block
+    if app_context is not None:
+        app_context.load(
+            fn=lambda: _refresh_library(""),
+            inputs=None,
+            outputs=refresh_outputs,
+        )
 
     return {
         "load_btn": load_btn,

@@ -329,6 +329,8 @@ def build_train_tab() -> dict:
                 output_dir=output_dir,
                 device=app_state.device,
                 callback=_training_callback,
+                models_dir=app_state.models_dir,
+                dataset_name=ds.name if ds else "untitled",
             )
         except RuntimeError as exc:
             app_state.training_active = False
@@ -544,6 +546,15 @@ def build_train_tab() -> dict:
             else:
                 stats = "Training complete."
             app_state.training_active = False
+
+            # Refresh model library catalog so Library tab sees the new model
+            try:
+                from distill.library.catalog import ModelLibrary
+
+                if app_state.models_dir:
+                    app_state.model_library = ModelLibrary(app_state.models_dir)
+            except Exception:
+                logger.warning("Failed to refresh model library after training", exc_info=True)
             return [
                 chart,                          # loss_plot
                 stats,                          # stats_md

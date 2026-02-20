@@ -166,7 +166,7 @@ class TrainingConfig:
     val_fraction: float = 0.2
     chunk_duration_s: float = 1.0
     checkpoint_interval: int = 10
-    preview_interval: int = 5
+    preview_interval: int = 20
     preview_interval_short: int = 2
     max_checkpoints: int = 3
     preset: OverfittingPreset = OverfittingPreset.BALANCED

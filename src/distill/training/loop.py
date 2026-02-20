@@ -289,6 +289,8 @@ def train(
     callback: "MetricsCallback | None" = None,
     cancel_event: "threading.Event | None" = None,
     resume_checkpoint: "Path | None" = None,
+    models_dir: "Path | None" = None,
+    dataset_name: str = "",
 ) -> dict:
     """Full training orchestrator.
 
@@ -679,6 +681,38 @@ def train(
         )
     except Exception:
         logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
+
+    # Save as .distill model to the library
+    saved_model_path = None
+    if models_dir is not None:
+        try:
+            from distill.models.persistence import ModelMetadata, save_model
+
+            metadata = ModelMetadata(
+                name=dataset_name or "Untitled Model",
+                dataset_name=dataset_name,
+                dataset_file_count=len(file_paths),
+                training_epochs=config.max_epochs,
+                final_train_loss=final_train,
+                final_val_loss=final_val,
+                has_analysis=analysis_result is not None,
+                n_active_components=(
+                    analysis_result.n_active_components
+                    if analysis_result is not None else 0
+                ),
+            )
+            saved_model_path = save_model(
+                model=model,
+                spectrogram_config=asdict(spec_config),
+                training_config=asdict(config),
+                metadata=metadata,
+                models_dir=models_dir,
+                analysis=analysis_result,
+            )
+            print(f"[TRAIN] Model saved to library: {saved_model_path}", flush=True)
+        except Exception as exc:
+            print(f"[TRAIN] Failed to save model to library: {exc}", flush=True)
+            logger.warning("Failed to save model to library", exc_info=True)
 
     # Emit completion event
     if callback is not None:

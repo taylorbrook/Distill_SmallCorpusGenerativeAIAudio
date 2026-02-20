@@ -78,6 +78,8 @@ class TrainingRunner:
         output_dir: Path,
         device: "torch.device",
         callback: "MetricsCallback | None" = None,
+        models_dir: "Path | None" = None,
+        dataset_name: str = "",
     ) -> None:
         """Start training in a background thread.
 
@@ -93,6 +95,10 @@ class TrainingRunner:
             Target device.
         callback:
             Optional metrics event subscriber.
+        models_dir:
+            Directory to save the .distill model file into.
+        dataset_name:
+            Name of the dataset (used for model metadata).
 
         Raises
         ------
@@ -109,7 +115,8 @@ class TrainingRunner:
 
         self._thread = threading.Thread(
             target=self._run_training,
-            args=(config, file_paths, output_dir, device, callback, None),
+            args=(config, file_paths, output_dir, device, callback, None,
+                  models_dir, dataset_name),
             daemon=True,
             name="training-runner",
         )
@@ -220,6 +227,8 @@ class TrainingRunner:
         device: "torch.device",
         callback: "MetricsCallback | None",
         resume_checkpoint: Path | None,
+        models_dir: "Path | None" = None,
+        dataset_name: str = "",
     ) -> None:
         """Thread target: run the training loop with error handling."""
         from distill.training.loop import train
@@ -233,6 +242,8 @@ class TrainingRunner:
                 callback=callback,
                 cancel_event=self._cancel_event,
                 resume_checkpoint=resume_checkpoint,
+                models_dir=models_dir,
+                dataset_name=dataset_name,
             )
             self._result = result
         except Exception as exc:
