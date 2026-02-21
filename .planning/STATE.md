@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 12 of 18 (RVQ-VAE Core Architecture)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-21 -- v1.1 roadmap created (7 phases, 34 requirements)
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-02-21 -- Completed 12-01-PLAN.md (ConvVQVAE model + VQVAEConfig)
 
-Progress: [===========░░░░░░░░░] 55% (v1.0 complete, v1.1 not started)
+Progress: [===========░░░░░░░░░] 58% (v1.0 complete, v1.1 Plan 12-01 done)
 
 ## Performance Metrics
 
@@ -29,8 +29,15 @@ Progress: [===========░░░░░░░░░] 55% (v1.0 complete, v1.1 not 
 |-------|-------|-------|----------|
 | 1-11 (v1.0) | 34 | ~7h | ~12 min |
 
+**By Phase (v1.1):**
+
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 12 | 01 | 4 min | 2 | 4 |
+
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
+- v1.1 Phase 12 Plan 01: 4 min, 2 tasks
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -47,6 +54,11 @@ Recent decisions affecting current work:
 - v1.1: Autoregressive prior (Transformer or LSTM -- resolve before Phase 14)
 - v1.1: Clean break from v1.0 models (no backward compatibility)
 - v1.1: Dataset-adaptive codebook sizing (64/128/256 for 5-20/20-100/100-500 files)
+- 12-01: commitment_weight=0.25 (not library default 1.0) for small-dataset stability
+- 12-01: EMA decay scales with dataset size: 0.8/0.9/0.95 for <=20/<=100/>100 files
+- 12-01: Spatial embedding encoder (each position independently quantized, 48 per 1-sec mel)
+- 12-01: QuantizerWrapper wraps ResidualVQ for codebook health monitoring
+- 12-01: ~16x temporal compression (~167ms per position, region-level code editing)
 
 ### Pending Todos
 
@@ -61,5 +73,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-21
-Stopped at: v1.1 roadmap created, ready to plan Phase 12
+Stopped at: Completed 12-01-PLAN.md -- ConvVQVAE model + VQVAEConfig
 Resume file: None
