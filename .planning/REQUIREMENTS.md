@@ -1,7 +1,7 @@
 # Requirements: Small DataSet Audio
 
 **Defined:** 2026-02-21
-**Core Value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
+**Core Value:** Controllable exploration -- users can reliably navigate between sound worlds using musically meaningful parameters
 
 ## v2.0 Requirements
 
@@ -65,7 +65,7 @@ Deferred from active requirements. Tracked but not in current roadmap.
 | Neural vocoder (HiFi-GAN/BigVGAN) | Separate model adds training complexity. Complex spectrogram eliminates Griffin-Lim without it. |
 | Raw phase prediction | Notoriously hard for neural networks (wrapping, quasi-random at low energy). IF is the proven alternative. |
 | v1.0 model backward compatibility | New representation is fundamentally different. Clean break. |
-| Real-time generation | Quality over latency — unchanged from v1.0 |
+| Real-time generation | Quality over latency -- unchanged from v1.0 |
 
 ## Traceability
 
@@ -73,33 +73,33 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| DATA-03 | — | Pending |
-| DATA-04 | — | Pending |
-| DATA-05 | — | Pending |
-| ARCH-01 | — | Pending |
-| ARCH-02 | — | Pending |
-| ARCH-03 | — | Pending |
-| ARCH-04 | — | Pending |
-| LOSS-01 | — | Pending |
-| LOSS-02 | — | Pending |
-| LOSS-03 | — | Pending |
-| LOSS-04 | — | Pending |
-| RECON-01 | — | Pending |
-| RECON-02 | — | Pending |
-| RECON-03 | — | Pending |
-| INTEG-01 | — | Pending |
-| INTEG-02 | — | Pending |
-| INTEG-03 | — | Pending |
-| INTEG-04 | — | Pending |
-| INTEG-05 | — | Pending |
+| DATA-01 | Phase 12 | Pending |
+| DATA-02 | Phase 12 | Pending |
+| DATA-03 | Phase 12 | Pending |
+| DATA-04 | Phase 12 | Pending |
+| DATA-05 | Phase 12 | Pending |
+| ARCH-01 | Phase 13 | Pending |
+| ARCH-02 | Phase 13 | Pending |
+| ARCH-03 | Phase 13 | Pending |
+| ARCH-04 | Phase 13 | Pending |
+| LOSS-01 | Phase 14 | Pending |
+| LOSS-02 | Phase 14 | Pending |
+| LOSS-03 | Phase 14 | Pending |
+| LOSS-04 | Phase 14 | Pending |
+| RECON-01 | Phase 15 | Pending |
+| RECON-02 | Phase 15 | Pending |
+| RECON-03 | Phase 15 | Pending |
+| INTEG-01 | Phase 16 | Pending |
+| INTEG-02 | Phase 16 | Pending |
+| INTEG-03 | Phase 16 | Pending |
+| INTEG-04 | Phase 16 | Pending |
+| INTEG-05 | Phase 16 | Pending |
 
 **Coverage:**
-- v2.0 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18 ⚠️
+- v2.0 requirements: 21 total
+- Mapped to phases: 21
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-21*
-*Last updated: 2026-02-21 after initial definition*
+*Last updated: 2026-02-21 after roadmap creation (traceability populated)*
