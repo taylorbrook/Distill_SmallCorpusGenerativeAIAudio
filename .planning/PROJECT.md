@@ -31,6 +31,14 @@ Controllable exploration — users can reliably navigate between sound worlds us
 
 ### Active
 
+- [ ] Replace magnitude-only mel spectrogram with 2-channel magnitude + instantaneous frequency representation
+- [ ] Eliminate Griffin-Lim reconstruction entirely — use ISTFT with learned phase
+- [ ] Add multi-resolution STFT loss for improved audio quality at multiple time-frequency scales
+- [ ] Increase default latent dimension from 64 to 128 for 2-channel data capacity
+- [ ] Update all pipeline stages (data, training, generation, export) for complex spectrogram
+
+### Deferred
+
 - [ ] Incrementally add more training audio to an existing model
 - [ ] Feed generated outputs back into training data for iterative refinement
 - [ ] Bundle HRTF SOFA file for binaural mode (currently requires user download)
@@ -45,6 +53,19 @@ Controllable exploration — users can reliably navigate between sound worlds us
 - Cloud-hosted training service — runs locally on user's hardware
 - OSC/MIDI controller mapping — deferred to v2
 - Multi-channel spatial audio (5.1, 7.1, ambisonic) — stereo/binaural sufficient for v1
+
+## Current Milestone: v2.0 Complex Spectrogram
+
+**Goal:** Replace magnitude-only mel spectrogram pipeline with 2-channel magnitude + instantaneous frequency representation, eliminating Griffin-Lim reconstruction entirely via exact ISTFT.
+
+**Target features:**
+- 2-channel VAE input/output: magnitude + instantaneous frequency (IF) on mel spectrograms
+- Griffin-Lim eliminated — ISTFT reconstruction from learned magnitude + phase
+- Multi-resolution STFT loss (auraloss) for perceptually accurate reconstruction
+- Default latent_dim increased to 128 for 2-channel data capacity
+- All pipeline stages updated: data loading, preprocessing, training, generation, export
+
+**Breaking changes:** v1.0 .sda model files will not be compatible. Clean break — new representation is fundamentally different.
 
 ## Context
 
@@ -94,4 +115,4 @@ Architecture: Convolutional VAE operating on mel spectrograms with PCA-based lat
 | sofar library for HRTF/binaural | Standard SOFA format for head-related transfer functions | ⚠️ Revisit — requires user to download SOFA file |
 
 ---
-*Last updated: 2026-02-15 after v1.0 milestone*
+*Last updated: 2026-02-21 after v2.0 milestone start*

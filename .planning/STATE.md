@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-15)
+See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** v1.0 MVP shipped — planning next milestone
+**Current focus:** v2.0 Complex Spectrogram — eliminate Griffin-Lim via magnitude + IF representation
 
 ## Current Position
 
-Phase: v1.0 complete (11 phases, 34 plans)
-Plan: All complete
-Status: v1.0 MVP shipped 2026-02-15
-Last activity: 2026-02-15 -- Milestone v1.0 archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-21 — Milestone v2.0 started
 
-Progress: [████████████████████] 100% (v1.0)
+Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (v2.0)
 
 ## Performance Metrics
 
@@ -218,6 +218,14 @@ Recent decisions affecting current work:
 - [Phase 11]: Preset takes priority over --slider when both provided (latent_vector is None guard)
 - [Phase 11]: Blend mode warns that --slider is not supported (neutral positions used)
 
+### v2.0 Decisions
+
+- Magnitude + Instantaneous Frequency representation (not real+imag, not raw phase)
+- Multi-resolution STFT loss via auraloss library
+- Default latent_dim 64 → 128
+- Breaking change — v1.0 .sda models not compatible
+- Focused scope — core pipeline change only (no incremental training, no feedback loop)
+
 ### Pending Todos
 
 None yet.
@@ -228,6 +236,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-15
-Stopped at: Completed 11-02-PLAN.md -- CLI auto-save and slider control (Phase 11 complete, all plans done)
+Last session: 2026-02-21
+Stopped at: Milestone v2.0 initialization — defining requirements
 Resume file: None
