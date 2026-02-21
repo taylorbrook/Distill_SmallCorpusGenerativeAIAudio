@@ -21,6 +21,7 @@ dependencies = [
     "lameenc>=1.7",
     "mutagen>=1.47",
     "sofar>=1.1",
+    "vector-quantize-pytorch>=1.27.0",
 ]
 
 [project.scripts]
