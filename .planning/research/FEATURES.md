@@ -1,314 +1,330 @@
-# Feature Landscape
+# Feature Research: VQ-VAE Audio Code Manipulation
 
-**Domain:** Generative Audio / AI Music Creation Tools (Small Dataset Focus)
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM
+**Domain:** RVQ-VAE discrete audio generation with code-level manipulation for creative sound design
+**Researched:** 2026-02-21
+**Confidence:** MEDIUM-HIGH (architecture patterns well-documented; code manipulation UI is novel territory with less prior art)
 
-## Table Stakes
+## Context: What Exists vs What Is New
 
-Features users expect. Missing = product feels incomplete.
+This research covers **only** the v1.1 milestone features. The following are **already shipped** in v1.0 and not covered here: training pipeline, mel spectrogram generation, continuous latent space exploration (PCA sliders), multi-format export (WAV/MP3/FLAC/OGG), spatial audio (stereo/binaural), model library, presets, generation history, A/B comparison, Gradio GUI, CLI.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Audio file import (drag & drop) | Standard across all audio tools; users expect seamless file loading | Low | Support WAV, AIFF, MP3, FLAC. Multi-file batch import critical for dataset building |
-| Model training with progress monitoring | Users need visibility into long-running processes; reduces anxiety about whether it's working | Medium | Loss visualization, epoch/step counters, estimated time remaining, sample previews during training. TensorBoard-style metrics display |
-| Real-time parameter controls during generation | Creative tools require immediate feedback; users explore by tweaking and listening | Medium | Non-blocking UI, responsive sliders/controls while audio generates. Similar to synth parameter control patterns |
-| Audio preview/playback | Cannot evaluate output without listening; fundamental to audio workflows | Low | Waveform display, transport controls (play/pause/stop), scrubbing, loop regions |
-| Preset save/recall | Musicians/producers expect to save configurations; standard across VSTs, DAWs, synthesis tools | Low | Named presets, user-created preset libraries, FXP-style format for interchange |
-| Audio export (WAV) | Getting audio out of the tool is table stakes; WAV is universal DAW format | Low | Configurable sample rate (44.1kHz, 48kHz min), bit depth (16/24/32-bit), mono/stereo. Uncompressed format critical for professional use |
-| Multiple model management | Users will train on different datasets (voice, drums, textures); need to switch between them | Medium | Model library/browser, load/unload models, metadata (dataset info, training date, sample count) |
-| Dataset visualization | Users need confidence their data loaded correctly before hours-long training | Low | File count, total duration, sample rate consistency checks, waveform thumbnails |
-| Generation parameter ranges/limits | Prevents broken output; users expect guardrails on sliders to keep results usable | Low | Min/max values on controls, visual indicators when approaching extremes, snap-to-default |
+The v1.1 milestone replaces the continuous VAE entirely with RVQ-VAE and adds an autoregressive prior for generation plus a code manipulation UI. The PCA slider interface from v1.0 is deprecated in favor of discrete code manipulation.
 
-## Differentiators
+---
 
-Features that set product apart. Not expected, but valued.
+## Feature Landscape
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Musically meaningful parameter controls (timbre, harmony, temporal, spatial) | **Core differentiator vs RAVE's opaque latent dims.** Maps abstract latent space to parameters musicians understand (spectral centroid, temporal envelope, spatial width) | High | Requires post-training PCA/analysis to extract interpretable dimensions. Similar to Autolume's feature extraction. Research: timbre = spectral envelope + temporal envelope; harmony = roughness/tension; temporal = attack time, duration; spatial = stereo width, pan |
-| Incremental training (add files to existing model) | Avoids full retraining when adding examples; supports iterative dataset curation workflow | High | Addresses catastrophic forgetting problem. Online incremental learning approach. Major technical challenge but huge UX win |
-| Output-to-training feedback loop | Enables evolutionary/iterative sound design; generate→select favorites→retrain on them | Medium-High | Combines generation and incremental training. Creates spiral of refinement. Novel workflow pattern not seen in current tools |
-| Small dataset optimization (5-500 files) | **Core differentiator vs Suno/Udio.** Specialization = competitive moat. Personal datasets, not generic models | High | Data augmentation (loudness, noise, shift, time-stretch), transfer learning from pretrained features, architecture choices for sample efficiency |
-| PCA-based feature extraction (Autolume-style) | Automatic discovery of meaningful control dimensions from trained model; reduces guesswork | High | Post-training analysis identifies interpretable axes. User can map MIDI controllers to extracted features. Bridges gap between latent space and musical parameters |
-| Multi-model layering/blending | Generate from multiple models simultaneously, blend outputs; creates hybrid timbres | Medium | Addresses "I want 60% model A + 40% model B" use case. Novel generative technique |
-| Generation history with visual diff | See/hear what changed between parameter adjustments; supports exploration without getting lost | Medium | Thumbnail waveforms in history list, A/B comparison playback, parameter snapshots. Addresses HistoryPalette research findings on creative version control |
-| OSC/MIDI parameter control | Live performance use case; map hardware controllers or receive from DAW/Ableton | Medium | Real-time parameter streaming, MIDI learn, OSC address mapping. Autolume-live pattern |
-| Spatial audio output (stereo/binaural/multi-channel) | Soundscape/texture generation benefits from spatial dimension; immersive output | Medium | Beyond basic stereo: binaural (headphone-optimized), 5.1/7.1 surround, ambisonic. Audiocube-style spatial processing |
-| Granular density/size controls | Texture generation sweet spot; low density = rhythmic stutters, high density = continuous clouds | Medium | Applies to temporal parameter space. Grain count, size, pitch, shape controls familiar from granular synths |
+### Table Stakes (Users Expect These)
 
-## Anti-Features
+Features that any VQ-VAE audio tool must have. Without these, the discrete code approach adds complexity without delivering value.
 
-Features to explicitly NOT build.
+| Feature | Why Expected | Complexity | Dependencies on Existing Code | Small-Dataset Notes |
+|---------|--------------|------------|-------------------------------|---------------------|
+| **Encode audio to discrete codes** | Fundamental VQ-VAE operation. Users need to see their audio as codes before they can manipulate them. Without this, codes are invisible and the tool is just a black box | MEDIUM | Reuses `audio.preprocessing`, `audio.spectrogram` for mel conversion. New encoder model replaces `models.vae.ConvEncoder` | Encoding quality depends on codebook training; with 5-20 files, codebook must be small (128-256 entries per layer) to avoid collapse |
+| **Decode codes back to audio** | Complementary to encoding. Users must hear the result of any code manipulation. Round-trip encode-decode is the proof that the system works | MEDIUM | Reuses `audio.spectrogram.mel_to_waveform` (Griffin-Lim) or new neural vocoder. Plugs into existing `inference.generation.GenerationPipeline` for spatial/export | Reconstruction quality is the make-or-break metric. Small codebooks = some quality loss vs continuous VAE. Must be audibly acceptable |
+| **Visualize code sequences** | Users cannot manipulate what they cannot see. A code grid/timeline showing which codebook entries are active at each time step is essential for the "sound DNA editor" metaphor | MEDIUM | New UI tab in `ui/tabs/`. Can reuse Gradio components (DataFrame, Plot). No backend dependency beyond the encoder output | Visual must make RVQ hierarchy clear: coarse (layer 1) vs fine (layer N) codes. Color-coding by layer is table stakes |
+| **RVQ-VAE training on user's dataset** | Users expect to train a model on their own audio, same as v1.0. The architecture changes but the workflow is the same: import data, train, get a model | HIGH | Replaces `training.loop` internals, `models.vae.ConvVAE`, `models.losses`. Reuses `training.runner`, `training.checkpoint`, `training.config`, `training.metrics`, `training.preview`, `data.dataset` | Critical: codebook collapse is the #1 risk with small datasets. Must implement EMA updates + dead code reset + k-means init. Dataset-adaptive codebook sizing (smaller codebook for fewer files) |
+| **Training progress with codebook health metrics** | v1.0 already shows loss curves and previews. VQ-VAE adds new failure modes (codebook collapse, dead codes) that users need visibility into | MEDIUM | Extends existing `training.metrics` and `ui.components.loss_chart`. Adds codebook utilization % and perplexity metrics | Codebook utilization is the critical new metric. Below 50% utilization signals collapse. Users need this surfaced prominently, not buried |
+| **Model persistence for VQ-VAE format** | Users need to save trained VQ-VAE models and load them later. Different checkpoint format from v1.0 (codebooks + encoder + decoder vs mu/logvar layers) | MEDIUM | Replaces `models.persistence`. Reuses `library.catalog` JSON index pattern and atomic writes. Model metadata schema needs version field | Clean break from v1.0 format (per PROJECT.md). No backward compat needed but forward-looking schema design matters |
+| **Autoregressive generation (basic)** | VQ-VAE cannot generate by sampling N(0,1) like continuous VAE. An autoregressive prior is mandatory for generation. Without it, the tool can only reconstruct/manipulate existing audio, not create new material | HIGH | New model architecture (transformer over codes). Integrates with `inference.generation.GenerationPipeline` replacing the latent vector sampling path. Reuses export, spatial, quality pipelines | Overfitting risk on small datasets. Prior must be small (2-4 transformer layers). Consider: is the prior even useful with 5-20 files? May need graceful degradation to random/shuffled code generation |
+| **Temperature/randomness control for generation** | Basic generation control. Users need at minimum a "how random/surprising" knob, replacing the seed+evolution controls from v1.0 | LOW | Maps to temperature parameter in autoregressive sampling. Plugs into existing seed infrastructure. UI replaces PCA sliders with simpler control | Temperature interacts with codebook size: small codebook + low temperature = very repetitive output. Need wider default range |
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Text-to-music generation | Wrong domain. Suno/Udio already dominate this. Requires massive datasets + lyrics handling. Not aligned with "personal small datasets" value prop | Focus on latent space exploration of user's own audio. Let users train on their sounds, not prompt for generic songs |
-| Built-in DAW/multi-track editor | Scope creep. Users already have DAWs (Ableton, Logic, Pro Tools). Tool should integrate, not replace | Export stems at high quality. Support drag-and-drop to DAWs. Focus on being best-in-class generator, not mediocre DAW |
-| Cloud model training | Privacy concerns with personal audio. Latency issues. Requires backend infrastructure, costs, accounts | Local-first training. GPU acceleration via Metal/CUDA. Users own their models and data |
-| Real-time (< 10ms latency) generation | RAVE achieves this but compromises quality. Not needed for "non-real-time, high fidelity" positioning | Accept 100ms-1s generation latency for 48kHz/24-bit quality. Cache generations for responsive playback |
-| Vocal/lyric generation | Legal/ethical minefield. Voice cloning concerns. Outside "textures/soundscapes/building blocks" scope | Focus on instrumental, abstract, timbral content. If voice is in dataset, treat as texture not lyrics |
-| Social/sharing features | Premature. Adds complexity (accounts, storage, moderation). Not core to creative workflow | Export audio files. Users share via SoundCloud/Bandcamp/etc. Keep tool offline-capable |
-| Automatic genre classification | Personal datasets may not fit genres. Adds ML complexity for questionable value | Let users tag/name models themselves. Metadata is freeform text, not constrained taxonomy |
-| Mobile app | Training requires GPU. Generation needs compute. UI complexity requires desktop real estate | Desktop-first (macOS/Windows/Linux). Mobile becomes viable later if models are tiny and generation is fast |
+### Differentiators (Competitive Advantage)
+
+Features that make this tool unique. The "sound DNA editor" concept is the core differentiator -- no existing tool offers direct code-level manipulation of personal audio through a visual interface.
+
+| Feature | Value Proposition | Complexity | Dependencies on Existing Code | Small-Dataset Notes |
+|---------|-------------------|------------|-------------------------------|---------------------|
+| **Code swapping between audio files** | **Core differentiator.** Encode two audio files, swap codes at specific time positions or specific RVQ layers. "Take the texture of sound A and the rhythm of sound B." No existing tool offers this at the discrete code level | MEDIUM | Requires encode + decode infrastructure. New operation is purely index manipulation (swap arrays). UI needs dual-pane code view | With small codebooks, fewer possible swaps but each swap is more dramatic. This is actually an advantage: fewer codes = more audible/meaningful changes |
+| **Per-layer code manipulation (coarse vs fine)** | RVQ layers capture different information: layer 1 = coarse structure/content, deeper layers = fine acoustic detail. Letting users edit layers independently enables "keep the structure, change the texture" workflows | MEDIUM-HIGH | Requires RVQ encoder that exposes per-layer indices. Decoder must accept partially modified code stacks. Builds on encode/decode infrastructure | Research shows information is entangled across layers (not cleanly separated). Users need clear labeling: "Layer 1 affects overall structure, Layer 4 affects subtle detail." Manage expectations |
+| **Code blending / interpolation** | Blend codes from two audio files by mixing their codebook indices (e.g., alternate codes, weighted selection, or interpolate in embedding space before re-quantizing). Creates hybrid sounds that are "between" two sources | HIGH | Interpolation in embedding space requires accessing codebook vectors (not just indices). lucidrains library provides `get_codes_from_indices`. Decode the blended embedding. More complex than simple index swapping | Blending in embedding space produces smoother results than index-level operations. With small codebooks, nearest-neighbor snapping after interpolation may collapse to one of the two sources. Monitor this |
+| **Codebook entry browser/auditioner** | Let users browse individual codebook entries: click a code, hear what it sounds like in isolation (decode a single code to a short audio snippet). Builds intuition about what each code "means" | MEDIUM | Requires single-code decode capability. UI component: grid of clickable cells with preview playback. Reuses `gr.Audio` for playback | With 128-256 entries, this is actually feasible to browse. With 1024+ entries, need clustering/search. Small datasets make this feature more practical, not less |
+| **Conditional generation (guide the prior)** | Beyond basic temperature: let users "seed" the autoregressive prior with a partial code sequence (e.g., encode the first 2 seconds of an audio file, then let the prior continue). Continuation/extension of existing audio | HIGH | Autoregressive prior must support prefix conditioning. Encode partial audio + generate remaining codes + decode full sequence. Integration point between encode and generate workflows | The prior may struggle to continue coherently with small training sets. However, "interesting continuation" may be more valuable than "coherent continuation" for creative users |
+| **Code sequence templates/patterns** | Let users create repeating patterns, loops, or structured sequences from codes. E.g., "repeat this 4-code pattern" or "mirror this sequence." Compositional code construction without the prior | MEDIUM | Pure array manipulation on code indices. Decode the constructed sequence. UI: pattern editor with drag/copy/mirror tools | Excellent for small datasets: users can manually compose code sequences that the prior might not discover. Extends the creative palette beyond what the model "learned" |
+| **Codebook usage heatmap** | Visualize which codebook entries are actually used in a specific audio file or across the training set. Identifies "dead" codes, frequently-used codes, and code distribution patterns | LOW-MEDIUM | Post-training analysis of codebook indices across dataset. t-SNE or UMAP projection of codebook embeddings. Extends `training.metrics` | Directly addresses the small-dataset codebook collapse problem. Users can see if their model is healthy (high utilization) or sick (few codes dominating) |
+| **Top-k / nucleus sampling controls** | Expose nucleus (top-p) and top-k sampling parameters for the autoregressive prior. Lets users control generation diversity more precisely than temperature alone. Standard in language model interfaces | LOW | Parameters on the sampling function. UI: two additional sliders alongside temperature. No model changes needed | Users familiar with LLM interfaces (ChatGPT, etc.) will recognize these controls. Bridges the mental model between text generation and audio generation |
+| **Encode-Edit-Decode workflow as single operation** | One-click workflow: upload audio, see codes, edit in place, hear result. The "sound DNA editor" as an integrated experience rather than separate encode/view/edit/decode steps | MEDIUM | Orchestration layer tying together encode, code view, edit operations, and decode into a single Gradio tab with reactive updates. State management via `ui.state.app_state` | This is what makes the tool feel magical vs feeling like a debug interface. The integrated workflow is the product |
+
+### Anti-Features (Commonly Requested, Often Problematic)
+
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| **Real-time code editing with instant audio preview** | Users want to hear changes immediately as they edit codes, like a live instrument | VQ-VAE decode (mel spectrogram + Griffin-Lim/vocoder) is too slow for real-time at 48kHz. Attempting this leads to audio glitches, buffer underruns, and frustration. The non-real-time design decision from v1.0 still applies | "Preview" button that decodes a 1-2 second snippet around the edit point. Fast enough to feel interactive (100-500ms) without promising real-time. Show a progress indicator during decode |
+| **Text-conditioned code generation** | "Generate codes that sound like a warm pad" -- text prompts are familiar from ChatGPT/Suno | Requires CLAP or similar text-audio embedding model. Massive additional dependency. Text concepts are unreliable with small personal datasets (what does "warm" mean for a dataset of industrial noise?) | Temperature + manual code manipulation gives more reliable control. Codebook entry browser + auditioner lets users find sounds by listening, not describing |
+| **Automatic code labeling / semantic tagging** | Users want codes labeled with what they represent (e.g., "this code = attack transient", "this code = sustain body") | Semantic meaning of codes is entangled, especially in early layers. Automated labeling would be inaccurate and misleading. Research shows even purpose-trained codecs have substantial attribute entanglement | Let users add their own labels/notes to codebook entries. Build labeling into the codebook browser. User-generated labels are more reliable than automated ones for personal datasets |
+| **Importing codebooks from other models (EnCodec, SoundStream)** | "Use Google's codebook with my decoder" -- leverage pre-trained audio understanding | Codebooks are tightly coupled to their encoder/decoder. Swapping codebooks between models produces garbage. Even within the same architecture, codebooks are not interchangeable | Train your own model on your own audio. This is the core value proposition. Consider transfer learning (init from pretrained, fine-tune) in a future milestone instead |
+| **Continuous latent space alongside discrete codes** | "Keep the PCA sliders from v1.0 AND add code manipulation" | Two control paradigms create confusion. Which one is the "real" control? They would need to be synchronized (slider change = code change and vice versa). Massive UI complexity for unclear benefit | Clean break: v1.1 is discrete codes only. The code manipulation UI replaces PCA sliders entirely. If users miss continuous control, consider adding "code embedding space" sliders in v1.2 that move through codebook neighborhoods |
+| **Arbitrary-length generation from autoregressive prior** | "Generate 5 minutes of audio from the prior" | Autoregressive generation on small-dataset priors degrades rapidly with length. Quality drops, repetition increases, coherence breaks down. The model has seen too few examples to maintain long-range structure | Cap generation length based on model training data duration. Suggest 5-30 second outputs. For longer durations, use code sequence templates or manual composition of shorter generated segments |
+| **Multi-codebook VQ (different codebook sizes per layer)** | "Use 1024 for coarse, 256 for fine" -- variable codebook sizes seem more flexible | lucidrains ResidualVQ uses uniform codebook size across layers. Variable sizes add significant complexity to the library integration, prior model, and code manipulation UI without proven benefit for small datasets | Use uniform codebook size (128-256 for small datasets, 512 for larger). The RVQ residual structure already handles coarse-to-fine via the layer hierarchy, not via codebook size |
+
+---
 
 ## Feature Dependencies
 
 ```
-Dataset Import
-    └──requires──> Dataset Visualization
-                      └──enables──> Model Training
-                                       └──requires──> Training Progress Monitoring
-                                                         └──produces──> Trained Model
-                                                                           └──enables──> Model Management
-                                                                                            └──requires──> Model Loading
-                                                                                                              └──enables──> Parameter Controls
-                                                                                                                               └──requires──> Audio Generation
-                                                                                                                                                 └──enables──> Audio Preview
-                                                                                                                                                                  └──enables──> Audio Export
+RVQ-VAE Training
+    |-- requires --> Codebook Management (EMA, dead code reset, k-means init)
+    |-- requires --> Training Progress + Codebook Health Metrics
+    |-- produces --> Trained RVQ-VAE Model
+    |                   |
+    |                   |-- enables --> Encode Audio to Codes
+    |                   |                   |-- enables --> Code Visualization
+    |                   |                   |                   |-- enables --> Code Swapping
+    |                   |                   |                   |-- enables --> Per-Layer Manipulation
+    |                   |                   |                   |-- enables --> Code Sequence Templates
+    |                   |                   |
+    |                   |                   |-- enables --> Codebook Entry Browser
+    |                   |                   |
+    |                   |                   |-- enables --> Code Blending (requires embedding access)
+    |                   |
+    |                   |-- enables --> Decode Codes to Audio
+    |                   |                   |-- required by --> ALL manipulation features
+    |                   |                   |-- reuses --> existing export/spatial pipeline
+    |                   |
+    |                   |-- enables --> VQ-VAE Model Persistence
+    |                   |                   |-- reuses --> library.catalog
+    |                   |
+    |                   |-- enables --> Autoregressive Prior Training
+    |                                       |-- requires --> Encoded code sequences from training set
+    |                                       |-- enables --> Code Sequence Generation
+    |                                       |                   |-- requires --> Temperature Control
+    |                                       |                   |-- enhanced by --> Top-k / Nucleus Sampling
+    |                                       |                   |-- enhanced by --> Conditional Generation
+    |                                       |
+    |                                       |-- enables --> Codebook Usage Heatmap
+    |
+    |-- reuses --> existing training.runner, training.checkpoint
+    |-- reuses --> existing data.dataset, audio.preprocessing
 
-PCA Feature Extraction ──enhances──> Parameter Controls (makes them musically meaningful)
-
-Incremental Training ──requires──> Existing Trained Model + New Dataset Import
-
-Output-to-Training Loop ──requires──> Audio Export + Incremental Training + Dataset Import
-
-Generation History ──requires──> Audio Preview + Parameter Controls
-
-OSC/MIDI Control ──requires──> Parameter Controls (provides alternate input method)
-
-Multi-Model Blending ──requires──> Model Management (load multiple) + Parameter Controls (blend ratios)
-
-Preset System ──requires──> Parameter Controls (saves their state)
+Encode-Edit-Decode Workflow
+    |-- requires --> Encode + Visualize + Edit Operations + Decode
+    |-- orchestration layer in UI
 ```
 
 ### Dependency Notes
 
-- **Dataset Import → Model Training → Generation**: Core linear workflow. Everything depends on having audio in.
-- **PCA Feature Extraction enhances Parameter Controls**: Without PCA, parameters are opaque latent dimensions (RAVE problem). With PCA, they become musically meaningful (timbre, harmony, etc.).
-- **Incremental Training requires existing model**: Can't incrementally train from scratch. Need base model first.
-- **Output-to-Training Loop requires multiple systems**: Most complex workflow. Needs generation, export, import, and incremental training all working.
-- **Generation History is independent**: Nice-to-have that layers on top of generation. No blockers.
+- **RVQ-VAE Training must come first**: Everything else depends on having a trained model with populated codebooks. Cannot test encode/decode without a trained model.
+- **Encode and Decode are paired**: Encode without decode is diagnostic-only. Decode without encode limits to prior-generated or manually constructed codes. Both are needed for the core workflow.
+- **Code visualization gates all manipulation features**: Users cannot swap/blend/edit what they cannot see. Visualization is the prerequisite for all creative operations.
+- **Autoregressive prior is independent of code manipulation**: The prior generates codes; manipulation edits codes. They enhance each other but neither requires the other. Can ship manipulation without prior, or prior without manipulation.
+- **Code blending is harder than code swapping**: Swapping is index-level (array operations). Blending requires embedding-space interpolation and re-quantization. Ship swapping first, blending second.
+- **Conditional generation requires both prior and encode**: Must encode a prefix, then feed to the prior. This is the most complex integration point.
 
-## MVP Recommendation
+---
 
-### Launch With (v1)
+## UI Paradigm Recommendation: The Sound DNA Editor
 
-Minimum viable product — what's needed to validate the concept.
+### Why Not PCA Sliders (v1.0 Approach)
 
-- [x] **Dataset Import (drag & drop)** — Cannot train without data. First step of workflow.
-- [x] **Dataset Visualization** — Prevents "train for 8 hours on corrupt files" scenarios. Confidence builder.
-- [x] **Model Training** — Core value prop. Differentiator is training on small personal datasets.
-- [x] **Training Progress Monitoring** — Training takes hours. Without progress visibility, tool feels broken.
-- [x] **Basic Model Management** — Must save/load trained models. Single model at a time is OK for MVP.
-- [x] **Parameter Controls (latent dims)** — Need some way to generate variants. Can start with raw latent dims before PCA.
-- [x] **Audio Generation** — Obvious. The point.
-- [x] **Audio Preview** — Cannot evaluate without listening.
-- [x] **Audio Export (48kHz/24-bit WAV)** — Getting audio into DAW validates "building blocks for production" use case.
-- [x] **Preset Save/Recall** — Musicians expect this. Low complexity, high value.
+The v1.0 PCA slider approach maps continuous latent dimensions to knobs. This breaks down for VQ-VAE because:
+1. Discrete codes are integers, not continuous values. Sliders produce continuous values that must be quantized, losing the precision advantage of discrete codes.
+2. PCA assumes a Gaussian latent space. VQ-VAE codes occupy a finite codebook, not a continuous manifold.
+3. The interesting operations are combinatorial (swap code 47 for code 183), not continuous (slide from -10 to +10).
 
-**Rationale**: This is the minimal loop: import audio → train model → load model → adjust parameters → generate → listen → export. Proves core value prop ("train on my sounds, explore the space, get high-quality output") without differentiating features that add complexity.
+### Recommended UI: Code Grid + Timeline
 
-### Add After Validation (v1.x)
+**Primary view: Code Timeline**
+- Horizontal axis = time (one column per time step, matching encoder frame rate)
+- Vertical axis = RVQ layer (row 1 = coarsest/layer 1, row N = finest/layer N)
+- Each cell shows a codebook index (integer) with color-coding by entry
+- Clicking a cell opens a picker showing all codebook entries with audio preview
+- Selecting a region enables batch operations (swap, copy, paste, fill with pattern)
 
-Features to add once core is working and users are engaged.
+**Secondary view: Codebook Browser**
+- Grid of all codebook entries for a selected layer
+- Each entry shows: index number, usage frequency, audio preview button
+- Entries color-coded by usage (hot/cold heatmap)
+- Search/filter by audio similarity
 
-- [ ] **PCA Feature Extraction** — Trigger: Users complain latent dims are opaque/hard to control. Elevates from "works" to "musically useful".
-- [ ] **Generation History** — Trigger: Users say "I had a good one 10 generations ago, can't get back to it". QOL improvement.
-- [ ] **Multi-Model Management** — Trigger: Users train 5+ models, switching becomes painful. Library/browser UI.
-- [ ] **Spatial Audio Output** — Trigger: Soundscape/ambient users request it. Niche but high-value for that segment.
-- [ ] **OSC/MIDI Control** — Trigger: Live performers ask for it. Enables new use case (performance tool).
-- [ ] **Granular Controls** — Trigger: Texture generation users want finer temporal control. Aligns with soundscape positioning.
+**Tertiary view: Dual-File Comparison**
+- Two code timelines side by side (source A, source B)
+- Drag-and-drop codes between files
+- "Merge" operation that interleaves or selects codes from both sources
 
-### Future Consideration (v2+)
+### Gradio Implementation Constraints
 
-Features to defer until product-market fit is established.
+Gradio does not have a native "code grid editor" component. Practical approaches:
+1. **gr.DataFrame** for the code grid: editable cells, color via CSS. Functional but not visually rich.
+2. **gr.Plot (Plotly heatmap)** for visualization + separate edit controls: pretty but indirect editing.
+3. **Custom Gradio component** via gr.HTML + JavaScript: most flexible but highest development cost.
+4. **Hybrid approach** (recommended): Plotly heatmap for visualization + row of dropdowns/number inputs for editing selected time steps + action buttons for batch operations. Achievable within standard Gradio.
 
-- [ ] **Incremental Training** — Why defer: High complexity (catastrophic forgetting), low urgency (users can retrain from scratch early on). Add when "retrain my 500-file model every time I add 5 files" becomes painful.
-- [ ] **Output-to-Training Feedback Loop** — Why defer: Requires incremental training. Workflow novelty needs validation. Could be killer feature or unused complexity.
-- [ ] **Multi-Model Blending** — Why defer: Advanced use case. Need multiple models first (v1.x multi-model management). Niche until user base is sophisticated.
-- [ ] **Configurable Export Formats** — Why defer: WAV covers 90% of use cases. MP3/FLAC/OGG are conveniences, not blockers. Add when users explicitly request.
-- [ ] **Batch Generation** — Why defer: "Generate 100 variants overnight" is power user feature. Validate single-generation workflow first.
+---
+
+## MVP Definition (v1.1 Milestone)
+
+### Must Have (Core VQ-VAE Value)
+
+- [ ] **RVQ-VAE Training** -- Cannot do anything without a trained model. Replaces v1.0 training loop entirely. Must include codebook health monitoring.
+- [ ] **Encode audio to discrete codes** -- The bridge from audio to the code domain. Without this, discrete codes are invisible.
+- [ ] **Decode codes to audio** -- The bridge back. Without this, code manipulation is silent.
+- [ ] **Code visualization (timeline grid)** -- Users must see the codes to understand and trust the system. The "aha moment" of the product.
+- [ ] **Basic code editing (select cell, change code index)** -- Minimum viable manipulation. Even changing one code and hearing the result proves the concept.
+- [ ] **Code swapping between two files** -- The headline feature: "mix the DNA of two sounds." Most accessible creative operation.
+- [ ] **Autoregressive prior (basic generation)** -- VQ-VAE without a prior cannot generate new material, only reconstruct/edit existing audio. Generation is expected.
+- [ ] **Temperature control for generation** -- Minimum generation control. Users need "more random" vs "more conservative."
+- [ ] **Updated model persistence** -- Users must save and load VQ-VAE models. Reuses library catalog pattern.
+
+### Add After Core Works (v1.1.x)
+
+- [ ] **Per-layer code manipulation** -- Trigger: users want "change the texture but keep the rhythm." Requires labeling layers with what they affect.
+- [ ] **Codebook entry browser with audio preview** -- Trigger: users ask "what does code 47 sound like?" Builds intuition about the codebook.
+- [ ] **Codebook usage heatmap** -- Trigger: users report "my model sounds weird." Diagnostic tool for codebook health post-training.
+- [ ] **Code blending in embedding space** -- Trigger: swapping feels too abrupt. Blending enables smoother transitions between sounds.
+- [ ] **Top-k / nucleus sampling** -- Trigger: temperature alone is too coarse. Power users want finer generation control.
+- [ ] **Code sequence templates/patterns** -- Trigger: users want rhythmic/looping structures. Manual composition of code sequences.
+
+### Future Consideration (v1.2+)
+
+- [ ] **Conditional generation (audio continuation)** -- Why defer: requires robust prior + encode integration. Prior may not be coherent enough on small datasets initially.
+- [ ] **Encode-Edit-Decode as single integrated workflow** -- Why defer: orchestration layer is polish. Core pieces must work independently first.
+- [ ] **Code embedding space sliders** -- Why defer: this is "PCA sliders but for codes." Only add if users miss continuous control after living with discrete editing.
+- [ ] **Batch code operations across multiple files** -- Why defer: power user feature. Single-file editing must be solid first.
+
+---
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Dataset Import | HIGH | LOW | P1 |
-| Model Training | HIGH | HIGH | P1 |
-| Training Progress Monitoring | HIGH | MEDIUM | P1 |
-| Audio Generation | HIGH | HIGH | P1 |
-| Audio Preview | HIGH | LOW | P1 |
-| Audio Export (WAV) | HIGH | LOW | P1 |
-| Basic Model Management | HIGH | MEDIUM | P1 |
-| Parameter Controls (raw latent) | HIGH | MEDIUM | P1 |
-| Preset Save/Recall | MEDIUM | LOW | P1 |
-| Dataset Visualization | MEDIUM | LOW | P1 |
-| PCA Feature Extraction | HIGH | HIGH | P2 |
-| Generation History | MEDIUM | MEDIUM | P2 |
-| Multi-Model Management (library) | MEDIUM | MEDIUM | P2 |
-| OSC/MIDI Control | LOW | MEDIUM | P2 |
-| Spatial Audio Output | MEDIUM | MEDIUM | P2 |
-| Granular Controls | MEDIUM | MEDIUM | P2 |
-| Incremental Training | HIGH | HIGH | P3 |
-| Output-to-Training Loop | MEDIUM | HIGH | P3 |
-| Multi-Model Blending | LOW | MEDIUM | P3 |
-| Batch Generation | LOW | MEDIUM | P3 |
-| Configurable Export Formats | LOW | LOW | P3 |
+| Feature | User Value | Implementation Cost | Priority | Phase Order |
+|---------|------------|---------------------|----------|-------------|
+| RVQ-VAE Training + Codebook Management | HIGH | HIGH | P1 | 1st (everything depends on this) |
+| Encode Audio to Codes | HIGH | MEDIUM | P1 | 2nd (needs trained model) |
+| Decode Codes to Audio | HIGH | MEDIUM | P1 | 2nd (paired with encode) |
+| Code Visualization (timeline grid) | HIGH | MEDIUM | P1 | 3rd (needs encode output) |
+| Basic Code Editing (cell-level) | HIGH | LOW-MEDIUM | P1 | 3rd (needs visualization) |
+| Code Swapping Between Files | HIGH | LOW-MEDIUM | P1 | 3rd (needs encode + edit) |
+| Updated Model Persistence | HIGH | MEDIUM | P1 | 2nd (save trained models) |
+| Training Progress + Codebook Health | MEDIUM-HIGH | MEDIUM | P1 | 1st (part of training) |
+| Autoregressive Prior Training | HIGH | HIGH | P1 | 4th (needs encoded training data) |
+| Temperature Control | MEDIUM-HIGH | LOW | P1 | 4th (part of generation) |
+| Per-Layer Code Manipulation | MEDIUM | MEDIUM | P2 | After core works |
+| Codebook Entry Browser | MEDIUM | MEDIUM | P2 | After core works |
+| Codebook Usage Heatmap | MEDIUM | LOW-MEDIUM | P2 | After core works |
+| Code Blending (embedding space) | MEDIUM | HIGH | P2 | After swapping works |
+| Top-k / Nucleus Sampling | LOW-MEDIUM | LOW | P2 | After basic generation |
+| Code Sequence Templates | MEDIUM | MEDIUM | P2 | After visualization |
+| Conditional Generation | MEDIUM | HIGH | P3 | Requires mature prior |
+| Integrated Workflow Polish | MEDIUM | MEDIUM | P3 | Polish phase |
 
 **Priority key:**
-- P1: Must have for launch (proves core value prop)
-- P2: Should have, add when possible (elevates from viable to compelling)
-- P3: Nice to have, future consideration (advanced/niche use cases)
+- P1: Must have for v1.1 milestone (proves VQ-VAE + code manipulation value prop)
+- P2: Should have, add when P1 is working (elevates from functional to compelling)
+- P3: Future consideration (requires P1+P2 maturity)
 
-## Competitor Feature Analysis
+---
 
-| Feature | Suno/Udio (Text-to-Music) | RAVE (Neural Audio VAE) | Our Approach (Small Dataset + Musical Params) |
-|---------|--------------------------|------------------------|----------------------------------------------|
-| **Training Data** | Massive datasets (millions of songs) | Medium datasets (hours of audio) | **Small datasets (5-500 files, minutes to hours)** |
-| **Training Workflow** | No user training (pretrained models) | Command-line, technical setup | **GUI-driven, accessible to musicians** |
-| **Parameter Controls** | Text prompts, genre tags | Opaque latent dimensions (z1-z16) | **Musically meaningful (timbre, harmony, temporal, spatial)** |
-| **Output Quality** | 44.1kHz, vocals/instruments | 48kHz but quality compromises | **48kHz/24-bit, high fidelity focus** |
-| **Generation Speed** | 10-30 seconds for full song | Real-time (< 10ms latency) | **Non-real-time (100ms-1s), quality over speed** |
-| **Use Case** | Complete songs with lyrics | Timbre transfer, audio effects | **Textures, soundscapes, building blocks for production** |
-| **Dataset Personalization** | None (generic output) | Possible but technical | **Core value prop (train on YOUR sounds)** |
-| **Export** | MP3/WAV stems | WAV output | **Configurable sample rate/bit depth/channels** |
-| **Model Management** | N/A (single global model) | Manual file management | **GUI library, metadata, switching** |
-| **Preset System** | N/A (prompt-based) | No presets | **Save/recall parameter states** |
-| **Live Performance** | Not applicable | Real-time capable | **OSC/MIDI for performance control (v2)** |
-| **Incremental Learning** | N/A | No | **Add files to existing models (v2)** |
-| **Feature Extraction** | N/A | Manual latent space analysis | **Automatic PCA-based musical parameter discovery** |
+## Competitor/Prior Art Feature Analysis
 
-**Key Differentiation**:
-- **vs Suno/Udio**: Small personal datasets (not generic), instrumental/abstract (not songs), musician-owned training (not cloud service)
-- **vs RAVE**: Musical parameters (not opaque), GUI workflow (not command-line), incremental training (not static), quality focus (not real-time)
+| Feature | Jukebox (OpenAI) | RAVE (IRCAM) | EnCodec/MusicGen (Meta) | SoundStream (Google) | Our Approach |
+|---------|------------------|--------------|-------------------------|----------------------|--------------|
+| **Architecture** | 3-level VQ-VAE, 2048 codebook, Transformer priors | Continuous VAE (or discrete config like SoundStream) | RVQ with 8 codebooks, 1024 entries each | RVQ with up to 80 layers, quantizer dropout | RVQ with 4-8 layers, 128-512 entries (dataset-adaptive) |
+| **Training data** | 1.2M songs | Hours of audio | Large corpora | Large corpora | **5-500 files (minutes to hours)** |
+| **User training** | No | Yes (CLI) | No | No | **Yes (GUI + CLI)** |
+| **Code visualization** | None (research tool) | Latent dims visible in Max/MSP | None (library API) | None (research tool) | **Code timeline grid with per-layer view** |
+| **Code manipulation** | None | Slider manipulation of continuous latents | None | None | **Swap, edit, blend, template codes** |
+| **Generation control** | Artist/genre/lyrics conditioning | Latent space LFOs in Max/MSP | Text + melody conditioning | N/A (codec, not generator) | **Temperature + top-k + code seeding** |
+| **Codebook introspection** | None exposed | None exposed | None exposed | None exposed | **Codebook browser + usage heatmap** |
+| **Small dataset support** | No | Partial (needs hours) | No | No | **Primary design target** |
+
+**Key differentiation**: No existing tool exposes discrete audio codes for direct user manipulation. Jukebox/EnCodec/SoundStream are research/production codecs with no creative editing interface. RAVE offers latent manipulation but in continuous space, not discrete codes. Our "sound DNA editor" is genuinely novel.
+
+---
 
 ## Domain-Specific Insights
 
-### Generative Audio Tool Patterns (2026)
+### What RVQ Layers Actually Capture (Research Findings)
 
-**Current Landscape**: AI music tools split into two camps:
-1. **Text-to-music (Suno, Udio)**: Consumer-facing, prompt-driven, complete song generation. 44.1kHz+ audio, vocals/lyrics, genre/mood controls. Not trainable by users.
-2. **Neural synthesis (RAVE, Magenta NSynth)**: Developer/researcher-facing, VAE-based, requires technical setup. Real-time capable but opaque parameters.
+Research on interpretable neural audio codecs (Interspeech 2025) reveals:
 
-**Gap Our Tool Fills**: Musician-facing neural synthesis with small dataset training and musical parameter control. Not trying to make "songs" (Suno's domain) or replace DAWs (they integrate). Focus: personal sound palette → controllable generation → DAW integration.
+- **Layer 1**: Captures coarse structure -- linguistic content for speech, rhythmic/harmonic structure for music. Highest alignment with semantic features. Modifying layer 1 produces the most audible and structural changes.
+- **Layers 2-4**: Encode speaker identity, timbre characteristics, and broad spectral shape. Changes here alter "who/what it sounds like" while preserving structure.
+- **Deeper layers (5+)**: Fine acoustic detail -- precise spectral shape, noise characteristics, subtle timing. Changes are audible but subtle. Increasingly "diffuse" with less interpretable structure.
+- **Key caveat**: Information is substantially **entangled** across layers, not cleanly separated. Modifying one layer can unexpectedly affect attributes that "belong" to another layer. Users should be warned: "Layer operations affect multiple aspects of the sound."
 
-### Training Workflow Expectations
+**Implication for our UI**: Label layers with approximate descriptions ("Structure", "Timbre", "Detail") but include a disclaimer. Per-layer editing is powerful but not surgically precise.
 
-Research shows users expect:
-- **Visual feedback**: Loss curves, sample rate consistency checks, dataset file counts
-- **Time estimates**: "8 hours remaining" more reassuring than spinner
-- **Sample monitoring**: Hear validation samples during training (TensorBoard audio tab pattern)
-- **Cancellation/resumption**: Long processes need abort and checkpoint recovery
+### Codebook Sizing for Small Datasets
 
-### Parameter Control Paradigms
+Research on codebook collapse and small data suggests:
 
-Audio synthesis tools use several control patterns:
-1. **Sliders (ADSR, filter cutoff)**: Precise, familiar, but high cognitive load at scale
-2. **XY pads (NSynth instrument)**: Spatial exploration, intuitive but limited to 2D
-3. **MIDI/OSC (Autolume-live)**: Hardware integration, performance-oriented
-4. **Automated discovery (PCA, GANspace)**: Extract meaningful dims from latent space
+- **128 entries**: Viable minimum for 5-20 files. Low risk of collapse. Coarse representation but meaningful.
+- **256 entries**: Good balance for 20-100 files. May see 10-20% dead codes without mitigation.
+- **512 entries**: Appropriate for 100-500 files. Requires EMA + dead code reset.
+- **1024+ entries**: Risky for small datasets. High collapse probability. Only viable with aggressive mitigation (k-means init + EMA + reset + warmup).
 
-**Recommendation**: Hybrid approach. Start with sliders for MVP (table stakes). Add PCA to make sliders musically meaningful (v1.x differentiator). Add XY pads + MIDI for performance use cases (v2).
+**Recommendation**: Auto-scale codebook size based on dataset size. Default mapping: `codebook_size = min(max(len(dataset) * 8, 128), 512)`. Expose as an advanced setting.
 
-### Audio Export Considerations
+### Autoregressive Prior Design for Small Datasets
 
-DAW integration requires:
-- **Sample rate parity**: Generate at 44.1kHz or 48kHz (project SR). Mismatched SR causes resampling artifacts.
-- **Bit depth headroom**: 24-bit preferred over 16-bit for post-processing. 32-bit float ideal for mixing.
-- **Uncompressed formats**: WAV/AIFF only. MP3/OGG lose detail.
-- **Stem export**: Multi-model blending should output separate files, not premixed (like Suno's stem download).
+- **Model size**: 2-4 transformer layers, 128-256 hidden dim. Larger models overfit immediately on small datasets.
+- **Training**: Prior trains on encoded sequences from the training set. With 20 files, that may be only 20 code sequences. High overfitting risk.
+- **Practical expectation**: The prior will memorize small datasets rather than generalize. This is partially acceptable: "remixed versions of your sounds" rather than "entirely new sounds." Set user expectations accordingly.
+- **Sampling diversity**: Temperature > 1.0 may be necessary to get novel output from an overfit prior. Top-k sampling prevents degenerate tokens.
+- **Alternative for very small datasets (5-10 files)**: Skip the prior entirely. Offer shuffle-based and template-based code generation instead. Users compose new code sequences manually from the codes they can see in the visualization.
 
-### Small Dataset Best Practices
+### Gradio UI Patterns for Code Manipulation
 
-Machine learning on limited data requires:
-- **Data augmentation**: Loudness variation, noise injection, pitch shift, time stretch. Increases effective dataset size 5-10x.
-- **Transfer learning**: Pretrained feature extractors (YAMNet, VGGish) provide robust representations. Fine-tune decoder only.
-- **Architectural choices**: Smaller latent dim (4-8 vs 16-32), shallower networks, regularization (dropout, weight decay).
-- **Quality over quantity**: 50 high-quality, diverse samples > 500 similar samples.
+Based on Gradio component capabilities (2025-2026):
+- **gr.Dataframe**: Best for editable code grid. Supports colored cells via CSS. Integer-only cells for code indices.
+- **gr.Plot (Plotly)**: Best for code visualization heatmaps. Click events supported. Not directly editable.
+- **gr.Audio**: Instant preview of decode results. Pair with every edit operation.
+- **gr.Dropdown per cell**: Feasible for small time ranges but not scalable to full sequences. Use for "edit selected region" pattern.
+- **State management**: `gr.State` for current code sequence, edit history (undo/redo). The `ui.state.app_state` singleton can hold the active code buffer.
 
-### Preset System Patterns
-
-Musicians expect:
-- **Factory presets**: Ship with 10-20 curated examples showing range of tool
-- **User presets**: Save to user library, shareable files (FXP/FXB format or JSON)
-- **Categorization**: Tag by mood/genre/instrument, searchable
-- **Recall behavior**: "Morphing" between current state and recalled preset (crossfade option)
-
-### Incremental Training Challenges
-
-Research highlights:
-- **Catastrophic forgetting**: Adding new data erases old knowledge. Mitigation: regularization, replay buffers, freezing encoder layers.
-- **Distribution shift**: New samples may differ from original dataset. Need domain adaptation.
-- **Efficiency**: Full retrain vs partial fine-tune. Trade-off between quality and speed.
-- **User expectations**: "Add 5 files" should take minutes, not hours. Implies frozen encoder, decoder-only updates.
+---
 
 ## Sources
 
-**Generative Audio Tools (2026)**:
-- [Top-13 AI Tools for Audio Creation & Editing in 2026](https://dataforest.ai/blog/best-ai-tools-for-audio-editing)
-- [Best AI Music Generators in 2026](https://wavespeed.ai/blog/posts/best-ai-music-generators-2026/)
-- [Best AI Music Generator Software in 2026](https://www.audiocipher.com/post/ai-music-app)
+**RVQ-VAE Architecture and Neural Audio Codecs:**
+- [SoundStream: An End-to-End Neural Audio Codec](https://research.google/blog/soundstream-an-end-to-end-neural-audio-codec/)
+- [EnCodec: High Fidelity Neural Audio Compression](https://audiocraft.metademolab.com/encodec.html)
+- [Jukebox: A Generative Model for Music](https://openai.com/index/jukebox/)
+- [EuleroDec: Complex-Valued RVQ-VAE for Efficient Audio Coding](https://arxiv.org/abs/2601.17517)
+- [ERVQ: Enhanced Residual Vector Quantization](https://arxiv.org/html/2410.12359)
+- [Neural audio codecs: how to get audio into LLMs](https://kyutai.org/codec-explainer)
 
-**AI Music Tool Comparison**:
-- [Best 8 AI Music Generators in 2026: Complete Guide & Comparison](https://song.bio/en/blog/best-ai-music-generators-2026)
-- [The 2 Best AI Music Generators (Which One Wins In 2026?)](https://musicmadepro.com/blogs/news/comparing-the-2-best-ai-music-generators)
+**VQ-VAE Fundamentals and Autoregressive Priors:**
+- [Neural Discrete Representation Learning (VQ-VAE paper)](https://arxiv.org/abs/1711.00937)
+- [VQ-VAE-2 Explained](https://paperswithcode.com/method/vq-vae-2)
+- [Understanding VQ-VAE (ML Berkeley)](https://mlberkeley.substack.com/p/vq-vae)
+- [VQ-VAE-2 Implementation with Autoregressive Prior](https://github.com/mattiasxu/VQVAE-2)
 
-**Audio Synthesis Parameter Controls**:
-- [The Best 15 Granular Synthesis VST Plugins in 2026](https://artistsindsp.com/the-best-15-granular-synthesis-vst-plugins-in-2026/)
-- [Granular Synthesis 101: A Portal Exploration](https://output.com/blog/granular-synthesis-101-a-portal-exploration)
-- [Basics of Synthesis and Sound Design](https://medium.com/@kusekiakorame/basics-of-synthesis-and-sound-design-a-beginners-guide-9c3d0314c6d5)
+**Codebook Interpretability and Layer Analysis:**
+- [Bringing Interpretability to Neural Audio Codecs (Interspeech 2025)](https://arxiv.org/html/2506.04492v1)
+- [Analysing the Language of Neural Audio Codecs](https://arxiv.org/html/2509.01390)
+- [Discrete Audio Tokens: More Than a Survey](https://hal.science/hal-05424376v1/file/5055_Discrete_Audio_Tokens_Mor.pdf)
 
-**RAVE Neural Audio Synthesis**:
-- [GitHub - RAVE Official Implementation](https://github.com/acids-ircam/RAVE)
-- [RAVE: A variational autoencoder for fast and high-quality neural audio synthesis](https://arxiv.org/abs/2111.05011)
+**Codebook Collapse and Small Dataset Techniques:**
+- [Addressing Index Collapse of Large-Codebook Speech Tokenizer](https://arxiv.org/html/2406.02940v1)
+- [Finite Scalar Quantization: VQ-VAE Made Simple (ICLR 2024)](https://proceedings.iclr.cc/paper_files/paper/2024/file/e2dd53601de57c773343a7cdf09fae1c-Paper-Conference.pdf)
+- [Addressing Representation Collapse in VQ Models](https://openreview.net/pdf/91a14185eeff83559b178556728653853d8a8803.pdf)
+- [Is Hierarchical Quantization Essential for Optimal Reconstruction?](https://arxiv.org/html/2601.22244)
+
+**Creative Audio Manipulation and Style Transfer:**
+- [Self-Supervised VQ-VAE for One-Shot Music Style Transfer](https://github.com/cifkao/ss-vq-vae)
+- [Latent Space Interpolation of Synthesizer Parameters](https://gwendal-lv.github.io/spinvae2/)
+- [TokenSynth: Token-based Neural Synthesizer](https://arxiv.org/html/2502.08939v1)
+- [Audio Conditioning for Music Generation via Discrete Bottleneck Features](https://musicgenstyle.github.io/)
+
+**Autoregressive Generation and Sampling:**
+- [Generation configurations: temperature, top-k, top-p](https://huyenchip.com/2024/01/16/sampling.html)
+- [Top-k and Top-p Decoding](https://www.aussieai.com/research/top-k-decoding)
+- [Continuous Autoregressive Modeling (ICLR 2025)](https://proceedings.iclr.cc/paper_files/paper/2025/file/7d90c28e7820709792d969211815a2b3-Paper-Conference.pdf)
+
+**RAVE and Latent Space Exploration:**
+- [RAVE Official Implementation](https://github.com/acids-ircam/RAVE)
 - [Tutorial: Neural Synthesis in Max 8 with RAVE](https://forum.ircam.fr/article/detail/tutorial-neural-synthesis-in-max-8-with-rave/)
+- [Latent Terrain: Dissecting the Latent Space of Neural Audio Autoencoders](https://forum.ircam.fr/article/detail/latent-terrain-dissecting-the-latent-space-of-neural-audio-autoencoder-by-shuoyang-jasper-zheng/)
 
-**VST Plugin Preset Management**:
-- [Making Audio Plugins Part 6: Presets](https://www.martin-finke.de/articles/audio-plugins-006-presets/)
-- [GitHub - vst-presets: Curated collection of VST presets](https://github.com/delaudio/vst-presets)
+**Library (lucidrains vector-quantize-pytorch):**
+- [vector-quantize-pytorch GitHub](https://github.com/lucidrains/vector-quantize-pytorch)
+- [Residual Vector Quantization Explained (Scott Hawley)](https://drscotthawley.github.io/blog/posts/2023-06-12-RVQ.html)
 
-**Small Dataset Machine Learning**:
-- [Make the Most of Limited Datasets Using Audio Data Augmentation](https://www.edgeimpulse.com/blog/make-the-most-of-limited-datasets-using-audio-data-augmentation/)
-- [A Complete Guide to Audio Datasets](https://huggingface.co/blog/audio-datasets)
-- [Working with Audio Data for Machine Learning in Python](https://www.comet.com/site/blog/working-with-audio-data-for-machine-learning-in-python/)
-
-**Latent Space Exploration**:
-- [A Mapping Strategy for Interacting with Latent Audio Synthesis](https://arxiv.org/html/2407.04379v1)
-- [Latent Timbre Synthesis](https://github.com/ktatar/latent-timbre-synthesis)
-- [TIMBRE LATENT SPACE: EXPLORATION AND CREATIVE ASPECTS](https://acids-ircam.github.io/timbre_exploration/)
-- [Making a Neural Synthesizer Instrument](https://magenta.tensorflow.org/nsynth-instrument)
-
-**Audio Export & DAW Integration**:
-- [Sample Rate & Bit Depth Explained](https://www.blackghostaudio.com/blog/sample-rate-bit-depth-explained)
-- [How to Export Your Mix for Mastering](https://veniamastering.studio/blogs/learn/how-to-export-your-mix-for-mastering)
-- [Exporting Your Song: Best Bouncing Settings Explained](https://splice.com/blog/exporting-your-track/)
-
-**Incremental Training**:
-- [Online incremental learning for audio classification](https://arxiv.org/html/2508.20732)
-- [Incremental Learning: Adaptive and real-time machine learning](https://blogs.mathworks.com/deep-learning/2024/03/04/incremental-learning-adaptive-and-real-time-machine-learning/)
-
-**Autolume (Visual Equivalent)**:
-- [Autolume 2.0: A GAN-based No-Coding Small Data](https://creativity-ai.github.io/assets/papers/49.pdf)
-- [Autolume-Live: Interface for Live Visual Performances using GANs](https://summit.sfu.ca/_flysystem/fedora/2023-07/etd22382.pdf)
-
-**Soundscape Generation**:
-- [Soundscaping Guide - The Art Of Soundscape Creation](https://www.audiocube.app/blog/soundscaping)
-- [Ambient Suite | Tools for Textural Soundscapes](https://puremagnetik.com/products/drone-texture-suite-tools-for-textural-soundscapes)
-
-**Musical Parameters (Timbre/Harmony/Temporal/Spatial)**:
-- [Timbre Space as a Musical Control Structure](https://cnmat.berkeley.edu/sites/default/files/attachments/Timbre-Space.pdf)
-- [Timbre and harmony: interpolations of timbral structures](https://saariaho.org/media/pages/texts/896aa80481-1717024697/timbre-and-harmony-interpolations-of-timbral-structures.pdf)
-
-**Training Progress Visualization**:
-- [Guide 3: Model Training & Fine-tuning | Universal TTS Guide](https://actepukc.github.io/Universal-TTS-Guide/guides/3_MODEL_TRAINING.html)
-- [10 Best Tools for Machine Learning Model Visualization (2024)](https://dagshub.com/blog/best-tools-for-machine-learning-model-visualization/)
-
-**Creative Version Control**:
-- [Towards Creative Version Control](https://www.researchgate.net/publication/365331522_Towards_Creative_Version_Control)
-- [Undo and redo Mixer and plug-in adjustments in Logic Pro](https://support.apple.com/guide/logicpro/undo-and-redo-mixer-and-plug-in-adjustments-lgcpe30a5c12/mac)
+**Gradio UI Components:**
+- [Gradio Audio Component Docs](https://www.gradio.app/docs/gradio/audio)
+- [Gradio Audio Waveform Visualization Request](https://github.com/gradio-app/gradio/issues/9740)
 
 ---
-*Feature research for: Small Dataset Generative Audio Tool*
-*Researched: 2026-02-12*
-*Confidence: MEDIUM (WebSearch-verified with multiple sources; some findings from official docs/GitHub; no Context7 verification available for domain)*
+*Feature research for: VQ-VAE Audio Code Manipulation (v1.1 milestone)*
+*Researched: 2026-02-21*
+*Confidence: MEDIUM-HIGH (RVQ-VAE architecture patterns well-established in literature; code manipulation UI paradigm is novel with limited prior art; small-dataset implications extrapolated from codebook collapse research)*

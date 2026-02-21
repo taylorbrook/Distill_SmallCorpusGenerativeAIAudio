@@ -1,382 +1,414 @@
-# Domain Pitfalls: Small-Dataset Generative Audio
+# Pitfalls Research: Adding RVQ-VAE + Autoregressive Prior to Small-Dataset Audio System
 
-**Domain:** High-fidelity generative audio from small personal datasets
-**Researched:** 2026-02-12
+**Domain:** Residual Vector Quantization VAE with autoregressive prior for small-dataset (5-500 files) audio generation
+**Researched:** 2026-02-21
 **Confidence:** MEDIUM-HIGH
+**Context:** Replacing existing continuous ConvVAE + PCA exploration with discrete RVQ-VAE + autoregressive prior + code manipulation UI. Existing codebase has mel spectrogram pipeline, training loop, model persistence, Gradio UI, and CLI.
 
-This research identifies critical pitfalls specific to building generative audio systems that train on 5-500 audio files and aim for 48kHz/24-bit quality with musically meaningful controls.
+This research focuses on pitfalls **specific to adding RVQ-VAE and an autoregressive prior** to the existing system. General audio ML pitfalls (preprocessing, MPS issues, normalization) are covered in the v1.0 research and remain valid but are not repeated here except where behavior changes under quantization.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Overfitting Without Detection
+### Pitfall 1: Codebook Collapse on Small Datasets
+
+**Severity:** CRITICAL -- renders the entire RVQ-VAE architecture useless
 
 **What goes wrong:**
-With 5-20 audio files, models memorize the exact training samples instead of learning generalizable audio features. The model becomes a lookup table that can only reproduce training data, not explore the sound space.
+Most codebook entries go unused ("dead codes"). With 5-50 audio files producing perhaps 25-500 training chunks, the encoder quickly converges to mapping all inputs to a handful of codes. Remaining codes never receive gradient updates and their embeddings drift into irrelevance. In the worst case, a 512-entry codebook uses only 5-15 entries, producing a glorified lookup table with no generative capacity. ERVQ research found codebook utilization as low as 14.7% even on large datasets; with small datasets the problem is far worse.
 
 **Why it happens:**
-Neural audio models have millions of parameters but tiny datasets. Current text-to-sound generation models face significant overfitting issues on small-scale datasets (fewer than 51k text-audio pairs). With personal datasets of 5-500 files, this problem becomes acute. Developers focus on reconstruction quality metrics without measuring generalization.
+- **Insufficient data diversity:** 5-50 files produce limited spectral variety. The encoder finds a few "good enough" codes and stops exploring.
+- **Winner-take-all dynamics:** Nearest-neighbor assignment in VQ means codes near the initial cluster centers attract all assignments; distant codes starve.
+- **EMA decay washes out sparse updates:** With EMA-based codebook updates (standard in lucidrains/vector-quantize-pytorch), codes that receive rare assignments get their embeddings pulled toward the running mean, which is dominated by the few active codes.
+- **Residual stages amplify collapse:** In RVQ, if the first quantizer collapses, subsequent residual quantizers receive low-entropy residuals, causing cascading collapse across all levels.
 
 **How to avoid:**
-1. **Validation set from day one:** Even with 10 files, hold out 2 for validation. Never evaluate on training data alone.
-2. **Perceptual diversity metrics:** Track not just reconstruction loss but also measure if generated samples are distinct from training samples using perceptual distance metrics (DPAM, ViSQOL).
-3. **Regularization stack:** Use dropout (0.2-0.3), weight decay, and VAE beta-scheduling to prevent exact memorization.
-4. **Data augmentation pipeline:** Time-stretching, pitch shifting, and noise injection to artificially expand the dataset. SpecAugment is particularly effective for spectrogram-based models.
-5. **Preference optimization (DPO):** Encourages greater exploration in the model's output space, preventing mode collapse and fostering more diverse augmentations while mitigating overfitting risks.
+1. **Scale codebook size to dataset:** Use `codebook_size = min(64, num_training_chunks // 4)` as a starting heuristic. For 5 files (~25 chunks), use 8-16 codes per level. For 500 files (~2500 chunks), use 64-128. Never use 512+ with <200 files.
+2. **Enable k-means initialization:** Set `kmeans_init=True, kmeans_iters=10` in `VectorQuantize`. This seeds codebook entries from actual data distribution rather than random initialization.
+3. **Set dead code threshold:** Use `threshold_ema_dead_code=2` (replace codes with EMA cluster size below 2 with random batch vectors). This is the SoundStream approach and is built into lucidrains.
+4. **Reduce number of RVQ levels:** Use 2-4 quantizer levels for small datasets, not 8-16. Each level needs sufficient residual signal to learn meaningful codes. Start with `num_quantizers=4`.
+5. **Add codebook balancing loss:** Penalize uneven code assignment distribution. Add an entropy-based term: `balance_loss = -sum(p_i * log(p_i))` where `p_i` is the assignment frequency of code `i`. Maximize this entropy.
+6. **Use affine parametrization:** Set `affine_param=True` in lucidrains VectorQuantize. This learns per-codebook-dimension scale and shift, helping codes specialize without collapsing.
 
 **Warning signs:**
-- Validation loss diverges from training loss after 10-20 epochs
-- Generated samples sound nearly identical to training samples
-- Latent space interpolation produces abrupt transitions instead of smooth morphing
-- KL divergence term in VAE approaches zero (posterior collapse indicator)
-- Model outputs one of a few "favorite" samples repeatedly
+- Codebook utilization < 50% after first 10 epochs (measure: unique codes used / total codebook size per batch)
+- Commitment loss drops to near-zero (encoder outputs already match the few active codes perfectly)
+- Reconstruction loss plateaus early despite low utilization (model can't improve because it lacks codes)
+- All training samples map to the same few code sequences
+- Per-code assignment histogram is extremely skewed (>80% of assignments go to <10% of codes)
+
+**Specific thresholds:**
+- Healthy utilization: >70% of codes used at least once per epoch
+- Warning zone: 30-70% utilization
+- Crisis: <30% utilization -- stop training, reduce codebook size, re-initialize
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Build validation framework from the start. Phase 2 (Quality & Evaluation) - Implement perceptual metrics to catch overfitting early.
+Phase 1 (RVQ-VAE Architecture) -- codebook sizing, k-means init, dead code reset, utilization monitoring must all be built into the quantizer layer from the start. Cannot be retrofitted.
 
 ---
 
-### Pitfall 2: Audio Preprocessing Pipeline Incompatibilities
+### Pitfall 2: Prior Model Memorizes Training Sequences
+
+**Severity:** CRITICAL -- makes generation useless (reproduces training data verbatim)
 
 **What goes wrong:**
-Audio loaded/preprocessed with one library (librosa) during training but different library (torchaudio) during inference causes model quality degradation or complete failure. Spectrograms computed differently lead to distribution shift.
+The autoregressive prior (Transformer/GPT-style) trained on code sequences from the VQ-VAE memorizes the exact sequences from the training set. With 5-50 files producing only 25-500 code sequences, even a small Transformer has enough capacity to memorize them all. Generated sequences are verbatim copies of training data, not novel combinations.
 
 **Why it happens:**
-torchaudio MelScale uses non-default librosa options (norm=None, htk=True), creating different mel filter banks. Librosa returns raw spectrograms while torchaudio converts to dB scale. Data precision differs between libraries. Developers copy preprocessing code from different sources without understanding parameter alignment.
+- **Extreme data scarcity for sequence models:** A Transformer trained on 50 code sequences of length 94 (1 second at current spectrogram resolution) has ~4,700 tokens total. Even a tiny GPT-2 style model (2M parameters) can memorize this trivially.
+- **No quantization regularization on prior:** Unlike the VQ-VAE where quantization acts as a bottleneck, the prior has direct access to the exact code sequences and can memorize them.
+- **Standard training objectives reward memorization:** Cross-entropy loss on next-token prediction is minimized by perfect recall of training sequences. With few sequences, the model reaches near-zero loss by memorizing rather than learning distributional patterns.
 
 **How to avoid:**
-1. **Single library consistency:** Choose either librosa OR torchaudio for entire pipeline (train + inference). Document this decision in requirements.txt.
-2. **Explicit parameter documentation:** Save all preprocessing parameters (sample_rate, n_fft, hop_length, n_mels, window, norm, htk, power) in model config.
-3. **Preprocessing module:** Create a preprocessing.py that encapsulates all audio loading and transformation with frozen parameters.
-4. **Validation test:** Load same audio file through train and inference pipelines, assert outputs are identical (within floating point tolerance).
-5. **Visual inspection:** Plot mel spectrograms from training and inference side-by-side to catch mismatches early.
+1. **Tiny prior model:** Use an extremely small Transformer. For 5-50 files: 2 layers, 4 heads, embed_dim=128, ~500K parameters. For 50-200 files: 4 layers, 4 heads, embed_dim=256, ~2M parameters. For 200-500 files: 6 layers, 8 heads, embed_dim=512, ~10M parameters. The model should be too small to memorize but large enough to learn bigram/trigram patterns.
+2. **Heavy dropout:** Use dropout=0.3-0.5 on attention and feed-forward layers. This is much higher than standard Transformer training but essential for small data.
+3. **Aggressive early stopping:** Monitor validation perplexity. Stop when validation perplexity starts increasing. With 50 files, this might be after 20-50 epochs.
+4. **Token-level augmentation:** During prior training, randomly replace 5-10% of input codes with random codes (input corruption). Forces the model to learn local patterns rather than memorizing global sequences.
+5. **Temperature/top-k sampling at inference:** Even a partially memorized model can produce novel outputs with `temperature=0.8-1.2` and `top_k=10-20`. But this is a band-aid, not a fix.
+6. **Train prior on augmented VQ-VAE outputs:** Encode augmented versions of training audio through the VQ-VAE to produce more diverse code sequences for prior training. This multiplies training data for the prior without new audio.
+7. **Sequence-level data augmentation:** Randomly crop, reverse, or concatenate code sequences to increase training diversity.
 
 **Warning signs:**
-- Model works in training but produces noisy/distorted output in inference
-- Switching between CPU/GPU changes audio quality
-- Adding torchaudio after using librosa breaks existing code
-- Spectrograms look visually different between training and generation
+- Prior training loss drops below 0.1 within 10 epochs (memorization)
+- Validation perplexity is near 1.0 (perfect prediction = memorization)
+- Generated sequences have >50% exact n-gram overlap with training sequences (measure 8-gram overlap)
+- Temperature=1.0 sampling produces only slight variations of training sequences
+- Increasing temperature produces incoherent output rather than novel combinations (sharp transition from memorized to random)
+
+**Specific thresholds:**
+- Healthy prior: validation perplexity between 2.0 and 20.0 (depends on codebook size)
+- Memorized: validation perplexity < 1.5
+- Underfitting: validation perplexity > 50.0
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Lock preprocessing pipeline early and validate consistency.
+Phase 2 (Autoregressive Prior) -- model sizing, regularization, augmentation strategy, and memorization detection must all be designed together. Prior architecture cannot be designed independently of dataset size.
 
 ---
 
-### Pitfall 3: Aliasing Artifacts at 48kHz
+### Pitfall 3: Cascading Codebook Collapse Across RVQ Levels
+
+**Severity:** CRITICAL -- unique to RVQ, not present in single-level VQ-VAE
 
 **What goes wrong:**
-At 48kHz sample rate, neural vocoders and generators produce high-frequency aliasing artifacts: metallic ringing, mirrored frequency content, tonal artifacts at constant frequencies. Audio sounds "digital" or has unnatural shimmer.
+In Residual VQ, each level quantizes the residual error from the previous level. If the first quantizer captures most of the signal (because the codebook is too large or the data is too uniform), residual levels receive near-zero input. The later codebooks collapse completely because they have nothing meaningful to encode. With small, homogeneous datasets (e.g., 20 ambient drone recordings), the first codebook might capture the entire signal.
 
 **Why it happens:**
-Unconstrained nonlinear activations (ReLU, tanh) generate infinite harmonics exceeding Nyquist frequency (24kHz for 48kHz audio), causing "folded-back" aliasing. ConvTranspose upsampling copies mirrored low-frequency content to high frequencies creating "mirrored" aliasing. Combination of periodicity and DC bias creates tonal ringing artifacts.
+- **Small datasets have less spectral diversity:** 20 drone recordings might span a narrow spectral range. One codebook with 64 entries might cover the entire space with low residual error.
+- **Residual signal shrinks exponentially:** Each RVQ level captures less information. With limited data variety, the residual after level 1 might already be noise-floor.
+- **No inter-codebook diversity enforcement:** Standard RVQ treats each level independently. Nothing prevents level 2 from learning the same codes as level 1.
 
 **How to avoid:**
-1. **Anti-aliased activations:** Use oversampling and anti-derivative anti-aliasing on activation functions before downsampling.
-2. **Replace ConvTranspose:** Avoid ConvTranspose1d for upsampling. Use interpolation (nearest/linear) followed by Conv1d instead.
-3. **Multi-band decomposition:** Follow RAVE's approach with PQMF multi-band decomposition to handle different frequency bands separately.
-4. **Low-pass filtering:** Apply explicit low-pass filters before upsampling operations.
-5. **Spectral loss components:** Add multi-resolution STFT loss to penalize high-frequency artifacts during training.
+1. **Fewer quantizer levels:** Start with `num_quantizers=2` for tiny datasets (5-50 files), up to `num_quantizers=4` for larger ones (200-500). Only add levels if reconstruction quality demands it.
+2. **Monitor per-level utilization independently:** Track codebook utilization for each RVQ level separately. If level N has <20% utilization, you have too many levels.
+3. **Monitor per-level commitment loss:** If commitment loss for levels 3+ is near zero, those levels are idle.
+4. **Use quantize_dropout from lucidrains:** `quantize_dropout=True` randomly drops quantizer levels during training, forcing each level to contribute. This prevents the first level from dominating.
+5. **Progressive level addition:** Train with 1 quantizer level first. Add level 2 after level 1 converges. Continue until reconstruction quality saturates or utilization drops below threshold.
 
 **Warning signs:**
-- High-frequency "sparkle" or "shimmer" in generated audio
-- Metallic ringing that wasn't in training data
-- Spectrograms show mirrored patterns in high frequencies
-- Constant-frequency tones appear in output
-- Artifacts worsen at higher sample rates (48kHz worse than 16kHz)
+- Reconstruction loss barely improves when adding quantizer levels beyond the first 1-2
+- Later codebook levels have <10% utilization while first level has >90%
+- Commitment loss for later levels is 10x smaller than for the first level
+- Code sequences from later levels are nearly constant (same code repeated)
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Choose anti-aliased architecture from start. Phase 2 (Quality & Evaluation) - Implement spectral analysis to detect aliasing.
+Phase 1 (RVQ-VAE Architecture) -- number of quantizer levels must be adaptive to dataset size, not hard-coded.
 
 ---
 
-### Pitfall 4: Uninterpretable Latent Space Controls
+### Pitfall 4: VQ-VAE Reconstruction Degrades Audio Quality vs. Continuous VAE
+
+**Severity:** CRITICAL -- users will reject the v1.1 upgrade if audio quality drops
 
 **What goes wrong:**
-Trained model has latent dimensions but they don't correspond to musically meaningful parameters (pitch, brightness, attack time). Sliders produce unpredictable or correlated changes. Users can't explore sound space intentionally.
+The existing continuous VAE produces smooth mel spectrogram reconstructions (MSE-optimized continuous output). VQ-VAE produces quantized reconstructions that, when converted back to audio via Griffin-Lim, sound worse than the continuous VAE output. Quantization introduces step-function artifacts in the mel spectrogram, and Griffin-Lim amplifies these into audible distortion.
 
 **Why it happens:**
-Standard VAE/GAN training doesn't enforce semantic meaning on latent dimensions. Without regularization, latent space learns arbitrary correlations. Dimensions become entangled (one slider affects multiple perceptual attributes). Models optimize for reconstruction, not controllability.
+- **Quantization is lossy by design:** Mapping continuous encoder output to nearest codebook entry discards information. With small codebooks (necessary for small data), this quantization error is significant.
+- **Griffin-Lim magnifies quantization artifacts:** The existing mel-to-waveform pipeline uses Griffin-Lim (128 iterations). Quantization artifacts in mel spectrograms become phase-incoherent noise in waveforms. Griffin-Lim assumes smooth spectrograms; stepped/quantized spectrograms violate this assumption.
+- **No commitment loss tuning:** Too-high commitment weight forces encoder to match codebook too aggressively, losing fine detail. Too-low commitment weight causes encoder-codebook divergence and unstable training.
 
 **How to avoid:**
-1. **Latent space regularization:** Force specific dimensions to map to target attributes (pitch, spectral centroid, RMS). Use supervised losses during training.
-2. **Disentanglement techniques:** Apply beta-VAE with beta > 1 to encourage dimension independence, or use Total Correlation loss.
-3. **Sparse autoencoders (SAE):** Train SAE on top of learned latents to find linear mappings to interpretable acoustic features.
-4. **Post-training analysis:** Systematically vary each latent dimension and measure which acoustic properties change using audio analysis (librosa features).
-5. **User feedback loop:** Build UI that shows which perceptual attributes change as users adjust sliders, allowing empirical validation.
+1. **Commitment weight tuning:** Start with `commitment_weight=0.25` (original VQ-VAE paper default). For small datasets, try 0.1-0.5 range. Monitor both reconstruction loss and commitment loss; neither should dominate.
+2. **Use codebook_dim projection:** Set `codebook_dim=8-16` (lower than encoder output dim) via lucidrains. This projects to a lower-dimensional space for quantization, then projects back up. Reduces quantization error at the cost of some codebook expressiveness.
+3. **Multi-scale spectral loss:** Replace pure MSE with a combination of MSE + multi-resolution STFT loss. This forces the decoder to produce spectrograms that sound good, not just look close numerically.
+4. **Plan for neural vocoder upgrade:** Griffin-Lim is the current bottleneck. When reconstruction quality hits a ceiling, a HiFi-GAN vocoder trained on VQ-VAE reconstructions would dramatically improve quality. Flag this as a future enhancement, not a blocker.
+5. **A/B comparison framework:** Build a side-by-side comparison between v1.0 continuous VAE output and v1.1 VQ-VAE output using the same audio inputs. Quality must be comparable or better before shipping.
 
 **Warning signs:**
-- Moving one slider changes multiple unrelated audio characteristics
-- Latent interpolations produce incoherent transitions
-- Users report sliders "don't do what they say"
-- Extreme latent values produce noise/silence instead of valid audio
-- Different audio samples map to similar latent codes
+- VQ-VAE reconstruction loss is 2x+ higher than continuous VAE on same data
+- Generated audio has audible stepping/clicking artifacts
+- Listening tests show users prefer v1.0 output over v1.1
+- Spectrograms show visible "staircase" patterns in frequency or time
 
 **Phase to address:**
-Phase 3 (Latent Space Exploration) - Primary focus on building interpretable controls. Phase 4 (UI Polish) - Validate controls through user testing.
+Phase 1 (RVQ-VAE Architecture) -- decoder quality and loss function design. A/B comparison should be a gating criterion for the milestone.
 
 ---
 
-### Pitfall 5: Posterior Collapse in VAE Training
+### Pitfall 5: Training Loop Integration Breaks Existing Functionality
+
+**Severity:** CRITICAL -- the codebase has 17,520 LOC across 186 files with extensive integration
 
 **What goes wrong:**
-The VAE's latent space becomes uninformative - the KL divergence term approaches zero and the decoder ignores latent codes. Model generates same generic output regardless of latent input. Interpolation in latent space has no effect.
+Replacing the continuous VAE with RVQ-VAE breaks the training loop, model persistence, generation pipeline, and UI in cascading ways. The existing system passes `(recon, mu, logvar)` tuples everywhere; VQ-VAE returns `(recon, indices, commit_loss)` instead. KL annealing, free bits, posterior collapse monitoring -- all become irrelevant and must be replaced. Checkpoint format changes break model loading. Generation pipeline assumes `sample from N(0,1) -> decode` which is meaningless for VQ-VAE.
 
 **Why it happens:**
-When decoder is too powerful (especially with autoregressive components), it learns to generate audio without using latent information. KL term in ELBO loss gets minimized to near-zero as encoder learns to match prior exactly. Small datasets exacerbate this since decoder can memorize patterns without needing latent context.
+- **Deep coupling to continuous VAE interface:** `vae_loss()` expects `(mu, logvar)`. `train_epoch()` passes `kl_weight` and `free_bits`. `validate_epoch()` monitors `kl_divergence`. `GenerationPipeline` calls `model.sample()` with random latent vectors. `persistence.py` saves `latent_dim` and reconstructs `ConvVAE`. All of this is hardwired to the continuous VAE.
+- **Latent space analysis assumes continuous space:** The PCA-based `LatentSpaceAnalyzer` operates on continuous latent vectors from the encoder. VQ-VAE produces discrete indices, not continuous vectors. The entire controls/mapping system (sliders, presets) is built on PCA of continuous latents.
+- **Clean break declared but integration surface is large:** PROJECT.md says "clean break from v1.0 models" but the codebase has 186 files. Untangling continuous VAE assumptions from each is non-trivial.
 
 **How to avoid:**
-1. **Beta-VAE scheduling:** Start with beta=0 and gradually increase KL weight to final value (0.0001 → 1.0) over training. Prevents KL collapse early in training.
-2. **KL floor/threshold:** Implement delta-VAE constraint ensuring minimum KL divergence (e.g., KL >= 0.5).
-3. **Free bits:** Allow first N nats of KL divergence to be "free" (not penalized), forcing encoder to use at least minimal information.
-4. **Monitor KL per dimension:** Track KL contribution per latent dimension. If any drop below threshold, adjust regularization.
-5. **Decoder capacity control:** Limit decoder capacity relative to encoder to force dependence on latent codes.
-6. **Observation noise tuning:** Carefully tune reconstruction loss variance weighting to balance reconstruction vs. KL terms.
+1. **Map the full integration surface first:** Before writing any VQ-VAE code, identify every file that imports from `models.vae`, `models.losses`, `training.loop`, `inference.generation`, `controls.*`, or `models.persistence`. Create a dependency graph.
+2. **Design the new interface before implementing:** Define the VQ-VAE model's public API: `forward()` returns what? `encode()` returns what? `decode()` takes what? Write type stubs first.
+3. **Implement behind a feature flag or parallel module:** Create `models/vqvae.py` alongside existing `models/vae.py`. Create `models/vq_losses.py` alongside existing `models/losses.py`. Do not delete old code until new code passes all tests.
+4. **Update persistence format with version bump:** Increment `SAVED_MODEL_VERSION` to 2. New format stores codebook state, spectrogram config, and VQ-specific metadata (num_quantizers, codebook_size, codebook_dim). Load function must detect version and handle both (or reject v1 gracefully).
+5. **Replace generation pipeline completely:** VQ-VAE generation goes through the autoregressive prior, not through random sampling. `GenerationPipeline.generate()` must be rewritten to: prior samples codes -> decoder produces mel -> Griffin-Lim produces audio.
+6. **Explicitly deprecate and remove PCA/slider controls:** The controls system (analyzer, features, mapping, serialization) is built entirely on continuous latent space PCA. For VQ-VAE, the "controls" become code manipulation (swap, blend, interpolate codes). This is a different paradigm, not an adaptation.
 
 **Warning signs:**
-- KL divergence term drops below 0.1 (or configured threshold)
-- Validation reconstruction loss stays constant while training loss decreases
-- Sampling from prior produces coherent audio (means decoder ignores latents)
-- Different latent codes produce identical outputs
-- Gradients flowing into encoder approach zero
+- `ImportError` or `AttributeError` in seemingly unrelated modules after VQ-VAE integration
+- Tests pass for VQ-VAE in isolation but fail in full pipeline
+- UI breaks because it expects continuous latent vector sliders
+- Checkpoint loading fails silently (loads v1 checkpoint into v2 model)
+- Generation produces silence or noise because pipeline still calls old `model.sample()`
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Implement KL monitoring and beta-scheduling from initial architecture.
-
----
-
-### Pitfall 6: Training Instability in GAN Components
-
-**What goes wrong:**
-Discriminator becomes too strong, generator gradients vanish. Or generator produces mode collapse (same outputs repeatedly). Training oscillates wildly or diverges entirely.
-
-**Why it happens:**
-GANs have inherent training instability: discriminator/generator imbalance, vanishing gradients when discriminator is perfect, mode collapse when generator finds "easy wins". Small datasets mean discriminator can easily overfit to training samples, making generator training impossible.
-
-**How to avoid:**
-1. **Gradient penalties:** Use Wasserstein loss with gradient penalty (WGAN-GP) or R1/R2 regularization for stable training.
-2. **Spectral normalization:** Apply spectral norm to discriminator layers to constrain Lipschitz constant.
-3. **Balanced update schedule:** Update discriminator less frequently than generator (e.g., 1:3 ratio), or use adaptive schedules based on loss ratios.
-4. **Progressive training:** Start with low-resolution audio, gradually increase to 48kHz. Stabilizes early training.
-5. **Multi-scale discriminators:** Use discriminators at different time scales (waveform, mel-spectrogram, multi-resolution STFT) to prevent mode collapse.
-6. **Monitor gradient norms:** Track generator and discriminator gradient norms. If ratio exceeds 10:1 in either direction, adjust learning rates.
-
-**Warning signs:**
-- Discriminator accuracy > 95% (too strong)
-- Generator loss increases continuously
-- Generated audio becomes noise or silence
-- Mode collapse: all outputs sound similar
-- Loss oscillations with amplitude > 2x
-- Gradient norms explode (>100) or vanish (<0.001)
-
-**Phase to address:**
-Phase 1 (Core Training Pipeline) - Build with stable GAN formulation (WGAN-GP, spectral norm) from start.
-
----
-
-### Pitfall 7: MPS (Apple Silicon) vs CUDA Behavior Differences
-
-**What goes wrong:**
-Model trains fine on CUDA GPUs but fails or produces different results on Apple Silicon MPS. Memory leaks on MPS. Non-contiguous tensor errors. Numerical differences between backends.
-
-**Why it happens:**
-MPS has stricter buffer size limits than CUDA due to Metal memory allocation constraints. MPS doesn't support strided tensor access for some operations, expecting contiguous memory. Reported memory leaks in PyTorch 2.7.0 MPS backend. Kernel implementations differ, causing numerical divergence.
-
-**How to avoid:**
-1. **Explicit contiguous calls:** Use `.contiguous()` before operations that might fail on MPS, especially after reshape/transpose.
-2. **Memory monitoring:** Implement memory tracking and periodic garbage collection (`torch.mps.empty_cache()`) on MPS devices.
-3. **Batch size adjustment:** MPS buffer limits may require smaller batches than CUDA - make batch size configurable.
-4. **Numerical validation:** Run small-scale training on both CUDA and MPS, compare outputs to verify consistency.
-5. **Backend abstraction:** Detect device at runtime and apply backend-specific configurations (batch size, memory management).
-6. **Gradio memory management:** Implement explicit cleanup in Gradio interface functions to prevent memory accumulation.
-
-**Warning signs:**
-- Code works on CUDA but crashes on MPS with "buffer size exceeded"
-- Memory usage increases continuously on MPS (leak)
-- "Expected contiguous tensor" errors on MPS
-- Training results differ significantly between MPS and CUDA
-- Gradio interface slows down over multiple generations
-
-**Phase to address:**
-Phase 1 (Core Training Pipeline) - Test on both backends early. Phase 4 (UI Polish) - Handle memory management in Gradio.
-
----
-
-### Pitfall 8: Incorrect Audio Normalization Destroying Dynamics
-
-**What goes wrong:**
-Aggressive normalization flattens dynamic range, making quiet sounds loud and loud sounds compressed. Or inconsistent normalization between files trains model on incompatible distributions. Generated audio has unnatural dynamics.
-
-**Why it happens:**
-Per-file peak normalization makes whisper and shout have same amplitude. Global normalization using wrong dataset statistics. Applying different normalization in training vs inference. Not preserving original dynamic relationships in small, related dataset.
-
-**How to avoid:**
-1. **Loudness normalization over peak:** Use perceptual loudness (LUFS) normalization instead of peak, preserving dynamic range.
-2. **Consistent statistics:** Compute normalization statistics across entire dataset, save in config, apply same transform to training and inference.
-3. **RMS normalization:** For preserving dynamics, normalize by RMS energy rather than peak amplitude.
-4. **Optional: No normalization:** If dataset is already volume-consistent, skip normalization to preserve exact dynamics.
-5. **Validate reconstruction:** Listen to normalized→denormalized audio to ensure dynamics preserved.
-
-**Warning signs:**
-- Quiet audio files become as loud as loud files in preprocessing
-- Training samples sound compressed compared to originals
-- Generated audio has unnatural volume levels
-- Whispers generate at same amplitude as shouts
-- Clipping in generated audio despite normalized training
-
-**Phase to address:**
-Phase 1 (Core Training Pipeline) - Define normalization strategy early and validate on sample data.
+Must be addressed across ALL phases. Phase 1 should map the integration surface and define new interfaces. Each subsequent phase should update the relevant integration points.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 9: Evaluating Only with Reconstruction Metrics
+### Pitfall 6: Commitment Loss Instability
+
+**Severity:** MODERATE -- causes training to diverge but is recoverable
 
 **What goes wrong:**
-Model achieves low MSE/L1 loss but generated audio sounds bad. Metrics don't correlate with perceptual quality.
+Commitment loss (which pushes encoder outputs toward codebook entries) grows unboundedly during training. The encoder outputs drift far from codebook entries, commitment loss balloons, gradients become huge, and training diverges with NaN losses.
 
 **Why it happens:**
-L1/L2 losses measure pixel-wise difference, not perceptual similarity. They penalize phase shifts that are inaudible and ignore audible artifacts if they're "small" numerically.
+- **Encoder and codebook learning rates are mismatched:** If the encoder updates faster than the codebook (or vice versa), a gap opens between encoder outputs and codebook entries. Commitment loss tries to close this gap but overshoots.
+- **EMA decay too slow:** With `decay=0.99` (default), the codebook updates slowly. If the encoder adapts quickly, the codebook falls behind.
+- **Small batches amplify noise:** With 5 files and batch_size=2, each batch is a poor estimate of the data distribution. Codebook EMA updates based on noisy batches cause oscillation.
 
 **How to avoid:**
-1. **Multi-metric evaluation:** Combine reconstruction loss with perceptual metrics (PESQ, ViSQOL, DPAM).
-2. **Spectral losses:** Add multi-resolution STFT loss and mel spectrogram loss.
-3. **Human evaluation protocol:** Regular listening tests, even informal, to validate metrics.
-4. **Phase-aware metrics:** Use metrics that account for phase (not just magnitude spectrograms).
+1. **Use EMA with appropriate decay:** Set `decay=0.8` for small datasets (faster codebook adaptation), `decay=0.95` for larger ones. Default 0.99 is too slow for small data.
+2. **Moderate commitment weight:** Use `commitment_weight=0.25` (paper default). If loss diverges, reduce to 0.1. Lucidrains defaults to `commitment_weight=1.0` which can be too aggressive.
+3. **Gradient clipping on full loss:** The existing training loop already clips at `max_norm=1.0`. Keep this, but monitor commitment loss gradients specifically.
+4. **Batch normalization before quantization:** Normalize encoder outputs before VQ layer to keep magnitudes stable. Lucidrains supports this via `affine_param=True`.
 
 **Warning signs:**
-- Loss decreases but audio quality doesn't improve
-- Generated audio has artifacts but good loss values
-- Model optimizes for inaudible differences
+- Commitment loss increases monotonically over epochs instead of stabilizing
+- NaN losses appear intermittently (same pattern as existing MPS NaN issue but different cause)
+- Encoder output magnitudes grow continuously (monitor L2 norm of encoder outputs)
+- Reconstruction loss stagnates while commitment loss dominates total loss
 
 **Phase to address:**
-Phase 2 (Quality & Evaluation) - Implement comprehensive evaluation suite.
+Phase 1 (RVQ-VAE Architecture) -- loss function design and hyperparameter defaults.
 
 ---
 
-### Pitfall 10: Ignoring Phase Information
+### Pitfall 7: Inadequate Code Utilization Monitoring
+
+**Severity:** MODERATE -- without monitoring, you cannot diagnose most other pitfalls
 
 **What goes wrong:**
-Model trained on magnitude spectrograms only, using Griffin-Lim for phase reconstruction. Generated audio sounds "phasey" or has artifacts.
+Training proceeds with apparently decreasing loss, but the model is secretly suffering from codebook collapse, dead codes, or skewed utilization. Without explicit monitoring, these problems are invisible until you try to generate and get poor results.
 
 **Why it happens:**
-Phase is critical for audio quality but often discarded for simplicity. Griffin-Lim is iterative approximation that introduces artifacts. Models trained without phase don't learn temporal fine structure.
+- **Reconstruction loss alone is insufficient:** A VQ-VAE can achieve decent reconstruction loss with only 10% of codebook utilized. The loss does not reveal whether the codebook is healthy.
+- **Existing training metrics are VAE-specific:** Current metrics track `recon_loss`, `kl_loss`, `kl_divergence`, and `overfitting_gap`. None of these apply to VQ-VAE. New metrics must be designed.
+- **Codebook health is multi-dimensional:** You need to track utilization per level, assignment entropy, dead code count, commitment loss per level, and codebook embedding drift. This is significantly more complex than VAE metrics.
 
 **How to avoid:**
-1. **Waveform-domain generation:** Generate audio directly as waveforms (RAVE approach) instead of spectrograms.
-2. **Neural vocoder:** Use dedicated phase-aware vocoder (HiFi-GAN, UnivNet) trained to reconstruct from mel spectrograms.
-3. **Complex-valued networks:** Train on complex spectrograms (magnitude + phase) using complex-valued layers.
-4. **Multi-resolution losses:** Include waveform-domain losses alongside spectral losses.
+1. **Track these metrics every epoch:**
+   - `codebook_utilization`: fraction of codes used at least once this epoch, per RVQ level
+   - `codebook_entropy`: entropy of code assignment distribution, per level (max entropy = uniform usage)
+   - `dead_code_count`: number of codes not assigned in last N epochs, per level
+   - `commitment_loss_per_level`: separate commitment loss for each RVQ level
+   - `perplexity`: exponential of codebook entropy (common VQ metric, target: close to codebook_size)
+2. **Add these to MetricsCallback and EpochMetrics:** Extend the existing metrics infrastructure. The current `EpochMetrics` dataclass needs VQ-specific fields.
+3. **Add these to UI loss chart:** The existing `loss_chart.py` component should display codebook utilization alongside reconstruction loss.
+4. **Set alert thresholds:** Log warnings (matching existing pattern) when utilization drops below 50% or when dead_code_count exceeds 25% of codebook_size.
+5. **lucidrains provides some metrics:** `VectorQuantize` returns `commit_loss` as part of output. But utilization and entropy must be computed separately from the returned `indices`.
 
 **Warning signs:**
-- Audio sounds "swooshy" or has flutter
-- Percussive transients are smeared
-- Vocoder artifacts apparent in output
+- This pitfall IS the warning sign for other pitfalls. If you skip monitoring, you will only discover problems through bad generation quality, which is expensive to debug.
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Choose waveform-domain architecture OR plan for neural vocoder integration.
+Phase 1 (RVQ-VAE Architecture) -- metrics must be designed alongside the model, not added later. The training loop refactor must include VQ-specific metrics from day one.
 
 ---
 
-### Pitfall 11: Inadequate Data Augmentation Strategy
+### Pitfall 8: Hyperparameter Sensitivity with Small Data
+
+**Severity:** MODERATE -- wrong hyperparameters waste training time, right ones require experimentation
 
 **What goes wrong:**
-Model sees only exact training samples, missing opportunities to learn invariances. Overfitting accelerates unnecessarily.
+The system has many more hyperparameters than the continuous VAE: codebook_size, num_quantizers, codebook_dim, commitment_weight, decay, threshold_ema_dead_code, and prior model size/dropout/learning_rate. These interact non-linearly, and optimal values depend heavily on dataset size. Hyperparameters that work for 500 files fail completely for 5 files.
 
 **Why it happens:**
-Audio augmentation is non-obvious compared to images (rotation/flip). Developers skip augmentation or apply transformations that change semantic content (e.g., extreme pitch shifts that make violin sound like viola).
+- **Literature hyperparameters are for large datasets:** EnCodec, SoundStream, and RAVE tune on thousands of hours of audio. Their codebook_size=1024, num_quantizers=8 settings are meaningless for 5-minute datasets.
+- **No established small-data VQ-VAE literature:** This is a relatively unexplored regime. Standard VQ-VAE papers assume abundant data.
+- **Interactions between parameters:** Reducing codebook_size requires adjusting commitment_weight and decay. Reducing num_quantizers changes how much each level must capture. These dependencies are not documented.
 
 **How to avoid:**
-1. **Conservative augmentation:** Small pitch shifts (±2 semitones), time stretching (0.9x-1.1x), subtle noise injection.
-2. **SpecAugment:** Most effective augmentation for spectrogram-based models - frequency/time masking.
-3. **Validate augmentation:** Listen to augmented samples to ensure they preserve identity.
-4. **Probabilistic application:** Apply each augmentation with 50% probability, not all at once.
-5. **Domain-specific choices:** For timbral learning, avoid pitch shifts. For pitch learning, avoid EQ changes.
+1. **Dataset-adaptive defaults (extend existing pattern):** The codebase already has `get_adaptive_config()` that scales regularization to dataset size. Extend this with VQ-specific presets:
+   ```
+   5-20 files:   codebook_size=16, num_quantizers=2, codebook_dim=8, commitment=0.1, decay=0.8
+   20-100 files:  codebook_size=32, num_quantizers=3, codebook_dim=16, commitment=0.25, decay=0.9
+   100-500 files: codebook_size=64, num_quantizers=4, codebook_dim=32, commitment=0.25, decay=0.95
+   ```
+2. **Validate defaults on representative datasets:** Before shipping, test defaults on at least 3 dataset sizes (5, 50, 500 files) across at least 2 audio domains (ambient, percussive). Record what works.
+3. **Expose key hyperparameters in UI:** Let users adjust codebook_size and num_quantizers through the training tab. Provide tooltips explaining tradeoffs.
+4. **Log all hyperparameters in checkpoints:** Already done for VAE config. Extend checkpoint format to include all VQ parameters for reproducibility.
 
 **Warning signs:**
-- Model overfits in <20 epochs
-- High variance in validation performance
-- Augmented samples sound like different instruments/sources
+- Same hyperparameters produce good results on 200-file dataset but fail on 10-file dataset
+- Users report "it doesn't work" without ability to diagnose whether hyperparameters are the cause
+- Training consistently fails on first attempt, requiring manual tuning
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Implement augmentation pipeline with validation.
+Phase 1 (RVQ-VAE Architecture) for defaults, Phase 3 (UI) for user-facing controls.
 
 ---
 
-### Pitfall 12: Training Without Compute Budgeting
+### Pitfall 9: Prior Model Architecture Mismatch for Short Sequences
+
+**Severity:** MODERATE -- wrong architecture choice wastes compute and produces poor generation
 
 **What goes wrong:**
-Training takes 8 hours on laptop, preventing iteration. Or GPU memory maxes out with batch size 1. Development grinds to halt.
+The autoregressive prior is designed as a standard Transformer with positional encodings for long sequences, but the actual code sequences are very short. A 1-second mel spectrogram at the current settings produces 94 time frames. With 4 RVQ levels, that is 4 x 94 = 376 tokens per sequence. With 50 training files, total training data is ~18,800 tokens. A standard Transformer with learned positional embeddings for 1024+ positions wastes capacity on positions that never occur.
 
 **Why it happens:**
-48kHz audio with long context windows (4+ seconds) creates huge tensors. Models designed for A100 GPUs don't fit on consumer hardware. No profiling before committing to architecture.
+- **Copy-pasting Transformer architectures from NLP/large-scale audio:** GPT-2 style architectures are designed for 1024+ token sequences. Applying them to 94-376 token sequences is wasteful.
+- **Flattening RVQ levels into a single sequence:** Some implementations flatten all RVQ levels into one long sequence (level1_code1, level2_code1, level1_code2, level2_code2, ...). This interleaving doubles or quadruples sequence length unnecessarily.
 
 **How to avoid:**
-1. **Profile early:** Measure batch size, memory usage, and iteration speed on target hardware before deep development.
-2. **Gradient checkpointing:** Trade compute for memory by recomputing activations in backward pass.
-3. **Mixed precision training:** Use torch.cuda.amp (fp16) to halve memory usage and speed up training.
-4. **Reasonable context lengths:** Start with 1-2 second audio chunks, increase only if necessary.
-5. **Progressive complexity:** Begin with smaller model, validate approach, then scale up.
+1. **Match positional encoding to actual sequence length:** Set max_seq_len to the actual code sequence length (e.g., 94 for 1-second chunks) plus a small margin, not 1024.
+2. **Consider level-parallel prediction:** Instead of flattening all RVQ levels into one sequence, predict each level conditioned on the previous level. This keeps sequences short (94 tokens per level) and is the VQ-VAE-2 approach.
+3. **Use a simple architecture:** For tiny datasets, a 2-layer LSTM might outperform a Transformer. Transformers need more data to learn attention patterns. Consider an LSTM baseline.
+4. **Relative positional encoding:** Use rotary positional embeddings (RoPE) instead of absolute positional embeddings. Better generalization for variable-length sequences.
 
 **Warning signs:**
-- Batch size limited to 1-2 due to memory
-- Training epoch takes >1 hour on available hardware
-- OOM errors during training
-- Development cycle is multi-day due to training time
+- Prior model has more parameters than the VQ-VAE itself (overparameterized)
+- Attention maps show uniform attention (no learned patterns) -- indicating too few training sequences
+- Prior generates fixed-length outputs that don't adapt to requested duration
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Profile and establish compute budget before architecture commitment.
+Phase 2 (Autoregressive Prior) -- architecture selection and sizing.
 
 ---
 
-### Pitfall 13: Catastrophic Forgetting in Incremental Training
+### Pitfall 10: Code Manipulation UI Exposes Raw Indices Without Musical Meaning
+
+**Severity:** MODERATE -- poor UX undermines the entire "sound DNA editor" concept
 
 **What goes wrong:**
-User adds new audio files and retrains. Model loses ability to generate previous sounds, only produces new ones.
+The code manipulation UI shows raw codebook indices (e.g., "Code at position 47: index 23 from level 2") which means nothing to a musician. Users cannot predict what swapping code 23 for code 45 will sound like. The UI becomes a random number game rather than a creative tool.
 
 **Why it happens:**
-Neural networks trained on new data without old data forget previous patterns. Small datasets exacerbate this - 5 new files can completely override 5 old files in model weights.
+- **Codebook entries have no inherent meaning:** Unlike continuous latent dimensions that can be labeled via PCA ("brightness", "warmth"), codebook entries are arbitrary vectors. Code 23 is not inherently "bright" or "warm."
+- **Replacing PCA sliders with code indices:** v1.0 had musically meaningful sliders derived from PCA analysis. Removing these and replacing with raw code indices is a UX regression.
+- **Discrete representations are harder to explain:** "Move the brightness slider from 0.3 to 0.7" is intuitive. "Change the code at position 12 from index 5 to index 19" is not.
 
 **How to avoid:**
-1. **Retain previous data:** Keep all previous training files when adding new ones (simplest solution).
-2. **Elastic Weight Consolidation (EWC):** Penalize changes to weights important for previous tasks.
-3. **Replay buffer:** Store generated samples from previous training as "pseudo-data" to maintain coverage.
-4. **Progressive training strategy:** Train on all data but weight new data higher, not exclusively.
-5. **Validation on old data:** Include samples from original dataset in validation to detect forgetting.
+1. **Build a code-to-perceptual-feature mapping:** After VQ-VAE training, decode each codebook entry in isolation and analyze its spectral properties (spectral centroid, energy, bandwidth). Label codes with perceptual descriptors.
+2. **Cluster codes by perceptual similarity:** Group codebook entries into clusters (e.g., "high-energy", "low-frequency", "transient", "sustained") and present these clusters to users instead of raw indices.
+3. **Provide audio preview of each code:** When hovering over or selecting a code, immediately play the decoded audio for that code entry. Users learn code meanings through listening.
+4. **Design manipulation at a higher level:** Instead of "swap code index 5 for index 19," offer "replace this moment with something brighter" by identifying codes with higher spectral centroid.
+5. **Interpolation in codebook space:** Allow users to blend between two codes (weighted average of embeddings, then re-quantize). This provides continuous control within the discrete framework.
 
 **Warning signs:**
-- After incremental training, original sounds no longer generate correctly
-- Validation loss on old data increases while new data loss decreases
-- Latent space shifts dramatically after adding data
+- Users report the code editor is "random" or "unpredictable"
+- Users prefer v1.0 slider interface over v1.1 code editor
+- A/B tests show users generate more interesting audio with v1.0 than v1.1
 
 **Phase to address:**
-Phase 5 (Incremental Learning) - Design incremental training strategy from start or defer feature entirely.
+Phase 3 (Code Manipulation UI) -- must be designed with perceptual labeling from the start, not as raw index display.
 
 ---
 
-### Pitfall 14: Opaque Error Messages from Audio Libraries
+### Pitfall 11: Checkpoint and Model Format Incompatibility
+
+**Severity:** MODERATE -- breaks model persistence and library functionality
 
 **What goes wrong:**
-Cryptic errors like "Input shape mismatch" or "Invalid audio format" with no context. Debugging takes hours.
+The existing `.distill` model format stores `model_state_dict`, `latent_dim`, `spectrogram_config`, `latent_analysis`, and `metadata`. VQ-VAE needs to store codebook embeddings, num_quantizers, codebook_size, codebook_dim, plus the prior model state. The existing `load_model()` function hardcodes `ConvVAE` reconstruction. `ModelMetadata` lacks VQ-specific fields. The library catalog has no way to distinguish v1 from v2 models.
 
 **Why it happens:**
-Audio libraries (torchaudio, librosa, soundfile) have different expectations for tensor shapes, sample rates, dtype, and channel ordering. Error messages don't explain what was expected vs received.
+- **`SAVED_MODEL_VERSION = 1` is baked into persistence.py:** The version check will reject v2 models or silently misload them.
+- **`LoadedModel` dataclass references `ConvVAE` type:** The type annotation and reconstruction logic assume ConvVAE. A polymorphic model loading path is needed.
+- **Prior model is separate from VQ-VAE:** The VQ-VAE and the autoregressive prior are separate models that must be saved and loaded together. The current format assumes a single model.
 
 **How to avoid:**
-1. **Defensive validation:** Validate all audio inputs: shape, dtype, sample rate, range [-1, 1], NaN/Inf checks.
-2. **Explicit shape documentation:** Document expected shapes at every function (B, C, T) vs (B, T) vs (T,).
-3. **Wrapper functions:** Create load_audio() and save_audio() wrappers that normalize to consistent format.
-4. **Rich error messages:** Catch library errors and re-raise with context: "Expected shape (batch, 1, time), got (batch, time)."
-5. **Unit tests:** Test edge cases: mono vs stereo, different sample rates, short audio (<1 sec).
+1. **Version-gated loading:** Increment `SAVED_MODEL_VERSION` to 2. The load function should detect version and dispatch to the appropriate loading path. Reject loading v1 models (clean break per PROJECT.md).
+2. **Store VQ-specific metadata:** Add to saved dict: `num_quantizers`, `codebook_size`, `codebook_dim`, `commitment_weight`, `codebook_embeddings` (for visualization), `prior_model_state_dict`, `prior_config`.
+3. **Abstract model loading:** Change `LoadedModel` to accept either model type, or create `LoadedVQModel` with VQ-specific fields (codebook access, prior model).
+4. **Update library catalog:** Add fields to `ModelEntry`: `architecture_type` ("vae" or "vqvae"), `num_quantizers`, `codebook_size`. Update search/filter to include these.
+5. **Migration path:** Add a utility to re-train v1 models as v2, or clearly communicate that v1 models are not loadable in v1.1.
 
 **Warning signs:**
-- Frequent shape-related errors during development
-- Debugging takes longer than implementing features
-- Different audio files cause different errors
+- `ValueError: Not a valid .distill model file` when loading v2 models
+- Models load but produce garbage audio (wrong architecture reconstructed)
+- Library shows v1 and v2 models indistinguishably
 
 **Phase to address:**
-Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
+Phase 1 (RVQ-VAE Architecture) for format definition, validated when model persistence is implemented.
+
+---
+
+## Minor Pitfalls
+
+### Pitfall 12: Data Augmentation Interacts Differently with Quantization
+
+**Severity:** LOW -- but affects training quality subtly
+
+**What goes wrong:**
+The existing augmentation pipeline (time stretch, pitch shift, noise injection) creates variants that may all map to the same few codebook entries. Unlike continuous VAE where augmentation creates continuous variation in latent space, VQ-VAE might quantize all augmented variants to identical codes, negating the benefit.
+
+**How to avoid:**
+- Verify augmentation diversity: encode original and augmented versions, check that code sequences differ
+- Adjust augmentation strength: if augmented versions map to same codes, increase augmentation magnitude
+- Focus on augmentations that create spectral variety (EQ, filtering) rather than just temporal (time stretch)
+
+**Phase to address:** Phase 1 (training pipeline), validation during integration.
+
+---
+
+### Pitfall 13: Temperature and Sampling Strategy for Prior Generation
+
+**Severity:** LOW -- affects generation diversity but is tunable post-training
+
+**What goes wrong:**
+Generated code sequences from the prior are either too conservative (low temperature, sounds like average of training data) or too chaotic (high temperature, sounds like noise). Finding the right sampling parameters requires experimentation.
+
+**How to avoid:**
+- Expose temperature, top_k, and top_p as generation parameters in the UI
+- Default to temperature=0.9, top_k=0 (no filtering), top_p=0.95 (nucleus sampling)
+- Provide a "randomness" slider that maps to temperature (0.5 = conservative, 1.5 = experimental)
+- Allow per-RVQ-level temperature: lower temperature for coarse codes (level 1), higher for fine codes (level 3+)
+
+**Phase to address:** Phase 3 (generation UI).
+
+---
+
+### Pitfall 14: Sequence Length Mismatch Between Training and Generation
+
+**Severity:** LOW -- but causes silent quality degradation
+
+**What goes wrong:**
+The prior is trained on code sequences of fixed length (94 frames = 1 second). At generation time, users request variable durations (1-60 seconds). The prior must either generate longer sequences than it was trained on (extrapolation, which Transformers handle poorly) or generate multiple 1-second chunks and concatenate.
+
+**How to avoid:**
+- Train on variable-length sequences if possible (pad shorter, crop longer)
+- Use the existing chunking + crossfade strategy: generate 1-second code sequences, overlap-add at the code level
+- If generating longer sequences: use sliding window attention or chunked autoregressive generation with context carryover
+- Match the training chunk_duration_s with the generation chunk_duration_s (currently 1.0s)
+
+**Phase to address:** Phase 2 (prior model) for training, Phase 3 (generation) for inference.
 
 ---
 
@@ -384,27 +416,30 @@ Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Skip validation dataset | Faster initial training | Can't detect overfitting until deployment | Never - validation is critical with small data |
-| Use only L1 reconstruction loss | Simple implementation | Poor perceptual quality | MVP only - add perceptual losses in Phase 2 |
-| Hard-code preprocessing params | Quick iteration | Breaks reproducibility, hard to tune | Never - use config files from start |
-| Train only on CUDA, ignore MPS | Don't have Mac hardware | Limits user base to CUDA users | Acceptable if target users have CUDA GPUs |
-| Skip data augmentation | Simpler pipeline | Severe overfitting with <50 files | Never acceptable with <50 files |
-| Use Griffin-Lim for phase | Avoid training vocoder | Poor audio quality | Acceptable for MVP proof-of-concept |
-| Single learning rate for all components | Easier hyperparameter tuning | GAN training instability | Acceptable initially, tune separately later |
-| No gradient checkpointing | Faster training initially | Memory limits prevent larger models | Acceptable with sufficient GPU memory |
+| Hard-code codebook_size=64 for all datasets | Quick implementation | Fails for 5-file datasets (too many codes) and 500-file datasets (too few codes) | Never -- use adaptive sizing from day one |
+| Skip prior model, use random code sampling | Ship VQ-VAE faster | Generated audio is incoherent noise (codes have no distributional structure) | Never -- prior IS the generation mechanism |
+| Keep Griffin-Lim for mel-to-audio | No additional model to train | Audio quality ceiling, cannot improve beyond Griffin-Lim limits | Acceptable for MVP, plan vocoder upgrade |
+| Train prior on same data split as VQ-VAE | Simpler pipeline | Prior memorizes training sequences (no held-out validation) | Never -- prior needs separate validation |
+| Save VQ-VAE and prior as separate files | Simpler persistence | Users must manage paired files, easy to mismatch | Acceptable initially, bundle into single file before shipping |
+| Skip codebook utilization monitoring | Faster to ship training | Cannot diagnose codebook collapse until generation fails | Never -- monitoring is essential |
+| Use single flat sequence for RVQ levels | Simpler prior architecture | 4x longer sequences, prior struggles with long-range dependencies | Only with 1-2 RVQ levels |
 
 ---
 
 ## Integration Gotchas
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Gradio audio streaming | Using default 1-sec chunks causes latency | Set `streaming_chunk_size` to smaller value (e.g., 0.1s) if building real-time features |
-| torchaudio MelSpectrogram | Assuming it matches librosa defaults | Explicitly set `norm=None, htk=True` to match librosa or use consistent torchaudio throughout |
-| PyTorch DataLoader for audio | Loading entire audio files into memory | Use on-the-fly loading with `num_workers=0` to avoid multiprocessing audio issues |
-| Gradio with PyTorch models | Model stays on GPU between generations, leaks memory | Move model to GPU only during generation, move back to CPU after |
-| librosa load with sr=None | Sample rate varies across files | Always specify target sample rate: `librosa.load(path, sr=48000)` |
-| torch.save for checkpoints | Saving entire model breaks with architecture changes | Save `state_dict()` only, reconstruct model from code |
+| Integration Point | Common Mistake | Correct Approach |
+|-------------------|----------------|------------------|
+| `models/vae.py` -> `models/vqvae.py` | Copy-paste ConvVAE and modify in-place | Create new module; VQ-VAE has fundamentally different forward pass signature |
+| `models/losses.py` -> VQ losses | Try to adapt `vae_loss()` with `(mu, logvar)` | Write new `vqvae_loss()` with `(recon, commit_loss)` -- completely different terms |
+| `training/loop.py` | Add VQ branches inside existing `train_epoch()` | Create parallel `train_vqvae_epoch()` -- the loop structure is different (no KL annealing, add codebook metrics) |
+| `inference/generation.py` | Make `GenerationPipeline` accept both model types | Create `VQGenerationPipeline` -- generation flow is fundamentally different (prior -> decode vs. sample -> decode) |
+| `controls/analyzer.py` | Try to PCA-analyze discrete codes | Replace with code-frequency analysis and perceptual labeling -- PCA is meaningless on discrete indices |
+| `training/config.py` | Add VQ params to existing `TrainingConfig` | Create `VQTrainingConfig` extending or parallel to existing config -- too many new parameters to mix |
+| `models/persistence.py` | Save VQ-VAE using existing save_model() | Version-gated save/load with VQ-specific fields; bundle prior model state |
+| `ui/tabs/generate_tab.py` | Keep slider controls for VQ-VAE | Replace with code editor UI -- slider paradigm does not apply to discrete codes |
+| `training/metrics.py` | Report same metrics as continuous VAE | Add VQ-specific metrics (utilization, perplexity, dead codes) to callback system |
+| `audio/spectrogram.py` | No changes needed | Correct -- spectrogram layer is independent of model architecture; keep as-is |
 
 ---
 
@@ -412,12 +447,11 @@ Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Loading all audio into RAM | Memory usage scales with dataset size | Use lazy loading with on-demand disk reads | >100 files or >5 min per file |
-| ConvTranspose upsampling | Checkerboard/aliasing artifacts at 48kHz | Use interpolation + Conv1d | Immediately at 48kHz |
-| Inefficient STFT computation | Training bottleneck on CPU | Use torchaudio's GPU-accelerated STFT or compute offline | Batch size >4 with online STFT |
-| Per-file normalization in training loop | 10x slower data loading | Pre-compute and cache normalized audio | >50 files |
-| Gradio reloading model per request | First generation after idle is slow | Keep model loaded in memory, lazy-load on first use | Multi-user scenarios |
-| Full-resolution spectrograms | Massive memory usage for long audio | Use multi-scale or chunked processing | Audio length >10 seconds |
+| k-means init on every training start | 30-60 second delay before first epoch with large codebook | Cache k-means result; only re-run if data changes | codebook_size > 128 with slow hardware |
+| Codebook distance computation on CPU | Training bottleneck: VQ layer is slow | Ensure codebook is on same device as encoder output | Always with GPU training |
+| Prior model attention on long sequences | OOM or slow generation for >10 second outputs | Use chunked generation, not single sequence for full duration | Sequence length > 512 tokens |
+| Storing full codebook embeddings in checkpoint | Checkpoint files grow (minor for small codebooks) | Acceptable; codebook embeddings are small (64 codes x 256 dim = 64KB) | Only with codebook_size > 4096 |
+| Decoding one code at a time in prior | Extremely slow autoregressive generation | Use KV-cache for Transformer inference | Always for Transformer prior |
 
 ---
 
@@ -425,25 +459,26 @@ Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| No progress indication during training | User thinks app froze, force-quits | Use tqdm or Gradio progress callbacks for epoch/batch updates |
-| Latent sliders with no labels | User has no idea what each slider does | Post-training analysis to label sliders with perceptual meaning ("brightness", "attack") |
-| Generated audio auto-plays | Unexpected sound annoys users | Provide play button, let user control playback |
-| No way to export model/settings | User loses work when closing app | Save/load functionality for model checkpoints and configurations |
-| Sliders use arbitrary ranges (-5 to 5) | Non-intuitive, hard to remember sweet spots | Normalize to 0-1 or meaningful units, show current value |
-| No undo for generation | User loses interesting results by accident | Keep history of recent generations with ability to revisit |
+| Showing codebook utilization as raw percentage | Users don't understand "codebook utilization: 42%" | Show health indicator: green (>70%), yellow (30-70%), red (<30%) with plain-language explanation |
+| Training UI unchanged from v1.0 | Users expect same training experience but behavior is different | Update training tab with VQ-specific progress indicators and explanations |
+| No explanation of architecture change | Users wonder why their v1.0 models don't load | Show clear message: "v1.1 uses a new architecture. Previous models are not compatible." |
+| Code editor with no undo | Destructive code edits lose interesting sounds | Implement undo/redo stack for code modifications |
+| Prior generation with no progress | Autoregressive generation is sequential and slow | Show token-by-token generation progress; allow early stopping |
+| Generation controls too technical | "Temperature", "top-k", "nucleus sampling" are ML jargon | Map to "Creativity" (temperature), "Focus" (top-k), "Diversity" (top-p) with plain-language descriptions |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Training converges**: Often missing validation set evaluation - verify model generalizes beyond training data
-- [ ] **Audio generates**: Often missing format conversion for playback - verify Gradio can play output format
-- [ ] **Latent interpolation works**: Often missing boundary handling - verify extreme latent values produce valid audio, not noise
-- [ ] **Model saves/loads**: Often missing normalization parameters in checkpoint - verify inference reproduces training pipeline exactly
-- [ ] **Works on target hardware**: Often missing MPS/CPU fallback - verify runs on user's device, not just dev machine
-- [ ] **Handles edge cases**: Often missing mono/stereo handling - verify works with various audio formats from wild
-- [ ] **Reproducible results**: Often missing random seed control - verify same inputs produce same outputs
-- [ ] **Memory doesn't leak**: Often missing cleanup in Gradio callbacks - verify memory usage is stable over 10+ generations
+- [ ] **VQ-VAE trains:** Often missing codebook utilization monitoring -- verify >50% codes are active, not just that loss decreases
+- [ ] **VQ-VAE reconstructs:** Often missing A/B comparison with continuous VAE -- verify quality is comparable, not just that output exists
+- [ ] **Prior generates:** Often missing memorization check -- verify generated sequences differ from training sequences (>50% novel n-grams)
+- [ ] **Code manipulation works:** Often missing perceptual labeling -- verify users can predict effect of code changes, not just that indices change
+- [ ] **Model saves/loads:** Often missing prior model in checkpoint -- verify both VQ-VAE AND prior load correctly together
+- [ ] **Generation pipeline complete:** Often missing prior -> decode -> Griffin-Lim -> audio chain -- verify end-to-end from UI button to playback
+- [ ] **Metrics are meaningful:** Often missing VQ-specific metrics in UI -- verify codebook health is visible during training, not just reconstruction loss
+- [ ] **Works across dataset sizes:** Often missing testing on extremes -- verify 5-file AND 500-file datasets both produce usable models
+- [ ] **Augmentation helps:** Often missing validation that augmentation improves VQ diversity -- verify augmented data produces different code sequences
 
 ---
 
@@ -451,18 +486,18 @@ Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Model overfitted to training data | MEDIUM | Re-train with stronger regularization, add validation set, implement augmentation |
-| Preprocessing inconsistency | LOW | Standardize on one library, update inference to match training, re-validate outputs |
-| Aliasing artifacts at 48kHz | HIGH | Requires architecture change - switch to anti-aliased layers, may need re-training from scratch |
-| Posterior collapse | MEDIUM | Adjust beta-schedule and re-train from checkpoint before collapse, or re-train with KL floor |
-| GAN training instability | MEDIUM-HIGH | Switch to WGAN-GP formulation, add spectral norm, re-train with balanced updates |
-| Uninterpretable latent space | MEDIUM | Post-training: fit sparse autoencoder to find directions. Better: re-train with regularization |
-| Catastrophic forgetting | LOW | Re-train with all data (old + new) using simple concatenation |
-| MPS memory leak | LOW | Add explicit garbage collection, reduce batch size, or switch to CUDA if available |
-| Wrong normalization strategy | MEDIUM | Re-normalize dataset with correct method, re-train from scratch (training data changed) |
-| Missing perceptual metrics | LOW | Implement metrics on existing model - no re-training needed |
-| Phase information lost | HIGH | Requires architectural change to waveform-domain or training separate vocoder |
-| Compute budget exceeded | MEDIUM | Reduce model size, use gradient checkpointing, mixed precision, or upgrade hardware |
+| Codebook collapse | MEDIUM | Reduce codebook_size, enable k-means init + dead code reset, retrain from scratch |
+| Prior memorization | LOW | Reduce prior model size, increase dropout to 0.5, add token corruption, retrain prior only (VQ-VAE is fine) |
+| Cascading RVQ collapse | MEDIUM | Reduce num_quantizers, enable quantize_dropout, retrain VQ-VAE |
+| Audio quality regression vs v1.0 | HIGH | Tune commitment_weight, add spectral loss, consider vocoder upgrade. May require architecture iteration. |
+| Training loop integration breakage | LOW | Revert to parallel implementation (old code untouched), fix new code in isolation |
+| Commitment loss instability | LOW | Reduce commitment_weight to 0.1, reduce EMA decay to 0.8, add gradient clipping |
+| Missing utilization monitoring | LOW | Add metrics post-hoc; no retraining needed, just add logging |
+| Hyperparameter mismatch | MEDIUM | Build adaptive defaults table, retrain with corrected hyperparameters |
+| Prior architecture mismatch | MEDIUM | Redesign prior (smaller model, different positional encoding), retrain prior only |
+| Raw index UI | MEDIUM | Add perceptual labeling layer on top of existing code editor without changing underlying mechanics |
+| Checkpoint format broken | LOW | Add version detection in load, create migration utility |
+| Augmentation ineffective | LOW | Adjust augmentation strength, verify diversity; may need VQ-VAE retrain |
 
 ---
 
@@ -470,96 +505,63 @@ Phase 1 (Core Training Pipeline) - Build robust audio I/O layer with validation.
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Overfitting without detection | Phase 1 (Core Pipeline) | Validation loss tracks within 10% of training loss |
-| Preprocessing incompatibilities | Phase 1 (Core Pipeline) | Inference reproduces training pipeline, spectrograms match visually |
-| Aliasing artifacts at 48kHz | Phase 1 (Core Pipeline) | Spectral analysis shows no mirroring above 20kHz |
-| Uninterpretable latent space | Phase 3 (Latent Exploration) | Each slider maps to single perceptual attribute in listening tests |
-| Posterior collapse | Phase 1 (Core Pipeline) | KL divergence per dimension stays above threshold (e.g., 0.5) |
-| GAN training instability | Phase 1 (Core Pipeline) | Generator/discriminator loss ratio stable in [0.5, 2.0] range |
-| MPS vs CUDA differences | Phase 1 (Core Pipeline) | Model produces same outputs (within 1% error) on both backends |
-| Incorrect normalization | Phase 1 (Core Pipeline) | Dynamic range preserved in normalized audio, sounds natural |
-| Reconstruction metrics only | Phase 2 (Quality & Evaluation) | Perceptual metrics (PESQ, ViSQOL) correlate with listening tests |
-| Phase information ignored | Phase 1 (Core Pipeline) | Waveform generation or neural vocoder integrated from start |
-| Inadequate augmentation | Phase 1 (Core Pipeline) | Training with/without augmentation shows 20%+ performance difference |
-| Compute budget exceeded | Phase 1 (Core Pipeline) | Training epoch completes in <30 min on target hardware |
-| Catastrophic forgetting | Phase 5 (Incremental Learning) | Validation on old data maintains <5% loss increase after new data added |
-| Opaque audio library errors | Phase 1 (Core Pipeline) | Custom validation provides clear error messages for all failure modes |
+| Codebook collapse | Phase 1 (RVQ-VAE Architecture) | Codebook utilization >70% on training data after convergence |
+| Prior memorization | Phase 2 (Autoregressive Prior) | Generated sequences have <50% 8-gram overlap with training set |
+| Cascading RVQ collapse | Phase 1 (RVQ-VAE Architecture) | Each RVQ level has >30% utilization; reconstruction improves with each added level |
+| Audio quality regression | Phase 1 (RVQ-VAE Architecture) | Blind A/B test: users rate VQ-VAE output >= v1.0 VAE output |
+| Training loop integration | Phase 1 (RVQ-VAE Architecture) | Full training pipeline runs end-to-end without importing anything from continuous VAE |
+| Commitment loss instability | Phase 1 (RVQ-VAE Architecture) | Commitment loss stabilizes within 20% of initial value after warmup |
+| Missing utilization monitoring | Phase 1 (RVQ-VAE Architecture) | Training UI shows per-level codebook utilization, entropy, and dead code count |
+| Hyperparameter sensitivity | Phase 1 (RVQ-VAE Architecture) | Default hyperparameters produce >50% codebook utilization on 5-file, 50-file, and 500-file datasets |
+| Prior architecture mismatch | Phase 2 (Autoregressive Prior) | Prior model has fewer parameters than VQ-VAE; generates coherent code sequences |
+| Code manipulation UX | Phase 3 (Code Manipulation UI) | User study: musicians can predict effect of code changes >50% of the time |
+| Checkpoint format | Phase 1 (RVQ-VAE Architecture) | Save-load round-trip preserves model behavior exactly (recon loss identical before and after load) |
+| Augmentation effectiveness | Phase 1 (RVQ-VAE Architecture) | Augmented data encodes to >20% different code sequences than original data |
+| Temperature/sampling | Phase 3 (Code Manipulation UI) | Users can navigate from "conservative" to "experimental" generation via single slider |
+| Sequence length mismatch | Phase 2 (Autoregressive Prior) | Generated audio for 5-second request sounds coherent (no abrupt transitions between chunks) |
 
 ---
 
 ## Sources
 
-### Overfitting and Small Datasets
-- [Dataset for Deep Learning 2026 Guide](https://thelinuxcode.com/dataset-for-deep-learning-a-practical-guide-for-2026/)
-- [Techniques and pitfalls for ML training with small data sets](https://www.trustbit.tech/blog/2021/06/30/techniques-and-pitfalls-for-ml-training-with-small-data-sets)
-- [A survey of deep learning audio generation methods](https://arxiv.org/pdf/2406.00146)
-- [Synthio: Augmenting Small-Scale Audio Classification Datasets with Synthetic Data](https://arxiv.org/html/2410.02056v2)
+### Codebook Collapse and Utilization
+- [ERVQ: Enhanced Residual Vector Quantization with Intra-and-Inter-Codebook Optimization](https://arxiv.org/abs/2410.12359) -- codebook utilization improved from 14.7% to 100%
+- [EdVAE: Mitigating Codebook Collapse with Evidential Discrete VAEs](https://arxiv.org/abs/2310.05718)
+- [Addressing Representation Collapse in Vector Quantized Models with One Linear Layer (ICCV 2025)](https://openreview.net/forum?id=SqUiGfJ1So)
+- [Addressing Index Collapse of Large-Codebook Speech Tokenizer](https://arxiv.org/html/2406.02940v1)
+- [Examples Codebook Utilization does not generalize -- Issue #109](https://github.com/lucidrains/vector-quantize-pytorch/issues/109) -- lucidrains library
 
-### VAE/GAN Training Stability
-- [Common GAN Problems - Google ML Guide](https://developers.google.com/machine-learning/gan/problems)
-- [Common VAE Training Difficulties](https://apxml.com/courses/vae-representation-learning/chapter-2-vaes-mathematical-deep-dive/vae-training-difficulties)
-- [Understanding Failure Modes of GAN Training](https://medium.com/game-of-bits/understanding-failure-modes-of-gan-training-eae62dbcf1dd)
+### lucidrains/vector-quantize-pytorch
+- [GitHub Repository](https://github.com/lucidrains/vector-quantize-pytorch) -- VectorQuantize and ResidualVQ configuration
+- [Commitment Loss Problems -- Issue #27](https://github.com/lucidrains/vector-quantize-pytorch/issues/27)
+- [commitment loss too large and how to choose codebook dim -- Issue #69](https://github.com/lucidrains/vector-quantize-pytorch/issues/69)
+- [zero for second residual grad -- Issue #33](https://github.com/lucidrains/vector-quantize-pytorch/issues/33) -- RVQ gradient flow issues
 
-### Audio Artifacts and Quality
-- [Aliasing-Free Neural Audio Synthesis](https://arxiv.org/html/2512.20211)
-- [Upsampling Artifacts in Neural Audio Synthesis](https://www.researchgate.net/publication/352171371_Upsampling_Artifacts_in_Neural_Audio_Synthesis)
-- [FA-GAN: Artifacts-free and Phase-aware High-fidelity GAN-based Vocoder](https://arxiv.org/html/2407.04575v1)
-- [STFTCodec: High-Fidelity Audio Compression through Time-Frequency Domain Representation](https://www.researchgate.net/publication/397086862_STFTCodec_High-Fidelity_Audio_Compression_through_Time-Frequency_Domain_Representation)
+### VQ-VAE Training and Architecture
+- [Understanding Vector Quantization in VQ-VAE](https://huggingface.co/blog/ariG23498/understand-vq) -- Hugging Face blog
+- [Robust Training of Vector Quantized Bottleneck Models](https://arxiv.org/pdf/2005.08520) -- batch normalization and learning rate techniques
+- [High-Fidelity Audio Compression with Improved RVQGAN](https://arxiv.org/pdf/2306.06546) -- codebook dim=8 optimal for audio
+- [Residual Vector Quantization -- Scott Hawley](https://drscotthawley.github.io/blog/posts/2023-06-12-RVQ.html) -- practical RVQ tutorial
+- [SoundStream: An End-to-End Neural Audio Codec](https://research.google/blog/soundstream-an-end-to-end-neural-audio-codec/) -- k-means init, dead code reset
 
-### Latent Space Interpretability
-- [Latent Space Regularization for Explicit Control of Musical Attributes](https://musicinformatics.gatech.edu/wp-content_nondefault/uploads/2019/06/Pati-and-Lerch-Latent-Space-Regularization-for-Explicit-Control-o.pdf)
-- [Exploring XAI for the Arts: Explaining Latent Space in Generative Music](https://arxiv.org/pdf/2308.05496)
-- [Learning Interpretable Features in Audio Latent Spaces via Sparse Autoencoders](https://arxiv.org/html/2510.23802)
+### Autoregressive Prior and Overfitting
+- [Entropy-Guided Token Dropout: Training Autoregressive Language Models with Limited Domain Data](https://arxiv.org/html/2512.23422)
+- [Scheduled DropHead: A Regularization Method for Transformer Models](https://ar5iv.labs.arxiv.org/html/2004.13342)
+- [Leveraging VQ-VAE tokenization for autoregressive modeling of medical time series](https://www.sciencedirect.com/science/article/abs/pii/S0933365724001672) -- VQ-VAE prevents memorization via lossy encoding
+- [VideoGPT: Video Generation using VQ-VAE and Transformers](https://arxiv.org/pdf/2104.10157)
 
-### Preprocessing and Normalization
-- [Deep Learning for Audio Signal Processing](https://arxiv.org/pdf/1905.00078)
-- [Audio Deep Learning Made Simple - Why Mel Spectrograms perform better](https://ketanhdoshi.github.io/Audio-Mel/)
-- [Mel-spectrogram: A Comprehensive Guide for 2025](https://www.shadecoder.com/topics/mel-spectrogram-a-comprehensive-guide-for-2025)
-- [The right way to generate mel-spectrogram - GitHub Issue](https://github.com/CookiePPP/VocoderComparisons/issues/3)
+### Audio Quality and Vocoding
+- [Spectrogram Patch Codec: A 2D Block-Quantized VQ-VAE and HiFi-GAN](https://arxiv.org/html/2509.02244v1)
+- [Limitations of Traditional Vocoders (e.g., Griffin-Lim)](https://apxml.com/courses/speech-recognition-synthesis-asr-tts/chapter-5-neural-vocoders-waveform-generation/traditional-vocoder-limitations)
+- [VQ-VAE Methods for Sound Reconstruction](https://mehdihosseinimoghadam.github.io/posts/2022/02/sound-reconstruction-with-Vq-VAE/)
 
-### MPS and GPU Issues
-- [MPS Memory Leak - PyTorch Issue #154329](https://github.com/pytorch/pytorch/issues/154329)
-- [Training results from using MPS backend are poor compared to CPU and CUDA](https://github.com/pytorch/pytorch/issues/109457)
-- [Memory usage and epoch iteration time increases indefinitely on M1 pro MPS](https://github.com/pytorch/pytorch/issues/77753)
-- [CUDA out of memory when training audio RNN](https://discuss.pytorch.org/t/cuda-out-of-memory-when-training-audio-rnn-gru/97566)
-
-### Audio Quality Evaluation
-- [Objective Measures of Perceptual Audio Quality Reviewed](https://arxiv.org/pdf/2110.11438)
-- [ViSQOL: Perceptual Quality Estimator for speech and audio](https://github.com/google/visqol)
-- [Perceptual Audio: Perceptual Metrics DPAM and CDPAM](https://github.com/pranaymanocha/PerceptualAudio)
-- [PESQ - PyTorch-Metrics Documentation](https://lightning.ai/docs/torchmetrics/stable/audio/perceptual_evaluation_speech_quality.html)
-
-### Catastrophic Forgetting
-- [Continual Learning and Catastrophic Forgetting](https://arxiv.org/html/2403.05175v1)
-- [Online incremental learning for audio classification](https://arxiv.org/html/2508.20732)
-- [Characterizing Continual Learning Scenarios and Strategies for Audio Analysis](https://arxiv.org/html/2407.00465v1)
-
-### RAVE and Real-Time Synthesis
-- [RAVE: A variational autoencoder for fast and high-quality neural audio synthesis](https://arxiv.org/abs/2111.05011)
-- [RAVE Official Implementation](https://github.com/acids-ircam/RAVE)
-
-### Posterior Collapse Prevention
-- [Scale-VAE: Preventing Posterior Collapse in Variational Autoencoder](https://aclanthology.org/2024.lrec-main.1250/)
-- [Preventing Posterior Collapse with delta-VAEs](https://openreview.net/forum?id=BJe0Gn0cY7)
-- [GitHub: Posterior Collapse List](https://github.com/sajadn/posterior-collapse-list)
-
-### Library Compatibility
-- [Comparing Librosa, Soundfile and Torchaudio](https://nasseredd.github.io/blog/speech-and-language-processing/comparing-audio-libraries)
-- [MelSpectrogram inconsistency with librosa - PyTorch Issue](https://github.com/pytorch/audio/issues/1058)
-- [Which library is torchaudio consistent with?](https://github.com/pytorch/audio/issues/80)
-
-### Data Augmentation
-- [Audio Deep Learning Made Simple (Part 3): Data Preparation and Augmentation](https://towardsdatascience.com/audio-deep-learning-made-simple-part-3-data-preparation-and-augmentation-24c6e1f6b52/)
-- [Data Augmentation and Deep Learning Methods in Sound Classification](https://www.mdpi.com/2079-9292/11/22/3795)
-- [Make the Most of Limited Datasets Using Audio Data Augmentation](https://www.edgeimpulse.com/blog/make-the-most-of-limited-datasets-using-audio-data-augmentation/)
-
-### Gradio Audio Interface
-- [Microphone Capture - Allow setting smaller chunk size for low latency](https://github.com/gradio-app/gradio/issues/6526)
-- [Support setting sample rate and channels for mic capture](https://github.com/gradio-app/gradio/issues/5848)
-- [Gradio Audio Documentation](https://www.gradio.app/docs/gradio/audio)
+### Migration and Integration
+- [VQ-VAE: A Comprehensive Guide for 2025](https://www.shadecoder.com/topics/vq-vae-a-comprehensive-guide-for-2025)
+- [Vector Quantized VAE: A Comprehensive Guide for 2025](https://www.shadecoder.com/topics/vector-quantized-vae-a-comprehensive-guide-for-2025)
+- [Variational Autoencoders: VAE to VQ-VAE / dVAE](https://rohitbandaru.github.io/blog/VAEs/) -- migration considerations
 
 ---
 
-*Pitfalls research for: Small-dataset generative audio with high-fidelity output and musically meaningful controls*
-*Researched: 2026-02-12*
-*Confidence: MEDIUM-HIGH - Based on current research literature, community reports, and known issues in PyTorch/audio ML ecosystem*
+*Pitfalls research for: Adding RVQ-VAE + autoregressive prior to small-dataset audio generation system*
+*Researched: 2026-02-21*
+*Confidence: MEDIUM-HIGH -- Based on current research literature, lucidrains library documentation, community issue reports, and analysis of existing codebase integration surface. Small-dataset VQ-VAE is an underexplored regime; some recommendations are extrapolated from large-scale findings and should be validated empirically.*

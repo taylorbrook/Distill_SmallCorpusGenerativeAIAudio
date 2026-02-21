@@ -1,312 +1,267 @@
-# Technology Stack
+# Technology Stack: v1.1 RVQ-VAE + Autoregressive Prior
 
-**Project:** Small Dataset Generative Audio
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM-HIGH
+**Project:** Distill -- Small Dataset Generative Audio
+**Milestone:** v1.1 VQ-VAE
+**Researched:** 2026-02-21
+**Scope:** NEW dependencies only. Existing stack (PyTorch, TorchAudio, Gradio, Typer, Rich, soundfile, mutagen, sofar) is validated and not re-researched.
 
-## Recommended Stack
+## Recommended Stack Additions
 
-### Core Framework
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| PyTorch | 2.10.0 | Deep learning framework | Industry standard for research-grade audio ML. Native MPS support for Apple Silicon, excellent CUDA support, and flexible enough for novel architectures. Version 2.10.0 is latest stable as of Feb 2026. |
-| TorchAudio | 2.10.0 | Audio I/O and transforms | Official PyTorch audio library. Provides efficient spectrograms, resampling, and integrates seamlessly with PyTorch tensors. Transitioned to maintenance phase, focusing on core audio processing. |
-| PyTorch Lightning | 2.6.1 | Training orchestration | Reduces boilerplate for distributed training, multi-GPU support, experiment logging. Latest version (Jan 30, 2026) provides production-ready features for complex training workflows. |
-
-### Generative Model Architecture
+### VQ/RVQ Layer: vector-quantize-pytorch (lucidrains)
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| RAVE | 2.3.1 | VAE-based audio synthesis | Real-time Audio Variational autoEncoder specifically designed for audio. v2 architecture offers faster processing and higher quality than v1. Proven for small datasets (2-3 hours minimum). Use v2_small config (8GB GPU) for development, v2 for production (16GB GPU). **Caveat:** Latent controls are opaque - you'll need to build disentanglement on top. |
-| Stable Audio Tools | Latest (requires PyTorch 2.5+) | Latent diffusion framework | Production-grade latent diffusion for audio. Includes pretrained VAEs, U-Net diffusion models, and supports fine-tuning. Open source (MIT), actively maintained by Stability AI. Enables conditioning on text/metadata and duration control. **Best for:** Fine-tuning pretrained models on small datasets rather than training from scratch. |
-| DDSP | Latest (Magenta) | Differentiable DSP | Use for interpretable synthesis. Trains on <13 minutes of audio. Explicitly models harmonic and noise components, making it naturally more interpretable than pure neural approaches. **Trade-off:** Limited to monophonic or simple timbres, but parameters are inherently musical. |
+| vector-quantize-pytorch | >=1.27.0 | RVQ layers (codebook, EMA, dead code reset, k-means init) | The de facto standard VQ/RVQ library for PyTorch. Actively maintained (1.27.21 released 2026-02-12). Provides `ResidualVQ` with every feature the project needs out of the box: k-means codebook initialization, EMA updates, dead code replacement via `threshold_ema_dead_code`, configurable `num_quantizers` and `codebook_size`. Writing a custom implementation would take 500-1000 lines and miss edge cases this library handles (gradient straight-through, codebook collapse prevention, rotation trick). Used by SoundStream/Encodec-style systems throughout the research community. |
 
-**Recommendation:** Start with RAVE v2_small for rapid prototyping, then layer disentanglement techniques. Consider DDSP for interpretable baseline comparisons and Stable Audio Tools if you can leverage pretrained models via transfer learning.
+**Confidence:** HIGH -- PyPI verified version, MIT licensed, 3500+ GitHub stars, actively maintained by lucidrains (prolific PyTorch library author).
 
-### Neural Audio Codec
+**Key API for this project:**
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| DAC (Descript Audio Codec) | 1.0.0 | High-fidelity audio compression | State-of-the-art neural codec with ~90x compression while preserving quality. Supports 44.1kHz (your target is 48kHz, this is close). Works across speech, music, environmental audio. MIT licensed. Operates at 8 kbps. **Use for:** Compressing training data or as a perceptual bottleneck in your architecture. |
-| EnCodec | Latest | Alternative neural codec | Facebook's codec, supports stereo 48kHz (matches your requirement exactly). Use if you need exact 48kHz support. **Trade-off:** DAC has better quality per bitrate, but EnCodec has exact sample rate match. |
+```python
+from vector_quantize_pytorch import ResidualVQ
 
-**Recommendation:** Use DAC for general work (44.1kHz is close enough for experimentation). Switch to EnCodec if 48kHz becomes a hard requirement or you need the perceptual features from Meta's ecosystem.
+rvq = ResidualVQ(
+    dim=256,                    # encoder output dimension
+    codebook_size=256,          # codes per quantizer (start small for 5-500 files)
+    num_quantizers=4,           # coarse-to-fine layers
+    kmeans_init=True,           # init codebook from first batch (SoundStream paper)
+    kmeans_iters=10,            # k-means iterations for init
+    decay=0.99,                 # EMA decay for codebook updates
+    threshold_ema_dead_code=2,  # replace codes with cluster size < 2
+)
 
-### Audio Processing
+x = torch.randn(1, 94, 256)  # [batch, time_frames, dim]
+quantized, indices, commit_loss = rvq(x)
+# quantized: [1, 94, 256] -- same shape, quantized
+# indices:   [1, 94, 4]   -- code indices per quantizer
+# commit_loss: [1, 4]     -- commitment loss per quantizer
+```
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| librosa | 0.11.0+ | Audio analysis and feature extraction | De facto standard for music/audio feature extraction (MFCCs, spectral features, onset detection). Well-documented, widely used in research. |
-| soundfile | Latest | Audio I/O | Efficient reading/writing of WAV, FLAC, OGG. Simpler interface than librosa for pure I/O. Recommended over librosa.load for production pipelines. |
-| pedalboard | 0.9.22+ | Audio effects and augmentation | Spotify's audio effects library. 300x faster than pySoX, 4x faster file loading than librosa.load. Use for data augmentation (EQ, compression, reverb) to artificially expand small datasets. Supports VST3/Audio Unit plugins for creative effects. |
+**Return values integrate directly with the existing loss computation pattern** (see `src/distill/models/losses.py`). The `commit_loss` replaces KL divergence as the regularization term. Reconstruction loss (MSE on mel spectrograms) stays the same.
 
-**Recommendation:** Use soundfile for I/O, librosa for analysis/features, pedalboard for augmentation. This combo gives you speed (pedalboard) + research features (librosa) + simplicity (soundfile).
-
-### Training and Optimization
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| auraloss | 0.2.0+ | Audio-specific loss functions | PyTorch package with time-domain (ESR, SI-SDR, SNR) and frequency-domain (multi-resolution STFT, Mel-STFT) losses designed for audio. Critical for perceptually meaningful training. Use multi-resolution STFT loss for high-fidelity reconstruction. |
-| einops | 0.8.2 | Tensor manipulation | Readable tensor operations (rearrange, reduce, repeat). Essential for complex audio tensor shapes (batch, channels, time, frequency). Latest version (Jan 26, 2026) supports all major frameworks. |
-| Hydra | 1.3+ | Configuration management | Facebook's hierarchical config system. Essential for managing experiments with multiple hyperparameters, model architectures, and dataset variations. Enables reproducible research and rapid iteration. |
-
-### Latent Space Disentanglement
+### VQ Library Dependencies
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Beta-VAE / Factor-VAE | Custom implementation | Disentangled representations | Your core innovation area. Beta-VAE pressures latent space toward factorial prior via weighted KL term. Factor-VAE explicitly penalizes total correlation. **Recent research (2025):** Shows beta-VAE can collapse mutual information under heavy regularization - you'll need careful tuning. Start with beta=4-10, monitor reconstruction vs. disentanglement trade-off. |
-| SD-Codec approach | Research paper reference | Source-disentangled codec | 2025 ICASSP paper shows joint audio coding + source separation by assigning different domains to distinct codebooks. **Apply to your case:** Separate timbral, harmonic, temporal dimensions into different codebook groups for explicit control. |
+| einops | >=0.8.0 | Tensor reshaping (required by vector-quantize-pytorch) | Required dependency of vector-quantize-pytorch. Provides readable tensor operations (`rearrange`, `reduce`). Already proven in the ecosystem (0.8.2 released 2026-01-26). Pure Python, zero compatibility risk. |
+| einx[torch] | >=0.1.3 | Extended Einstein operations (required by vector-quantize-pytorch) | Required dependency of vector-quantize-pytorch. Provides additional tensor notation used internally by the library. Lightweight, no additional transitive dependencies beyond torch. |
 
-**Recommendation:** Implement Beta-VAE first (simpler), then experiment with SD-Codec's multi-codebook approach if single-latent disentanglement fails. Monitor with qualitative latent traversals and quantitative disentanglement metrics.
+**Confidence:** HIGH -- these are hard dependencies of vector-quantize-pytorch, versions verified from setup.py analysis.
 
-### Experiment Tracking
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Weights & Biases | Latest | Experiment tracking and visualization | Industry standard for ML experiment tracking. Rich media support (audio, spectrograms). Real-time metric logging. Required by Stable Audio Tools. Free tier available. |
-| MLflow | Latest | Alternative tracking | Open source alternative to W&B. Self-hosted option if you prefer local control. Less audio-specific features but more flexible for custom metrics. |
-
-**Recommendation:** Start with W&B for rapid iteration and rich audio visualization. Switch to MLflow only if you need self-hosting or have privacy constraints.
-
-### User Interface
+### Autoregressive Prior: No New Library Needed
 
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Gradio | 6.5.1 | Interactive UI | Latest version (Jan 29, 2026). Built-in audio components with waveform display, microphone input, streaming support. Perfect for rapid prototyping of audio interfaces. Supports real-time parameter manipulation via sliders. Integrates with Hugging Face Spaces for easy sharing. |
+| torch.nn (LSTM) | (bundled with PyTorch) | Autoregressive prior over discrete codes | Use a small LSTM (2-3 layers, 256-512 hidden) as the prior model. For 5-500 audio files producing sequences of ~94 time steps with 4 quantizer levels, a transformer would be massively overparameterized and prone to overfitting. LSTMs have stronger sequential inductive bias, need fewer parameters (under 2M vs 10M+ for a transformer), and train reliably on tiny datasets. PyTorch's `nn.LSTM` is battle-tested on all backends (CUDA, MPS, CPU). No new dependency required. |
 
-### Development Tools
+**Confidence:** HIGH -- this is a pure architectural decision using existing PyTorch primitives. Multiple sources confirm LSTMs outperform transformers on small datasets due to inductive bias and parameter efficiency.
 
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| Jupyter Lab | Interactive development | Standard for audio ML research. Use for exploratory analysis, feature visualization. |
-| VSCode + Python extension | Code editor | Excellent PyTorch debugging, notebook support, Git integration. |
-| FFmpeg | Audio conversion | Required by RAVE and many audio libraries. Install via conda or system package manager. |
-| Git LFS | Large file storage | Essential for storing audio datasets and trained model checkpoints. Configure before committing audio files. |
+**Rationale for LSTM over Transformer:**
+
+| Factor | LSTM (2-layer, 512 hidden) | Transformer (4-layer, 4-head, 256 dim) |
+|--------|---------------------------|----------------------------------------|
+| Parameter count | ~1.5M | ~8-12M |
+| Min training data | Works with 50-500 sequences | Needs 5000+ sequences |
+| Sequential inductive bias | Built-in (recurrence) | Must be learned (positional encoding) |
+| Overfitting risk at 5-100 files | Moderate (manageable with dropout) | Very high |
+| MPS/CUDA/CPU compat | Excellent (core PyTorch op) | Excellent (core PyTorch op) |
+| Implementation complexity | Simple (`nn.LSTM` + linear head) | Moderate (attention masks, positional encoding) |
+| Training speed | Fast (small model) | Slower (attention is O(n^2)) |
+
+**When to upgrade to transformer:** If the dataset grows to 1000+ files and sequence lengths exceed 200 tokens, a small transformer with 2-4 layers could be beneficial. This is a future optimization, not a v1.1 concern.
+
+**Prior architecture sketch:**
+
+```python
+class CodePrior(nn.Module):
+    """Autoregressive prior over RVQ code sequences."""
+    def __init__(self, num_codes=256, num_quantizers=4, hidden=512, layers=2):
+        super().__init__()
+        self.embedding = nn.Embedding(num_codes, hidden)
+        self.lstm = nn.LSTM(hidden, hidden, num_layers=layers,
+                           batch_first=True, dropout=0.3)
+        # Predict next code for each quantizer level
+        self.heads = nn.ModuleList([
+            nn.Linear(hidden, num_codes) for _ in range(num_quantizers)
+        ])
+
+    def forward(self, codes):
+        # codes: [B, T, num_quantizers] -- integer indices
+        # Train: teacher-forced, predict next timestep
+        ...
+```
+
+### Codebook Visualization: No New Library Needed
+
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| matplotlib | >=3.9 (already installed) | Codebook utilization heatmaps, code frequency histograms | Already in the project's dependencies. Sufficient for codebook usage heatmaps, per-quantizer utilization bar charts, and dead code monitoring. The existing training loop already uses matplotlib for loss charts. Gradio can display matplotlib figures directly. No need for Plotly -- this project does not need interactive web-based charts for codebook visualization. |
+
+**What to visualize (using existing matplotlib):**
+
+1. **Codebook utilization heatmap:** `[num_quantizers x codebook_size]` matrix showing how often each code is selected. Identifies dead codes (never used) and dominant codes (potential collapse).
+2. **Per-quantizer usage histogram:** Bar chart of code frequency per RVQ level. Healthy codebooks show roughly uniform usage.
+3. **Code sequence patterns:** Temporal heatmap of `[time_frames x num_quantizers]` showing which codes activate over time for a given audio file.
+4. **Reconstruction quality over RVQ depth:** Progressive reconstruction using 1, 2, 3, ... N quantizer levels, showing how each level refines audio quality.
+
+### Audio Processing: No New Dependencies
+
+No new audio processing libraries are needed. The existing stack handles everything:
+
+| Existing Technology | v1.1 Usage |
+|---------------------|------------|
+| torchaudio MelSpectrogram | Same mel spectrogram pipeline -- RVQ-VAE operates on the same mel representation as the v1.0 VAE |
+| torchaudio GriffinLim | Same mel-to-waveform reconstruction for previews and generation |
+| soundfile | Same audio I/O for export |
+| mutagen | Same metadata embedding |
+
+The RVQ-VAE replaces the *latent representation* (continuous z to discrete codes) but the input/output pipeline stays identical: waveform -> mel spectrogram -> encoder -> **[RVQ here]** -> decoder -> mel spectrogram -> waveform.
+
+## What NOT to Add
+
+| Tempting Addition | Why to Avoid |
+|-------------------|--------------|
+| PyTorch Lightning | The project already has a well-structured training loop in `src/distill/training/loop.py` with checkpointing, metrics, previews, and cancellation. Lightning would require rewriting all of this for marginal benefit. The codebase pattern (lazy imports, callback system, cancel events) is custom and works. |
+| Weights & Biases / MLflow | Over-engineering for a local creative tool with 5-500 files. The existing Rich-based console logging and matplotlib loss charts are sufficient. Adding cloud experiment tracking adds complexity and a network dependency for no user benefit. |
+| Hydra config system | The project uses dataclasses (`TrainingConfig`, `SpectrogramConfig`) with JSON serialization. This pattern is simpler and already works. Hydra is for research labs managing hundreds of experiment configs. |
+| librosa | The project explicitly chose TorchAudio + soundfile over librosa. TorchAudio provides all needed transforms (mel spectrogram, Griffin-Lim). librosa would add a redundant dependency. |
+| pedalboard | Data augmentation is already implemented in `src/distill/audio/augmentation.py` using TorchAudio transforms. Adding Spotify's pedalboard is unnecessary. |
+| auraloss (multi-resolution STFT loss) | For v1.1, MSE on mel spectrograms remains the reconstruction loss (same as v1.0). Multi-resolution STFT loss is a potential future improvement but adds a dependency for something that can be implemented in ~50 lines if needed. Focus v1.1 on getting RVQ-VAE working first. |
+| DAC / EnCodec | These are complete neural codecs (encoder + RVQ + decoder trained together). This project builds its own encoder/decoder architecture around mel spectrograms. Importing DAC/EnCodec would replace the entire architecture rather than extending it. |
+| RAVE | Same issue as DAC/EnCodec -- it is a complete system, not a component. The project's architecture is intentionally custom. |
+| plotly | Interactive web charts are unnecessary. Matplotlib figures render in Gradio tabs. The codebook visualizations are diagnostic, not user-facing interactive dashboards. |
+| einx (standalone) | Installed automatically as a dependency of vector-quantize-pytorch. Do not install separately to avoid version conflicts. |
+
+## Integration Points with Existing Code
+
+### Model Architecture (`src/distill/models/`)
+
+| Existing File | Change Required | Notes |
+|---------------|-----------------|-------|
+| `vae.py` | Replace entirely with `vqvae.py` | New `ConvVQVAE` class. Encoder stays convolutional (similar structure). Decoder stays convolutional. The middle bottleneck changes from `(mu, logvar) -> reparameterize -> z` to `encoder_output -> ResidualVQ -> quantized`. |
+| `losses.py` | Rewrite for VQ losses | Replace KL divergence with commitment loss from ResidualVQ. Keep MSE reconstruction loss. Remove `free_bits`, `kl_weight`, KL annealing -- these are continuous VAE concepts that do not apply to VQ-VAE. |
+| `persistence.py` | Extend for new model format | Save/load must handle: VQ-VAE state dict (different keys), codebook state (EMA buffers), prior model state dict. The `.distill` model format needs a version bump. |
+
+### Training Loop (`src/distill/training/`)
+
+| Existing File | Change Required | Notes |
+|---------------|-----------------|-------|
+| `loop.py` | Rewrite training/validation epochs | VQ-VAE forward pass returns `(recon, indices, commit_loss)` not `(recon, mu, logvar)`. Loss function changes. Remove KL annealing. Add codebook utilization monitoring. Add prior model training (can be same loop or separate phase). |
+| `config.py` | Extend with VQ-specific params | Add: `codebook_size`, `num_quantizers`, `commitment_weight`, `ema_decay`, `dead_code_threshold`. Remove: `kl_warmup_fraction`, `kl_weight_max`, `free_bits`. |
+| `metrics.py` | Add VQ-specific metrics | New metrics: codebook utilization (active codes / total codes), perplexity, commitment loss. Remove: KL divergence, posterior collapse warning. |
+
+### Controls (`src/distill/controls/`)
+
+| Existing File | Change Required | Notes |
+|---------------|-----------------|-------|
+| `analyzer.py` | Replace PCA analysis with codebook analysis | PCA-based latent space analysis is continuous-VAE specific. Replace with: codebook usage statistics, code co-occurrence patterns, per-quantizer analysis. |
+| `mapping.py` | Replace slider mapping with code manipulation | PCA sliders -> code swapping/blending UI. The generation paradigm shifts from "slide along PCA axis" to "select/swap/blend discrete codes." |
+
+### UI (`src/distill/ui/`)
+
+| Existing File | Change Required | Notes |
+|---------------|-----------------|-------|
+| `tabs/generate_tab.py` | Major rewrite | Replace PCA slider generation with: (1) autoregressive prior sampling, (2) code editing interface. |
+| New: `tabs/code_tab.py` | New file | Code manipulation UI: encode audio -> view codes as grid/heatmap -> swap/blend/edit -> decode back to audio. |
 
 ## Installation
 
 ```bash
-# Core PyTorch (Choose ONE based on your hardware)
+# In project root (H:/dev/Distill-vqvae)
+# Only ONE new package to install (brings einops and einx as dependencies):
+pip install "vector-quantize-pytorch>=1.27.0"
 
-# Apple Silicon (MPS)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision
-
-# NVIDIA GPU (CUDA 12.8 - recommended for RTX 30/40 series)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
-
-# CPU only (for testing)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision
-
-# Training framework
-pip install pytorch-lightning==2.6.1
-
-# Generative models
-pip install acids-rave  # RAVE (install PyTorch first!)
-pip install git+https://github.com/Stability-AI/stable-audio-tools  # Stable Audio
-
-# Neural codecs
-pip install descript-audio-codec  # DAC
-pip install encodec  # EnCodec (if you need 48kHz exactly)
-
-# Audio processing
-pip install librosa>=0.11.0
-pip install soundfile
-pip install pedalboard>=0.9.22
-
-# Training utilities
-pip install auraloss
-pip install einops>=0.8.2
-pip install hydra-core
-
-# Experiment tracking
-pip install wandb  # Weights & Biases
-# OR
-pip install mlflow  # If you prefer MLflow
-
-# UI
-pip install gradio==6.5.1
-
-# Development tools
-pip install jupyter jupyterlab
-pip install matplotlib seaborn  # Visualization
-pip install tensorboard  # Alternative visualization
-
-# System dependencies
-conda install ffmpeg  # Required by RAVE and audio processing
+# Or with uv (project uses uv):
+uv add "vector-quantize-pytorch>=1.27.0"
 ```
 
-## Alternatives Considered
+**That's it.** No other new dependencies are needed for v1.1.
 
-| Category | Recommended | Alternative | When to Use Alternative |
-|----------|-------------|-------------|-------------------------|
-| Generative Model | RAVE v2 | Jukebox (OpenAI) | If you have massive compute (days on 256 V100s) and huge datasets (millions of songs). Not suitable for 5-500 files. |
-| Generative Model | RAVE v2 / DDSP | AudioLM | If you want language model approach to audio. Requires large datasets and tokenized audio. Overkill for small datasets. |
-| Neural Codec | DAC | SoundStream | Google's codec, but less accessible (no official implementation). DAC is "drop-in replacement for EnCodec" with better quality. |
-| Audio I/O | soundfile | scipy.io.wavfile | Only if you're restricted to stdlib. soundfile supports more formats and is faster. |
-| UI Framework | Gradio | Streamlit | If you need more complex app structure. Gradio is simpler and audio-focused. |
-| Experiment Tracking | W&B | TensorBoard | If you want completely local/offline tracking. W&B has better audio support and collaboration features. |
-| Config Management | Hydra | argparse + YAML | Only for very simple projects. Hydra's composition and override system is essential for complex experiments. |
+## pyproject.toml Addition
 
-## What NOT to Use
-
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| Magenta DDSP (TensorFlow version) | TensorFlow is declining in research community. Harder to customize. PyTorch ecosystem dominates audio ML. | DDSP concepts implemented in PyTorch (or contribute PyTorch port to community) |
-| WaveNet / WaveGlow | Outdated (2016-2018). Extremely slow training and inference. Superseded by RAVE, diffusion models, and neural codecs. | RAVE for VAE approach, Stable Audio for diffusion |
-| pySoX / SoxBindings | 300x slower than pedalboard. Limited effects. Bindings can be fragile. | pedalboard (modern, fast, maintained by Spotify) |
-| Older PyTorch (<2.0) | Missing key features: torch.compile, better MPS support, Flash Attention. | PyTorch 2.10.0 (current stable) |
-| MusicVAE (original) | Designed for symbolic music (MIDI), not audio waveforms. Small latent space (512-dim) limits expressiveness for audio. | RAVE (designed for audio from the ground up) |
-| Real-time focused models for non-real-time use | RAVE has real-time variant but you want quality over speed. Disable real-time constraints in training config. | Use non-causal convolutions, larger models, prioritize quality in your fork/config |
-
-## Stack Patterns by Use Case
-
-**If training from scratch with 5-20 files:**
-- Use DDSP (works with <13 min of audio)
-- Aggressive data augmentation with pedalboard
-- Simple architecture to avoid overfitting
-- Multi-resolution STFT loss from auraloss
-
-**If training with 50-500 files:**
-- Use RAVE v2 or v2_small
-- Beta-VAE for disentanglement (beta=4-10)
-- Data augmentation with pedalboard (pitch shift, time stretch, EQ)
-- Multi-resolution STFT + perceptual losses
-
-**If fine-tuning pretrained models:**
-- Use Stable Audio Tools
-- Freeze encoder, train only decoder or specific layers
-- Your small dataset becomes "style transfer" data
-- Leverage W&B for comparing fine-tuning strategies
-
-**For high-fidelity (48kHz/24bit+) generation:**
-- EnCodec for exact 48kHz support, or upsample DAC output
-- Multi-resolution STFT loss at multiple scales
-- Avoid downsampling in preprocessing - work at native rate
-- Use 24-bit WAV output (soundfile supports this)
-
-**For musically meaningful controls:**
-- Implement Beta-VAE with disentanglement metrics
-- Create interpretable dimensions via controlled interventions
-- Use DDSP components for explicit harmonic/noise control
-- Build Gradio interface with labeled sliders per dimension
+```toml
+[project]
+dependencies = [
+    # ... existing dependencies ...
+    "vector-quantize-pytorch>=1.27.0",
+]
+```
 
 ## Version Compatibility
 
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| PyTorch 2.10.0 | TorchAudio 2.10.0 | Always use matching versions |
-| PyTorch 2.10.0 | PyTorch Lightning 2.6.1 | Tested and verified |
-| RAVE 2.3.1 | PyTorch 1.13+ | Now flexible - install PyTorch first, then RAVE |
-| Stable Audio Tools | PyTorch 2.5+ | Requires Flash Attention support, introduced in 2.5 |
-| Gradio 6.5.1 | PyTorch 2.10.0 | Independent packages, no conflicts |
-| librosa 0.11.0 | soundfile latest | librosa uses soundfile as backend |
-| pedalboard 0.9.22 | All Python 3.8+ | Native extension, framework-agnostic |
+| Package | Version | Compatible With | Verified |
+|---------|---------|-----------------|----------|
+| vector-quantize-pytorch | 1.27.21 | PyTorch >= 2.0 (no upper bound pinned), Python >= 3.9 | PyPI metadata, 2026-02-12 release |
+| einops | 0.8.2 | PyTorch (all versions), Python >= 3.8 | PyPI metadata, 2026-01-26 release |
+| einx[torch] | 0.3.0 | PyTorch (all versions), Python >= 3.9 | PyPI metadata, 2024-06-11 release |
+| PyTorch nn.LSTM | (bundled) | CUDA, MPS, CPU -- all backends | Core PyTorch operation |
 
-## Apple Silicon (MPS) Specific Notes
+**Note on installed PyTorch version:** The pyproject.toml specifies `torch>=2.10.0,<2.11` but the current venv has `torch==2.4.0+cu118`. vector-quantize-pytorch works with both -- it has no upper or lower bound on torch beyond requiring it to be installed. When the venv is updated to match pyproject.toml, no issues expected.
 
-**What works:**
-- PyTorch 2.10.0 has mature MPS support
-- TorchAudio operations (spectrograms, resampling)
-- RAVE training (tested in Jan 2026)
-- Most audio processing (librosa, pedalboard, soundfile)
+## MPS / CUDA / CPU Compatibility
 
-**What to watch:**
-- Some PyTorch ops fall back to CPU (warnings will appear)
-- Float precision matters - MPS can be sensitive to fp16
-- For RAVE: use float32 for training on MPS (voice clone requires it)
-- Test on MPS first, but have cloud GPU backup for large-scale training
+### vector-quantize-pytorch
 
-**Workarounds:**
-- Use `PYTORCH_ENABLE_MPS_FALLBACK=1` environment variable
-- Monitor MPS memory usage (Activity Monitor > GPU History)
-- For operations that fail on MPS, use `.cpu()` selectively
+| Backend | Status | Notes |
+|---------|--------|-------|
+| **CUDA** | Fully supported | All operations run on GPU. No known issues. |
+| **CPU** | Fully supported | All operations run on CPU. Slower but functional. |
+| **MPS** | Partially supported, workaround available | A historical crash was reported (issue #55) due to `aten::lerp.Scalar_out` not being supported on MPS and ComplexFloat dtype incompatibility. The issue is **closed** on GitHub. For safety: (1) the existing project pattern of running InverseMelScale on CPU provides a template for MPS workarounds, (2) k-means init should use `kmeans_init=True, kmeans_iters=10` which runs during the first forward pass and may need CPU fallback on older MPS, (3) EMA updates use `lerp_` which has improved MPS support in PyTorch 2.4+. **Recommendation:** Test on MPS early in development. If issues arise, the VQ layer can be wrapped to run on CPU (it is not the bottleneck -- the conv encoder/decoder are). |
 
-## Cloud GPU Recommendations
+### nn.LSTM (Prior Model)
 
-**For experimentation (RAVE v2_small):**
-- 1x RTX 3080 (10GB) or better
-- 16GB system RAM
-- Cost: ~$0.50/hour on AWS/Lambda Labs
+| Backend | Status | Notes |
+|---------|--------|-------|
+| **CUDA** | Fully supported | cuDNN-accelerated. Fast. |
+| **CPU** | Fully supported | Standard implementation. |
+| **MPS** | Fully supported | LSTM is well-supported on MPS since PyTorch 2.0. |
 
-**For production (RAVE v2):**
-- 1x RTX 3090 / 4090 (24GB) or A100 (40GB)
-- 32GB system RAM
-- Cost: ~$1-2/hour
+**Overall MPS strategy:** Same as v1.0 -- use `float32` throughout (no float16 on MPS), apply the existing smoke test pattern, fall back selectively to CPU for operations that fail. The project already handles this in `src/distill/hardware/device.py`.
 
-**For Stable Audio fine-tuning:**
-- Multi-GPU setup (2-4x A100) recommended
-- DeepSpeed ZeRO Stage 2 for memory efficiency
-- Cost: ~$4-8/hour for 4x A100
+## Small Dataset Sizing Recommendations
 
-**Providers:**
-- Lambda Labs: Good GPU availability, hourly billing
-- RunPod: Competitive pricing, Spot instances
-- Google Colab Pro+: Good for prototyping, A100 access
-- AWS/GCP/Azure: Enterprise option, more expensive
+For 5-500 audio files, codebook and model sizes must be scaled down from the literature (SoundStream uses 1024 codes, 8 quantizers on millions of hours of audio):
 
-## Small Dataset Strategy
+| Dataset Size | Codebook Size | Num Quantizers | Prior Hidden | Rationale |
+|-------------|--------------|----------------|--------------|-----------|
+| 5-20 files | 64 | 2-3 | 256 | Tiny dataset: more codes = more dead codes. 2 quantizers give coarse + fine. |
+| 20-100 files | 128-256 | 3-4 | 256-512 | Medium dataset: 128 codes is usually sufficient. 3-4 quantizers for detail. |
+| 100-500 files | 256-512 | 4-6 | 512 | Larger dataset: can support bigger codebook. 4-6 quantizers for nuance. |
 
-Your core challenge is making generative audio work with 5-500 files. Here's the stack strategy:
+**Key insight:** At 5-20 files producing ~50-200 mel spectrogram chunks each, the total training set is 250-4000 sequences of ~94 time steps. A codebook of 1024 would have most entries unused. Start with `codebook_size=128, num_quantizers=4` as a default and expose these as training config parameters.
 
-**Data augmentation is critical:**
-1. Use pedalboard for musical augmentations (EQ, compression, reverb)
-2. Pitch shifting ±2 semitones without timestretching
-3. Time stretching ±10% without pitch shifting
-4. Random EQ curves, subtle distortion
-5. Mix with environmental noise at low levels
+## Alternatives Considered
 
-**Architecture choices:**
-1. Smaller models to prevent overfitting (RAVE v2_small over v2)
-2. Strong regularization (Beta-VAE with beta=6-10)
-3. Early stopping with validation set (20% of your data)
-4. Multi-resolution STFT loss to learn features at multiple scales
-
-**Transfer learning when possible:**
-1. Stable Audio Tools: Fine-tune pretrained models
-2. Neural codecs: Use pretrained DAC/EnCodec, train only on top
-3. RAVE: If community releases pretrained models, start from those
-
-**Validation strategy:**
-1. Log audio to W&B every N epochs
-2. Qualitative listening tests are as important as metrics
-3. Latent space interpolations to check smoothness
-4. Reconstruction quality on held-out files
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| VQ Library | vector-quantize-pytorch | Custom VQ implementation | Custom VQ is 500-1000 lines to get right (straight-through estimator, EMA updates, dead code replacement, k-means init, codebook collapse prevention). The library handles all edge cases and is well-tested. The "not invented here" cost is not worth it for VQ. |
+| VQ Library | vector-quantize-pytorch | torchvq | Less maintained, fewer features, no RVQ support. |
+| Prior Model | LSTM | Transformer | Transformers overfit on small datasets (5-500 files produce <5000 training sequences). LSTMs have sequential inductive bias built in and need 5-10x fewer parameters. |
+| Prior Model | LSTM | WaveNet-style dilated convolutions | More complex to implement, marginal benefit for short sequences (~94 time steps). WaveNet shines on very long sequences (thousands of steps). |
+| Prior Model | LSTM | PixelCNN / PixelSNAIL | Designed for 2D grids (images). Code sequences are 1D temporal. LSTM is more natural. |
+| Codebook Viz | matplotlib | Plotly | Already installed, renders in Gradio, sufficient for diagnostic heatmaps. Plotly adds a heavy dependency for no added value in a local creative tool. |
+| Codebook Viz | matplotlib | tensorboard | Already installed but the project does not use TensorBoard. Adding TensorBoard logging for one feature is over-engineering. |
 
 ## Sources
 
-**High Confidence (Official Docs & Releases):**
-- [PyTorch 2.10.0 Installation](https://pytorch.org/get-started/locally/)
-- [PyTorch Lightning 2.6.1 Changelog](https://lightning.ai/docs/pytorch/stable/generated/CHANGELOG.html)
-- [RAVE GitHub Repository](https://github.com/acids-ircam/RAVE)
-- [Stable Audio Tools GitHub](https://github.com/Stability-AI/stable-audio-tools)
-- [DAC GitHub Repository](https://github.com/descriptinc/descript-audio-codec)
-- [Gradio 6.5.1 Documentation](https://www.gradio.app/docs/gradio/audio)
-- [Hugging Face Diffusers](https://huggingface.co/docs/diffusers/index)
+**HIGH Confidence (Official/Verified):**
+- [vector-quantize-pytorch PyPI](https://pypi.org/project/vector-quantize-pytorch/) -- v1.27.21, 2026-02-12
+- [vector-quantize-pytorch GitHub](https://github.com/lucidrains/vector-quantize-pytorch) -- ResidualVQ API, features, parameters
+- [einops PyPI](https://pypi.org/project/einops/) -- v0.8.2, 2026-01-26
+- [einx PyPI](https://pypi.org/project/einx/) -- v0.3.0, 2024-06-11
+- [vector-quantize-pytorch setup.py dependencies](https://github.com/OpenDocCN/python-code-anls/blob/master/docs/lucidrains/vector-quantize-pytorch----setup.py.md) -- einops>=0.7.0, einx[torch]>=0.1.3, torch
 
-**Medium Confidence (Recent Research & Community):**
-- [Source-Disentangled Neural Audio Codec (SD-Codec)](https://arxiv.org/html/2409.11228v1) - ICASSP 2025
-- [MiMo-Audio: Few-Shot Audio Learning](https://arxiv.org/abs/2512.23808) - 2025
-- [Stable Audio Open Paper](https://arxiv.org/html/2407.14358v1)
-- [DDSP Original Paper](https://magenta.tensorflow.org/ddsp)
-- [Beta-VAE Disentanglement Research 2025](https://arxiv.org/html/2602.09277)
-- [Pedalboard by Spotify](https://github.com/spotify/pedalboard)
-- [auraloss GitHub](https://github.com/csteinmetz1/auraloss)
+**MEDIUM Confidence (Verified with multiple sources):**
+- [vector-quantize-pytorch MPS Issue #55](https://github.com/lucidrains/vector-quantize-pytorch/issues/55) -- MPS crash (closed/resolved)
+- [SoundStream Paper](https://arxiv.org/abs/2107.03312) -- RVQ architecture, k-means init, codebook design
+- [LSTM vs Transformer for small datasets](https://discuss.pytorch.org/t/cant-get-transformer-to-exceed-lstm-help/210178) -- PyTorch community discussion
+- [Optimizing Deeper Transformers on Small Datasets](https://aclanthology.org/2021.acl-long.163.pdf) -- ACL 2021 paper
+- [VQ-VAE + Transformer Systems](https://www.emergentmind.com/topics/vq-vae-transformer-systems) -- Architecture overview
 
-**Medium Confidence (Web Search - Multiple Sources):**
-- [RAVE vs DDSP comparison](https://neurorave.github.io/neurorave/)
-- [EnCodec Facebook Research](https://github.com/facebookresearch/encodec)
-- [Neural Audio Codecs Overview 2025](https://www.abyssmedia.com/audioconverter/neural-audio-codecs-overview.shtml)
-- [PyTorch MPS Apple Silicon Support](https://developer.apple.com/metal/pytorch/)
-- [Einops 0.8.2 Release](https://github.com/arogozhnikov/einops)
-
-**Note on Confidence Levels:**
-- Core framework versions (PyTorch, Lightning, Gradio): HIGH - verified from official sources
-- Generative models (RAVE, Stable Audio, DDSP): HIGH - verified from official repos
-- Small dataset performance claims: MEDIUM - based on research papers and community reports
-- Disentanglement techniques: MEDIUM - active research area, techniques evolving
-- MPS support specifics: MEDIUM - based on community testing and GitHub issues, still maturing
+**LOW Confidence (Single source, needs validation during implementation):**
+- MPS compatibility of vector-quantize-pytorch with PyTorch 2.10+ -- the closed issue is from PyTorch 2.0 era. Modern PyTorch likely resolves it but should be smoke-tested.
+- Codebook size recommendations for very small datasets (5-20 files) -- extrapolated from literature on larger datasets. No published research on this exact regime.
 
 ---
-*Stack research for: Small Dataset Generative Audio*
-*Researched: 2026-02-12*
+*Stack research for: Distill v1.1 RVQ-VAE + Autoregressive Prior*
+*Researched: 2026-02-21*
