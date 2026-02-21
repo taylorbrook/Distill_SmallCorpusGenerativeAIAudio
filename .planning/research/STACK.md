@@ -1,312 +1,409 @@
-# Technology Stack
+# Technology Stack: v1.1 HiFi-GAN Vocoder Milestone
 
-**Project:** Small Dataset Generative Audio
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM-HIGH
+**Project:** Small Dataset Generative Audio -- Neural Vocoder Integration
+**Researched:** 2026-02-21
+**Confidence:** HIGH (verified against official repos, HuggingFace model cards, config files)
 
-## Recommended Stack
+> This document covers ONLY the stack additions/changes needed for
+> BigVGAN-v2 integration and optional per-model HiFi-GAN V2 training.
+> The existing v1.0 stack (PyTorch 2.10.0, TorchAudio, Gradio, etc.)
+> is validated and unchanged.
 
-### Core Framework
+---
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| PyTorch | 2.10.0 | Deep learning framework | Industry standard for research-grade audio ML. Native MPS support for Apple Silicon, excellent CUDA support, and flexible enough for novel architectures. Version 2.10.0 is latest stable as of Feb 2026. |
-| TorchAudio | 2.10.0 | Audio I/O and transforms | Official PyTorch audio library. Provides efficient spectrograms, resampling, and integrates seamlessly with PyTorch tensors. Transitioned to maintenance phase, focusing on core audio processing. |
-| PyTorch Lightning | 2.6.1 | Training orchestration | Reduces boilerplate for distributed training, multi-GPU support, experiment logging. Latest version (Jan 30, 2026) provides production-ready features for complex training workflows. |
+## Critical Compatibility Analysis: 48 kHz Pipeline vs BigVGAN Models
 
-### Generative Model Architecture
+The project operates at 48 kHz internally. No BigVGAN model exists at 48 kHz.
+This is the single most important architectural decision for this milestone.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| RAVE | 2.3.1 | VAE-based audio synthesis | Real-time Audio Variational autoEncoder specifically designed for audio. v2 architecture offers faster processing and higher quality than v1. Proven for small datasets (2-3 hours minimum). Use v2_small config (8GB GPU) for development, v2 for production (16GB GPU). **Caveat:** Latent controls are opaque - you'll need to build disentanglement on top. |
-| Stable Audio Tools | Latest (requires PyTorch 2.5+) | Latent diffusion framework | Production-grade latent diffusion for audio. Includes pretrained VAEs, U-Net diffusion models, and supports fine-tuning. Open source (MIT), actively maintained by Stability AI. Enables conditioning on text/metadata and duration control. **Best for:** Fine-tuning pretrained models on small datasets rather than training from scratch. |
-| DDSP | Latest (Magenta) | Differentiable DSP | Use for interpretable synthesis. Trains on <13 minutes of audio. Explicitly models harmonic and noise components, making it naturally more interpretable than pure neural approaches. **Trade-off:** Limited to monophonic or simple timbres, but parameters are inherently musical. |
+### Available BigVGAN-v2 Models
 
-**Recommendation:** Start with RAVE v2_small for rapid prototyping, then layer disentanglement techniques. Consider DDSP for interpretable baseline comparisons and Stable Audio Tools if you can leverage pretrained models via transfer learning.
+| Model ID | Sample Rate | Mel Bands | n_fft | hop_size | win_size | fmin | fmax | Params | Size |
+|----------|-------------|-----------|-------|----------|----------|------|------|--------|------|
+| `bigvgan_v2_44khz_128band_512x` | 44100 | 128 | 2048 | 512 | 2048 | 0 | null (22050) | 122M | ~489MB |
+| `bigvgan_v2_44khz_128band_256x` | 44100 | 128 | 1024 | 256 | 1024 | 0 | null (22050) | 112M | ~450MB |
+| `bigvgan_v2_24khz_100band_256x` | 24000 | 100 | 1024 | 256 | 1024 | 0 | 12000 | 112M | ~450MB |
+| `bigvgan_v2_22khz_80band_256x` | 22050 | 80 | 1024 | 256 | 1024 | 0 | 11025 | 112M | ~450MB |
 
-### Neural Audio Codec
+### Recommended Model: `bigvgan_v2_44khz_128band_512x`
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| DAC (Descript Audio Codec) | 1.0.0 | High-fidelity audio compression | State-of-the-art neural codec with ~90x compression while preserving quality. Supports 44.1kHz (your target is 48kHz, this is close). Works across speech, music, environmental audio. MIT licensed. Operates at 8 kbps. **Use for:** Compressing training data or as a perceptual bottleneck in your architecture. |
-| EnCodec | Latest | Alternative neural codec | Facebook's codec, supports stereo 48kHz (matches your requirement exactly). Use if you need exact 48kHz support. **Trade-off:** DAC has better quality per bitrate, but EnCodec has exact sample rate match. |
+**Why this model:**
 
-**Recommendation:** Use DAC for general work (44.1kHz is close enough for experimentation). Switch to EnCodec if 48kHz becomes a hard requirement or you need the perceptual features from Meta's ecosystem.
+1. **Closest to 48 kHz** -- 44.1 kHz captures up to 22.05 kHz, well above human hearing (20 kHz). Upsampling 44.1 kHz output to 48 kHz with torchaudio.transforms.Resample is transparent and lossless for audible content.
+2. **128 mel bands matches project default** -- The project already uses `n_mels=128`. This model uses 128 mel bands. No mel dimension change needed in the VAE architecture.
+3. **Matching n_fft and hop_size** -- Project: `n_fft=2048, hop_length=512`. This model: `n_fft=2048, hop_size=512`. Near-identical spectral resolution.
+4. **Highest quality** -- 512x upsampling with 122M parameters, trained on diverse audio (speech, environmental, instruments) for 5M steps.
+5. **Universal model** -- Trained on diverse audio types, not just speech. Suitable for the project's genre-agnostic design.
 
-### Audio Processing
+### Sample Rate Strategy
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| librosa | 0.11.0+ | Audio analysis and feature extraction | De facto standard for music/audio feature extraction (MFCCs, spectral features, onset detection). Well-documented, widely used in research. |
-| soundfile | Latest | Audio I/O | Efficient reading/writing of WAV, FLAC, OGG. Simpler interface than librosa for pure I/O. Recommended over librosa.load for production pipelines. |
-| pedalboard | 0.9.22+ | Audio effects and augmentation | Spotify's audio effects library. 300x faster than pySoX, 4x faster file loading than librosa.load. Use for data augmentation (EQ, compression, reverb) to artificially expand small datasets. Supports VST3/Audio Unit plugins for creative effects. |
+```
+VAE Training & Inference Pipeline:
+  48 kHz audio --> resample to 44.1 kHz --> compute BigVGAN-compatible mel --> VAE encodes/decodes mel
 
-**Recommendation:** Use soundfile for I/O, librosa for analysis/features, pedalboard for augmentation. This combo gives you speed (pedalboard) + research features (librosa) + simplicity (soundfile).
+Generation Pipeline (replacing Griffin-Lim):
+  VAE decoded mel --> BigVGAN vocoder (44.1 kHz output) --> resample to 48 kHz --> spatial/export pipeline
+```
 
-### Training and Optimization
+The project already has a resampler cache (`_resampler_cache` in `generation.py`) and resamples at the end of the pipeline. The change is:
+- **Before:** Internal processing at 48 kHz, Griffin-Lim at 48 kHz, resample at export if needed.
+- **After:** Internal mel computation at 44.1 kHz parameters, BigVGAN synthesizes at 44.1 kHz, resample to 48 kHz before spatial/export.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| auraloss | 0.2.0+ | Audio-specific loss functions | PyTorch package with time-domain (ESR, SI-SDR, SNR) and frequency-domain (multi-resolution STFT, Mel-STFT) losses designed for audio. Critical for perceptually meaningful training. Use multi-resolution STFT loss for high-fidelity reconstruction. |
-| einops | 0.8.2 | Tensor manipulation | Readable tensor operations (rearrange, reduce, repeat). Essential for complex audio tensor shapes (batch, channels, time, frequency). Latest version (Jan 26, 2026) supports all major frameworks. |
-| Hydra | 1.3+ | Configuration management | Facebook's hierarchical config system. Essential for managing experiments with multiple hyperparameters, model architectures, and dataset variations. Enables reproducible research and rapid iteration. |
+This requires changing `SpectrogramConfig` defaults to 44.1 kHz to match BigVGAN, OR computing a separate BigVGAN-compatible mel at inference time. The latter is cleaner because it preserves backward compatibility with existing trained models.
 
-### Latent Space Disentanglement
+---
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Beta-VAE / Factor-VAE | Custom implementation | Disentangled representations | Your core innovation area. Beta-VAE pressures latent space toward factorial prior via weighted KL term. Factor-VAE explicitly penalizes total correlation. **Recent research (2025):** Shows beta-VAE can collapse mutual information under heavy regularization - you'll need careful tuning. Start with beta=4-10, monitor reconstruction vs. disentanglement trade-off. |
-| SD-Codec approach | Research paper reference | Source-disentangled codec | 2025 ICASSP paper shows joint audio coding + source separation by assigning different domains to distinct codebooks. **Apply to your case:** Separate timbral, harmonic, temporal dimensions into different codebook groups for explicit control. |
+## Recommended Stack Additions
 
-**Recommendation:** Implement Beta-VAE first (simpler), then experiment with SD-Codec's multi-codebook approach if single-latent disentanglement fails. Monitor with qualitative latent traversals and quantitative disentanglement metrics.
+### BigVGAN Integration (Inference Only)
 
-### Experiment Tracking
+| Technology | Version/Source | Purpose | Why |
+|------------|---------------|---------|-----|
+| BigVGAN (vendored) | From HuggingFace repo | Neural vocoder generator | Not available as a pip package. Must vendor the model class files (`bigvgan.py`, `activations.py`, `alias_free_activation/`, `env.py`) or use HuggingFace Hub download. |
+| huggingface_hub | >=0.23.4 (1.4.1 installed) | Model download/caching | Already installed. Provides `from_pretrained()` with automatic download, caching at `~/.cache/huggingface/hub`, and version management. |
+| librosa | >=0.10.0 | Mel filterbank computation | **Required** for BigVGAN mel compatibility. BigVGAN uses `librosa.filters.mel()` with Slaney normalization to build mel filterbanks. TorchAudio's `MelSpectrogram` uses HTK scale by default -- these produce DIFFERENT mel spectrograms. Using the wrong mel will produce garbage audio. |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Weights & Biases | Latest | Experiment tracking and visualization | Industry standard for ML experiment tracking. Rich media support (audio, spectrograms). Real-time metric logging. Required by Stable Audio Tools. Free tier available. |
-| MLflow | Latest | Alternative tracking | Open source alternative to W&B. Self-hosted option if you prefer local control. Less audio-specific features but more flexible for custom metrics. |
+**Confidence:** HIGH -- verified from BigVGAN source code (`meldataset.py`), model configs on HuggingFace, and NVIDIA GitHub repo.
 
-**Recommendation:** Start with W&B for rapid iteration and rich audio visualization. Switch to MLflow only if you need self-hosting or have privacy constraints.
+### Mel Spectrogram Compatibility: Critical Details
 
-### User Interface
+The project's current mel computation (`AudioSpectrogram` class) is incompatible with BigVGAN:
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Gradio | 6.5.1 | Interactive UI | Latest version (Jan 29, 2026). Built-in audio components with waveform display, microphone input, streaming support. Perfect for rapid prototyping of audio interfaces. Supports real-time parameter manipulation via sliders. Integrates with Hugging Face Spaces for easy sharing. |
+| Parameter | Project (v1.0) | BigVGAN 44kHz/128band/512x | Compatible? |
+|-----------|----------------|----------------------------|-------------|
+| sample_rate | 48000 | 44100 | NO -- must resample |
+| n_fft | 2048 | 2048 | YES |
+| hop_length | 512 | 512 | YES |
+| n_mels | 128 | 128 | YES |
+| f_min | 0.0 | 0 | YES |
+| f_max | None (24000) | None (22050) | NO -- different Nyquist |
+| Mel scale | HTK (torchaudio default) | Slaney (librosa default) | **NO -- CRITICAL** |
+| Normalization | None (torchaudio default) | Slaney norm (librosa default) | **NO -- CRITICAL** |
+| Log compression | `torch.log1p(x)` | `torch.log(clamp(x, 1e-5))` | **NO -- CRITICAL** |
+| center | True (torchaudio default) | False (BigVGAN explicit) | **NO** |
+| Window | Hann (torchaudio) | Hann (torch.hann_window) | YES |
 
-### Development Tools
+**Three incompatibilities require a dedicated BigVGAN mel computation function:**
 
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| Jupyter Lab | Interactive development | Standard for audio ML research. Use for exploratory analysis, feature visualization. |
-| VSCode + Python extension | Code editor | Excellent PyTorch debugging, notebook support, Git integration. |
-| FFmpeg | Audio conversion | Required by RAVE and many audio libraries. Install via conda or system package manager. |
-| Git LFS | Large file storage | Essential for storing audio datasets and trained model checkpoints. Configure before committing audio files. |
+1. **Mel scale and normalization:** librosa uses Slaney scale with area normalization by default. TorchAudio uses HTK with no normalization. These produce numerically different filterbanks.
+2. **Log compression:** Project uses `log1p(x)` (log(1+x)), BigVGAN uses `log(clamp(x, min=1e-5))`. Different dynamic range mapping.
+3. **Center padding:** TorchAudio defaults to `center=True` (pads signal), BigVGAN uses `center=False`.
+
+**Solution:** Create a `BigVGANMelSpectrogram` class that uses `librosa.filters.mel()` for the filterbank and `torch.stft()` with BigVGAN-compatible parameters. This runs alongside the existing `AudioSpectrogram` -- the VAE still trains with the project's mel, but at inference the decoded mel gets converted to a BigVGAN-compatible mel for vocoding.
+
+Actually, the cleaner approach: the VAE should train on BigVGAN-compatible mels from the start, so the decoded mel can be fed directly to BigVGAN without any intermediate conversion. This means the mel computation needs to change for new models (existing models keep their saved SpectrogramConfig for backward compatibility).
+
+### HiFi-GAN V2 Training (Per-Model Fine-Tuning)
+
+| Technology | Version/Source | Purpose | Why |
+|------------|---------------|---------|-----|
+| HiFi-GAN V2 (custom implementation) | Adapted from jik876/hifi-gan + BigVGAN discriminators | Per-model vocoder training | V2 has only 0.92M parameters (vs V1's 13.92M), making it practical to train per-model on a user's small dataset. Achieves 4.23 MOS quality. Train on the same mel spectrograms the VAE produces. |
+| auraloss | >=0.4.0 | Multi-scale mel spectrogram loss | Provides `MultiResolutionSTFTLoss` with mel scaling. Used as auxiliary loss for GAN training alongside adversarial and feature matching losses. |
+| nnAudio | >=0.3.3 | CQT discriminator (optional) | Provides differentiable Constant-Q Transform for the multi-scale sub-band CQT discriminator that BigVGAN-v2 uses. Only needed if implementing BigVGAN-style discriminator instead of classic HiFi-GAN MPD+MSD. |
+
+**Confidence:** HIGH for HiFi-GAN V2 architecture (published paper, reference implementation). MEDIUM for training on small audio datasets (standard approach is large datasets; per-model fine-tuning on 5-500 files is novel territory).
+
+### HiFi-GAN V2 Training Configuration (48 kHz Target)
+
+For per-model HiFi-GAN V2 training, we train at 44.1 kHz to match BigVGAN mel parameters:
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Sampling rate | 44100 | Match BigVGAN mel parameters |
+| n_fft | 2048 | Match BigVGAN 44kHz/128band/512x |
+| hop_size | 512 | Match BigVGAN 44kHz/128band/512x |
+| win_size | 2048 | Match BigVGAN 44kHz/128band/512x |
+| num_mels | 128 | Match BigVGAN and project default |
+| fmin | 0 | Match BigVGAN |
+| fmax | null (22050) | Match BigVGAN (Nyquist at 44.1kHz) |
+| upsample_rates | [8, 8, 2, 2] | HiFi-GAN V2 default (8*8*2*2=256x; 512 hop * 1 would need 512x) |
+| upsample_kernel_sizes | [16, 16, 4, 4] | HiFi-GAN V2 default |
+| upsample_initial_channel | 128 | HiFi-GAN V2 default (compact) |
+| resblock | "1" | HiFi-GAN V2 uses resblock type 1 |
+| resblock_kernel_sizes | [3, 7, 11] | HiFi-GAN V2 default |
+| resblock_dilation_sizes | [[1,3,5], [1,3,5], [1,3,5]] | HiFi-GAN V2 default |
+| segment_size | 16384 | Adjusted for small datasets (original: 8192 at 22kHz -> ~16384 at 44kHz for same duration) |
+| batch_size | 8-16 | Small datasets need smaller batches |
+| learning_rate | 0.0002 | HiFi-GAN V2 default |
+
+**Important:** HiFi-GAN V2 default upsampling gives 256x (hop_size 256 at 22kHz). For our 512 hop_size at 44.1kHz, we need upsample_rates that multiply to 512: `[8, 8, 2, 2, 2]` or `[8, 4, 4, 2, 2]`. This is a configuration adaptation, not an architecture change.
+
+### GAN Training Loss Components
+
+| Loss | Implementation | Weight | Purpose |
+|------|---------------|--------|---------|
+| Adversarial (generator) | LS-GAN loss | 1.0 | Train generator to fool discriminator |
+| Adversarial (discriminator) | LS-GAN loss | 1.0 | Train discriminator to distinguish real/generated |
+| Feature matching | L1 on discriminator intermediate features | 2.0 | Stabilize GAN training |
+| Mel spectrogram | L1 on log-mel spectrograms | 45.0 | Perceptual reconstruction quality |
+| Multi-scale mel (optional) | auraloss `MultiResolutionSTFTLoss` | 15.0 | Multi-resolution spectral fidelity |
+
+### Discriminator Architecture
+
+Use classic HiFi-GAN discriminators (not BigVGAN's CQT discriminator) for per-model training because:
+1. **Simpler** -- MPD + MSD is well-understood and stable for small-scale training.
+2. **No nnAudio dependency** -- Avoids CQT computation complexity.
+3. **Proven** -- HiFi-GAN's discriminators work well even with limited data.
+
+| Component | Description |
+|-----------|-------------|
+| Multi-Period Discriminator (MPD) | 5 sub-discriminators with periods [2, 3, 5, 7, 11]. Each reshapes 1D waveform into 2D by period, applies 2D convolutions. |
+| Multi-Scale Discriminator (MSD) | 3 sub-discriminators at different scales (1x, 2x pool, 4x pool). Each applies 1D convolutions on progressively downsampled audio. |
+
+---
+
+## Model Download and Caching Strategy
+
+### BigVGAN Model Management
+
+| Concern | Solution |
+|---------|----------|
+| First download | `BigVGAN.from_pretrained('nvidia/bigvgan_v2_44khz_128band_512x')` downloads ~489MB to HuggingFace cache |
+| Cache location | Default: `~/.cache/huggingface/hub`. Controllable via `HF_HUB_CACHE` env var or `cache_dir` parameter |
+| Offline usage | After first download, works offline. `local_files_only=True` flag prevents network calls |
+| Model loading | Call `model.remove_weight_norm()` after loading for inference (important for speed) |
+| Device placement | Load to CPU first, then `.to(device)`. BigVGAN works on CPU, CUDA, and MPS |
+| CUDA kernel | Optional `use_cuda_kernel=True` for 1.5-3x speedup on NVIDIA GPUs. Requires nvcc + ninja at first run. Skip for CPU/MPS |
+
+### Vendoring Strategy for BigVGAN
+
+BigVGAN is NOT a pip package. Options:
+
+**Option A: Git submodule** (NOT recommended)
+- Brings entire repo including training code, discriminators, datasets.
+- 4GB+ with model weights.
+- Fragile for downstream users.
+
+**Option B: Vendor model files only** (RECOMMENDED)
+- Copy only inference-needed files: `bigvgan.py`, `activations.py`, `alias_free_activation/`, `env.py`, `utils.py`
+- Copy `meldataset.py` mel computation function (or reimplement with librosa).
+- MIT licensed -- vendoring is explicitly allowed.
+- Place in `src/distill/vocoder/bigvgan/` as a self-contained module.
+- Pin to a specific commit hash for reproducibility.
+
+**Option C: HuggingFace Hub download of model code** (VIABLE)
+- `from_pretrained()` downloads model architecture files alongside weights.
+- But requires adding the downloaded path to sys.path or importlib magic.
+- Less explicit than vendoring, harder to modify/patch.
+
+**Recommendation: Option B.** Vendor the 5-6 files (~50KB of code) into the project. The model weights are downloaded via HuggingFace Hub at runtime. This gives full control over the integration, easy patching for compatibility, and no runtime import hacks.
+
+### Per-Model HiFi-GAN V2 Storage
+
+| Artifact | Size | Storage Location |
+|----------|------|-----------------|
+| HiFi-GAN V2 generator | ~4MB (0.92M params) | Bundled in `.distill` model file |
+| HiFi-GAN V2 discriminator+optimizer | ~50-100MB | Saved as separate checkpoint during training, discarded after training completes |
+| Training checkpoint | ~150MB | `data/vocoder_training/` during training |
+
+The `.distill` model format (v2) should add an optional `vocoder_state_dict` key alongside the existing `model_state_dict`. At ~4MB for the V2 generator, this is negligible.
+
+---
+
+## Dependencies: What to Add
+
+### Required New Dependencies
+
+```toml
+# In pyproject.toml [project.dependencies]
+"librosa>=0.10.0",          # BigVGAN mel filterbank (Slaney norm). ~30MB installed.
+```
+
+### Already Installed (No Changes)
+
+| Package | Installed Version | Needed For |
+|---------|------------------|------------|
+| huggingface_hub | 1.4.1 | BigVGAN model download/caching via from_pretrained() |
+| torch | 2.10.0+cu128 | BigVGAN inference, HiFi-GAN training |
+| torchaudio | 2.10.0+cu128 | Resampling (44.1kHz <-> 48kHz) |
+| numpy | 2.4.2 | Array operations |
+| scipy | 1.17.0 | Signal processing (librosa dependency) |
+| soundfile | 0.13.1 | Audio I/O |
+
+### Optional Dependencies (HiFi-GAN Training Only)
+
+```toml
+# Not needed for BigVGAN inference-only usage.
+# Only needed if user wants to train per-model HiFi-GAN.
+# Consider making these optional via dependency group.
+
+[dependency-groups]
+vocoder-training = [
+    "auraloss>=0.4.0",       # Multi-scale mel loss for GAN training
+    "tensorboard>=2.0",      # Training monitoring (HiFi-GAN convention)
+]
+```
+
+### What NOT to Add
+
+| Package | Why NOT |
+|---------|---------|
+| nnAudio | Only needed for CQT discriminator. Use simpler MPD+MSD instead. |
+| pesq | Speech-specific quality metric. Not relevant for general audio/music. |
+| ninja | Only needed for BigVGAN CUDA kernel compilation. Optional optimization, not required. |
+| tensorboard | Only if HiFi-GAN training monitoring is needed. The project uses Gradio for UI, not TensorBoard. Could use Rich logging instead. |
+| einops | Not needed for vocoder integration. |
+| pytorch-lightning | Not needed. HiFi-GAN training loop is simple enough for vanilla PyTorch. The project already has its own training loop. |
+
+---
+
+## Integration Points with Existing Codebase
+
+### Files That Need Modification
+
+| Existing File | Change | Reason |
+|---------------|--------|--------|
+| `audio/spectrogram.py` | Add `BigVGANMelSpectrogram` class or `bigvgan_mel()` function | Compute BigVGAN-compatible mels using librosa filterbank, torch.stft, and log compression |
+| `inference/generation.py` | Replace `spectrogram.mel_to_waveform()` with vocoder call | Swap Griffin-Lim for BigVGAN neural vocoder |
+| `inference/chunking.py` | Update `synthesize_continuous_mel` to skip Griffin-Lim | Continuous mel synthesis stays, only the final mel-to-audio step changes |
+| `models/persistence.py` | Add vocoder_state_dict to save/load format | Store per-model HiFi-GAN V2 weights in .distill files |
+| `config/defaults.py` | Add vocoder config defaults | Default vocoder type ("bigvgan"), model ID, cache settings |
+| `training/runner.py` | Add vocoder training option | Orchestrate HiFi-GAN V2 training after VAE training |
+| `pyproject.toml` | Add librosa dependency | Required for BigVGAN mel computation |
+
+### New Files to Create
+
+| New File | Purpose |
+|----------|---------|
+| `src/distill/vocoder/__init__.py` | Vocoder module entry point |
+| `src/distill/vocoder/base.py` | Abstract vocoder interface (mel_to_waveform) |
+| `src/distill/vocoder/bigvgan/` | Vendored BigVGAN model files |
+| `src/distill/vocoder/bigvgan_vocoder.py` | BigVGAN wrapper (download, cache, inference) |
+| `src/distill/vocoder/hifigan/` | HiFi-GAN V2 generator + discriminators |
+| `src/distill/vocoder/hifigan_vocoder.py` | HiFi-GAN V2 wrapper (train, inference) |
+| `src/distill/vocoder/mel_utils.py` | BigVGAN-compatible mel computation |
+| `src/distill/vocoder/training.py` | HiFi-GAN V2 GAN training loop |
+
+### Vocoder Interface Design
+
+```python
+class Vocoder(ABC):
+    """Abstract vocoder interface replacing Griffin-Lim."""
+
+    @abstractmethod
+    def mel_to_waveform(self, mel: torch.Tensor) -> torch.Tensor:
+        """Convert mel spectrogram to waveform.
+
+        Parameters
+        ----------
+        mel : torch.Tensor
+            Log-mel spectrogram [B, n_mels, T] or [B, 1, n_mels, T].
+
+        Returns
+        -------
+        torch.Tensor
+            Waveform [B, 1, samples] in [-1, 1] range.
+        """
+        ...
+
+    @abstractmethod
+    def get_sample_rate(self) -> int:
+        """Return the native sample rate of this vocoder's output."""
+        ...
+```
+
+The existing `AudioSpectrogram.mel_to_waveform()` becomes a `GriffinLimVocoder` for backward compatibility, and the generation pipeline dispatches based on vocoder type.
+
+---
 
 ## Installation
 
+### Minimal (BigVGAN inference only)
+
 ```bash
-# Core PyTorch (Choose ONE based on your hardware)
+# Add librosa to existing environment
+uv add "librosa>=0.10.0"
 
-# Apple Silicon (MPS)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision
-
-# NVIDIA GPU (CUDA 12.8 - recommended for RTX 30/40 series)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
-
-# CPU only (for testing)
-pip3 install torch==2.10.0 torchaudio==2.10.0 torchvision
-
-# Training framework
-pip install pytorch-lightning==2.6.1
-
-# Generative models
-pip install acids-rave  # RAVE (install PyTorch first!)
-pip install git+https://github.com/Stability-AI/stable-audio-tools  # Stable Audio
-
-# Neural codecs
-pip install descript-audio-codec  # DAC
-pip install encodec  # EnCodec (if you need 48kHz exactly)
-
-# Audio processing
-pip install librosa>=0.11.0
-pip install soundfile
-pip install pedalboard>=0.9.22
-
-# Training utilities
-pip install auraloss
-pip install einops>=0.8.2
-pip install hydra-core
-
-# Experiment tracking
-pip install wandb  # Weights & Biases
-# OR
-pip install mlflow  # If you prefer MLflow
-
-# UI
-pip install gradio==6.5.1
-
-# Development tools
-pip install jupyter jupyterlab
-pip install matplotlib seaborn  # Visualization
-pip install tensorboard  # Alternative visualization
-
-# System dependencies
-conda install ffmpeg  # Required by RAVE and audio processing
+# BigVGAN model downloads automatically on first use via huggingface_hub
+# No manual download needed
 ```
+
+### Full (including HiFi-GAN V2 training)
+
+```bash
+# Core dependency
+uv add "librosa>=0.10.0"
+
+# Optional: for per-model vocoder training
+uv add --group vocoder-training "auraloss>=0.4.0"
+```
+
+---
 
 ## Alternatives Considered
 
-| Category | Recommended | Alternative | When to Use Alternative |
-|----------|-------------|-------------|-------------------------|
-| Generative Model | RAVE v2 | Jukebox (OpenAI) | If you have massive compute (days on 256 V100s) and huge datasets (millions of songs). Not suitable for 5-500 files. |
-| Generative Model | RAVE v2 / DDSP | AudioLM | If you want language model approach to audio. Requires large datasets and tokenized audio. Overkill for small datasets. |
-| Neural Codec | DAC | SoundStream | Google's codec, but less accessible (no official implementation). DAC is "drop-in replacement for EnCodec" with better quality. |
-| Audio I/O | soundfile | scipy.io.wavfile | Only if you're restricted to stdlib. soundfile supports more formats and is faster. |
-| UI Framework | Gradio | Streamlit | If you need more complex app structure. Gradio is simpler and audio-focused. |
-| Experiment Tracking | W&B | TensorBoard | If you want completely local/offline tracking. W&B has better audio support and collaboration features. |
-| Config Management | Hydra | argparse + YAML | Only for very simple projects. Hydra's composition and override system is essential for complex experiments. |
+| Category | Recommended | Alternative | Why Not Alternative |
+|----------|-------------|-------------|---------------------|
+| Universal vocoder | BigVGAN-v2 44kHz/128band/512x | BigVGAN-v2 24kHz/100band/256x | 24kHz cuts off at 12kHz -- unacceptable for professional audio (48kHz target). Would lose high frequency content. |
+| Universal vocoder | BigVGAN-v2 | Vocos | Vocos is faster but BigVGAN-v2 has better universal quality across diverse audio types. Vocos optimized for speech. |
+| Universal vocoder | BigVGAN-v2 | MusicHiFi | MusicHiFi is designed for music with stereo support, but not publicly available as pretrained weights. Would require training from scratch. |
+| Per-model vocoder | HiFi-GAN V2 | HiFi-GAN V1 | V1 has 13.92M params vs V2's 0.92M. For per-model training on small datasets, V2's compact size prevents overfitting and fits in .distill files. |
+| Per-model vocoder | HiFi-GAN V2 | BigVGAN fine-tuning | BigVGAN has 112-122M params. Fine-tuning this on 5-500 audio files would massively overfit. V2 is appropriately sized. |
+| Mel computation | librosa filterbank + torch.stft | Pure torchaudio | BigVGAN was trained with librosa Slaney-norm filterbanks. Using torchaudio HTK filterbanks produces incompatible mels, even with matching parameters. Verified from BigVGAN source code. |
+| Model download | HuggingFace Hub (huggingface_hub) | Manual download script | HF Hub provides versioned caching, offline support, resume on interrupted downloads. Already installed (1.4.1). |
+| GAN discriminator | HiFi-GAN MPD+MSD | BigVGAN CQT discriminator | CQT discriminator requires nnAudio dependency and is designed for large-scale universal training. MPD+MSD is simpler, proven, and sufficient for per-model fine-tuning. |
+| BigVGAN integration | Vendor model files | Git submodule | Submodule brings 4GB+ repo. Vendoring ~50KB of MIT-licensed code is cleaner and gives full control. |
+| 44kHz model | 512x upsampling | 256x upsampling | 512x model uses same n_fft/hop as project (2048/512). 256x uses 1024/256 which would require changing VAE mel parameters. 512x is a drop-in match. |
 
-## What NOT to Use
+---
 
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| Magenta DDSP (TensorFlow version) | TensorFlow is declining in research community. Harder to customize. PyTorch ecosystem dominates audio ML. | DDSP concepts implemented in PyTorch (or contribute PyTorch port to community) |
-| WaveNet / WaveGlow | Outdated (2016-2018). Extremely slow training and inference. Superseded by RAVE, diffusion models, and neural codecs. | RAVE for VAE approach, Stable Audio for diffusion |
-| pySoX / SoxBindings | 300x slower than pedalboard. Limited effects. Bindings can be fragile. | pedalboard (modern, fast, maintained by Spotify) |
-| Older PyTorch (<2.0) | Missing key features: torch.compile, better MPS support, Flash Attention. | PyTorch 2.10.0 (current stable) |
-| MusicVAE (original) | Designed for symbolic music (MIDI), not audio waveforms. Small latent space (512-dim) limits expressiveness for audio. | RAVE (designed for audio from the ground up) |
-| Real-time focused models for non-real-time use | RAVE has real-time variant but you want quality over speed. Disable real-time constraints in training config. | Use non-causal convolutions, larger models, prioritize quality in your fork/config |
+## Version Compatibility Matrix
 
-## Stack Patterns by Use Case
+| Package | Version | Compatible With | Notes |
+|---------|---------|-----------------|-------|
+| librosa | >=0.10.0 | numpy 2.4.2, scipy 1.17.0 | librosa 0.10+ supports numpy 2.x. Install via uv. |
+| huggingface_hub | 1.4.1 (installed) | BigVGAN from_pretrained | Exceeds BigVGAN's >=0.23.4 requirement |
+| torch | 2.10.0+cu128 (installed) | BigVGAN inference, HiFi-GAN training | BigVGAN tested with PyTorch 2.3.1+ but works with 2.10 |
+| torchaudio | 2.10.0+cu128 (installed) | Resampling only | Mel computation shifts to librosa-based for BigVGAN compat |
+| auraloss | >=0.4.0 | torch 2.10.0, librosa | Optional, for HiFi-GAN training only |
 
-**If training from scratch with 5-20 files:**
-- Use DDSP (works with <13 min of audio)
-- Aggressive data augmentation with pedalboard
-- Simple architecture to avoid overfitting
-- Multi-resolution STFT loss from auraloss
+---
 
-**If training with 50-500 files:**
-- Use RAVE v2 or v2_small
-- Beta-VAE for disentanglement (beta=4-10)
-- Data augmentation with pedalboard (pitch shift, time stretch, EQ)
-- Multi-resolution STFT + perceptual losses
+## Device Compatibility Notes
 
-**If fine-tuning pretrained models:**
-- Use Stable Audio Tools
-- Freeze encoder, train only decoder or specific layers
-- Your small dataset becomes "style transfer" data
-- Leverage W&B for comparing fine-tuning strategies
+### BigVGAN Inference
 
-**For high-fidelity (48kHz/24bit+) generation:**
-- EnCodec for exact 48kHz support, or upsample DAC output
-- Multi-resolution STFT loss at multiple scales
-- Avoid downsampling in preprocessing - work at native rate
-- Use 24-bit WAV output (soundfile supports this)
+| Device | Status | Notes |
+|--------|--------|-------|
+| CUDA | Full support | Optional CUDA kernel for 1.5-3x speedup (requires nvcc + ninja) |
+| MPS (Apple Silicon) | Works | Standard PyTorch ops, no CUDA kernel. May need float32 (no fp16 on MPS for some ops) |
+| CPU | Works | Slower but functional. Adequate for non-real-time generation |
 
-**For musically meaningful controls:**
-- Implement Beta-VAE with disentanglement metrics
-- Create interpretable dimensions via controlled interventions
-- Use DDSP components for explicit harmonic/noise control
-- Build Gradio interface with labeled sliders per dimension
+### HiFi-GAN V2 Training
 
-## Version Compatibility
+| Device | Status | Notes |
+|--------|--------|-------|
+| CUDA | Full support | Recommended. GAN training benefits from GPU acceleration |
+| MPS | Likely works | PyTorch 2.10 has mature MPS support. GAN training has no unusual ops |
+| CPU | Works but slow | GAN training is compute-intensive. CPU training will be very slow but possible for small datasets |
 
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| PyTorch 2.10.0 | TorchAudio 2.10.0 | Always use matching versions |
-| PyTorch 2.10.0 | PyTorch Lightning 2.6.1 | Tested and verified |
-| RAVE 2.3.1 | PyTorch 1.13+ | Now flexible - install PyTorch first, then RAVE |
-| Stable Audio Tools | PyTorch 2.5+ | Requires Flash Attention support, introduced in 2.5 |
-| Gradio 6.5.1 | PyTorch 2.10.0 | Independent packages, no conflicts |
-| librosa 0.11.0 | soundfile latest | librosa uses soundfile as backend |
-| pedalboard 0.9.22 | All Python 3.8+ | Native extension, framework-agnostic |
+### MPS Considerations
 
-## Apple Silicon (MPS) Specific Notes
+The existing project already handles MPS edge cases (e.g., `InverseMelScale` forced to CPU). BigVGAN inference uses standard PyTorch conv/activation ops that work on MPS. The custom CUDA kernel (`use_cuda_kernel=True`) should be disabled on MPS -- detect device and set accordingly.
 
-**What works:**
-- PyTorch 2.10.0 has mature MPS support
-- TorchAudio operations (spectrograms, resampling)
-- RAVE training (tested in Jan 2026)
-- Most audio processing (librosa, pedalboard, soundfile)
-
-**What to watch:**
-- Some PyTorch ops fall back to CPU (warnings will appear)
-- Float precision matters - MPS can be sensitive to fp16
-- For RAVE: use float32 for training on MPS (voice clone requires it)
-- Test on MPS first, but have cloud GPU backup for large-scale training
-
-**Workarounds:**
-- Use `PYTORCH_ENABLE_MPS_FALLBACK=1` environment variable
-- Monitor MPS memory usage (Activity Monitor > GPU History)
-- For operations that fail on MPS, use `.cpu()` selectively
-
-## Cloud GPU Recommendations
-
-**For experimentation (RAVE v2_small):**
-- 1x RTX 3080 (10GB) or better
-- 16GB system RAM
-- Cost: ~$0.50/hour on AWS/Lambda Labs
-
-**For production (RAVE v2):**
-- 1x RTX 3090 / 4090 (24GB) or A100 (40GB)
-- 32GB system RAM
-- Cost: ~$1-2/hour
-
-**For Stable Audio fine-tuning:**
-- Multi-GPU setup (2-4x A100) recommended
-- DeepSpeed ZeRO Stage 2 for memory efficiency
-- Cost: ~$4-8/hour for 4x A100
-
-**Providers:**
-- Lambda Labs: Good GPU availability, hourly billing
-- RunPod: Competitive pricing, Spot instances
-- Google Colab Pro+: Good for prototyping, A100 access
-- AWS/GCP/Azure: Enterprise option, more expensive
-
-## Small Dataset Strategy
-
-Your core challenge is making generative audio work with 5-500 files. Here's the stack strategy:
-
-**Data augmentation is critical:**
-1. Use pedalboard for musical augmentations (EQ, compression, reverb)
-2. Pitch shifting ±2 semitones without timestretching
-3. Time stretching ±10% without pitch shifting
-4. Random EQ curves, subtle distortion
-5. Mix with environmental noise at low levels
-
-**Architecture choices:**
-1. Smaller models to prevent overfitting (RAVE v2_small over v2)
-2. Strong regularization (Beta-VAE with beta=6-10)
-3. Early stopping with validation set (20% of your data)
-4. Multi-resolution STFT loss to learn features at multiple scales
-
-**Transfer learning when possible:**
-1. Stable Audio Tools: Fine-tune pretrained models
-2. Neural codecs: Use pretrained DAC/EnCodec, train only on top
-3. RAVE: If community releases pretrained models, start from those
-
-**Validation strategy:**
-1. Log audio to W&B every N epochs
-2. Qualitative listening tests are as important as metrics
-3. Latent space interpolations to check smoothness
-4. Reconstruction quality on held-out files
+---
 
 ## Sources
 
-**High Confidence (Official Docs & Releases):**
-- [PyTorch 2.10.0 Installation](https://pytorch.org/get-started/locally/)
-- [PyTorch Lightning 2.6.1 Changelog](https://lightning.ai/docs/pytorch/stable/generated/CHANGELOG.html)
-- [RAVE GitHub Repository](https://github.com/acids-ircam/RAVE)
-- [Stable Audio Tools GitHub](https://github.com/Stability-AI/stable-audio-tools)
-- [DAC GitHub Repository](https://github.com/descriptinc/descript-audio-codec)
-- [Gradio 6.5.1 Documentation](https://www.gradio.app/docs/gradio/audio)
-- [Hugging Face Diffusers](https://huggingface.co/docs/diffusers/index)
+**HIGH Confidence (Official repos, model cards, source code):**
+- [NVIDIA BigVGAN GitHub Repository](https://github.com/NVIDIA/BigVGAN) -- architecture, code, requirements
+- [BigVGAN-v2 44kHz/128band/512x Model Card](https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_512x) -- config.json verified
+- [BigVGAN-v2 44kHz/128band/256x Model Card](https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_256x) -- config.json verified
+- [BigVGAN meldataset.py source](https://github.com/NVIDIA/BigVGAN/blob/main/meldataset.py) -- mel computation verified
+- [BigVGAN bigvgan.py source](https://github.com/NVIDIA/BigVGAN/blob/main/bigvgan.py) -- model class verified
+- [HiFi-GAN Reference Implementation](https://github.com/jik876/hifi-gan) -- V2 config, architecture, training
+- [HuggingFace Hub Download Docs](https://huggingface.co/docs/huggingface_hub/en/guides/download) -- caching, offline
+- [librosa.filters.mel Documentation](https://librosa.org/doc/main/generated/librosa.filters.mel.html) -- Slaney norm default
+- [TorchAudio MelSpectrogram vs librosa](https://github.com/pytorch/audio/issues/1058) -- compatibility analysis
 
-**Medium Confidence (Recent Research & Community):**
-- [Source-Disentangled Neural Audio Codec (SD-Codec)](https://arxiv.org/html/2409.11228v1) - ICASSP 2025
-- [MiMo-Audio: Few-Shot Audio Learning](https://arxiv.org/abs/2512.23808) - 2025
-- [Stable Audio Open Paper](https://arxiv.org/html/2407.14358v1)
-- [DDSP Original Paper](https://magenta.tensorflow.org/ddsp)
-- [Beta-VAE Disentanglement Research 2025](https://arxiv.org/html/2602.09277)
-- [Pedalboard by Spotify](https://github.com/spotify/pedalboard)
-- [auraloss GitHub](https://github.com/csteinmetz1/auraloss)
-
-**Medium Confidence (Web Search - Multiple Sources):**
-- [RAVE vs DDSP comparison](https://neurorave.github.io/neurorave/)
-- [EnCodec Facebook Research](https://github.com/facebookresearch/encodec)
-- [Neural Audio Codecs Overview 2025](https://www.abyssmedia.com/audioconverter/neural-audio-codecs-overview.shtml)
-- [PyTorch MPS Apple Silicon Support](https://developer.apple.com/metal/pytorch/)
-- [Einops 0.8.2 Release](https://github.com/arogozhnikov/einops)
-
-**Note on Confidence Levels:**
-- Core framework versions (PyTorch, Lightning, Gradio): HIGH - verified from official sources
-- Generative models (RAVE, Stable Audio, DDSP): HIGH - verified from official repos
-- Small dataset performance claims: MEDIUM - based on research papers and community reports
-- Disentanglement techniques: MEDIUM - active research area, techniques evolving
-- MPS support specifics: MEDIUM - based on community testing and GitHub issues, still maturing
+**MEDIUM Confidence (Paper, multiple sources agree):**
+- [BigVGAN Paper (ICLR 2023)](https://arxiv.org/abs/2206.04658)
+- [HiFi-GAN Paper (NeurIPS 2020)](https://arxiv.org/abs/2010.05646) -- V2 architecture, 0.92M params, 4.23 MOS
+- [auraloss GitHub](https://github.com/csteinmetz1/auraloss) -- audio loss functions
+- [nnAudio GitHub](https://github.com/KinWaiCheuk/nnAudio) -- CQT implementation
+- [MusicHiFi (IEEE 2024)](https://arxiv.org/abs/2403.10493) -- stereo vocoder reference
+- [PyTorchModelHubMixin docs](https://huggingface.co/docs/huggingface_hub/en/package_reference/mixins) -- from_pretrained mechanics
 
 ---
-*Stack research for: Small Dataset Generative Audio*
-*Researched: 2026-02-12*
+*Stack research for: v1.1 HiFi-GAN Vocoder Milestone*
+*Researched: 2026-02-21*

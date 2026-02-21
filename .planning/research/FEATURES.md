@@ -1,314 +1,543 @@
-# Feature Landscape
+# Feature Landscape: v1.1 Neural Vocoder Integration
 
-**Domain:** Generative Audio / AI Music Creation Tools (Small Dataset Focus)
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM
+**Domain:** Neural vocoder integration into existing generative audio tool
+**Researched:** 2026-02-21
+**Confidence:** HIGH (BigVGAN-v2 parameters verified against official config.json; HiFi-GAN architecture from original paper; codebase analysis from direct code reading)
+
+## Context
+
+This feature landscape covers ONLY the v1.1 milestone: replacing Griffin-Lim with neural vocoders (BigVGAN-v2 universal + optional per-model HiFi-GAN V2). All features below are scoped to vocoder integration; existing v1.0 features (VAE training, slider controls, export pipeline, model library, CLI) are already shipped and stable.
+
+### Critical Technical Context
+
+The existing system operates on mel spectrograms with these parameters:
+- `sample_rate=48000`, `n_fft=2048`, `hop_length=512`, `n_mels=128`, `f_min=0.0`, `f_max=None`
+- Normalization: `log1p(mel)` / `expm1(mel_log)` (log1p/expm1 pair)
+
+BigVGAN-v2's closest model (`bigvgan_v2_44khz_128band_512x`) uses:
+- `sampling_rate=44100`, `n_fft=2048`, `hop_size=512`, `num_mels=128`, `fmin=0`, `fmax=null`
+- Normalization: `log(clamp(mel, min=1e-5))` (plain log, NOT log1p)
+
+The n_fft, hop_size, and n_mels are identical. The sample rate (48kHz vs 44.1kHz) and mel normalization (log1p vs log) differ. This mismatch is the single most important technical constraint for this milestone. See PITFALLS.md for detailed analysis.
+
+---
 
 ## Table Stakes
 
-Features users expect. Missing = product feels incomplete.
+Features users expect when a vocoder upgrade ships. Missing any of these means the upgrade feels broken or incomplete.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Audio file import (drag & drop) | Standard across all audio tools; users expect seamless file loading | Low | Support WAV, AIFF, MP3, FLAC. Multi-file batch import critical for dataset building |
-| Model training with progress monitoring | Users need visibility into long-running processes; reduces anxiety about whether it's working | Medium | Loss visualization, epoch/step counters, estimated time remaining, sample previews during training. TensorBoard-style metrics display |
-| Real-time parameter controls during generation | Creative tools require immediate feedback; users explore by tweaking and listening | Medium | Non-blocking UI, responsive sliders/controls while audio generates. Similar to synth parameter control patterns |
-| Audio preview/playback | Cannot evaluate output without listening; fundamental to audio workflows | Low | Waveform display, transport controls (play/pause/stop), scrubbing, loop regions |
-| Preset save/recall | Musicians/producers expect to save configurations; standard across VSTs, DAWs, synthesis tools | Low | Named presets, user-created preset libraries, FXP-style format for interchange |
-| Audio export (WAV) | Getting audio out of the tool is table stakes; WAV is universal DAW format | Low | Configurable sample rate (44.1kHz, 48kHz min), bit depth (16/24/32-bit), mono/stereo. Uncompressed format critical for professional use |
-| Multiple model management | Users will train on different datasets (voice, drums, textures); need to switch between them | Medium | Model library/browser, load/unload models, metadata (dataset info, training date, sample count) |
-| Dataset visualization | Users need confidence their data loaded correctly before hours-long training | Low | File count, total duration, sample rate consistency checks, waveform thumbnails |
-| Generation parameter ranges/limits | Prevents broken output; users expect guardrails on sliders to keep results usable | Low | Min/max values on controls, visual indicators when approaching extremes, snap-to-default |
+| Feature | Why Expected | Complexity | Depends On |
+|---------|--------------|------------|------------|
+| **Transparent vocoder swap in generation pipeline** | Users press "Generate" and get better audio; workflow unchanged | Medium | Spectrogram mel normalization adapter, vocoder model loaded in pipeline |
+| **Automatic BigVGAN-v2 download on first use** | Users should not manually download model files, clone git repos, or manage checkpoints | Medium | huggingface_hub download with progress, local cache directory |
+| **Audio quality improvement over Griffin-Lim** | The entire point of the upgrade; output must be audibly, measurably better | Low (inherent to neural vocoder) | Correct mel parameter alignment between VAE and vocoder |
+| **Same export pipeline works** | WAV/MP3/FLAC/OGG export, metadata, sidecar JSON, spatial audio all continue working | Low | Vocoder produces same output format (numpy float32 waveform) |
+| **CLI generation works with vocoder** | `distill generate model_name` uses neural vocoder automatically | Low | Vocoder integrated at pipeline level, not UI level |
+| **All hardware targets supported** | CUDA, MPS (Apple Silicon), CPU fallback all work | Medium | BigVGAN uses standard PyTorch ops; verify no CUDA-only ops in inference path |
+| **Vocoder selection in UI** | Dropdown or radio to choose "BigVGAN (universal)" vs "Per-model HiFi-GAN" (if trained) | Low | UI component in Generate tab, state management |
+| **Vocoder selection in CLI** | `--vocoder bigvgan` or `--vocoder hifigan` flag on generate command | Low | CLI argument, pipeline routing |
+| **Download progress indication** | First-run BigVGAN download (~500MB) shows progress bar in both UI and CLI | Low | huggingface_hub has built-in progress; surface in Gradio and Rich |
+| **Graceful fallback if download fails** | If BigVGAN can't be downloaded (offline, network error), fall back to Griffin-Lim with warning | Low | Try/except around download, fallback path |
+
+### Table Stakes Dependency Chain
+
+```
+BigVGAN Download Manager
+    |-- downloads bigvgan_v2_44khz_128band_512x from HuggingFace (~500MB)
+    |-- caches in local data directory (alongside models)
+    |-- provides status/progress callbacks
+    v
+Mel Normalization Adapter
+    |-- converts VAE output (log1p-normalized mel) to BigVGAN input (log-normalized mel)
+    |-- handles sample rate mismatch (48kHz VAE -> 44.1kHz vocoder -> resample to target)
+    v
+Vocoder Wrapper (abstract interface)
+    |-- BigVGANVocoder (universal, downloaded)
+    |-- HiFiGANVocoder (per-model, trained)
+    |-- GriffinLimVocoder (fallback, existing)
+    v
+Generation Pipeline Integration
+    |-- replaces spectrogram.mel_to_waveform() call
+    |-- vocoder selection logic (auto/bigvgan/hifigan/griffinlim)
+    |-- waveform output compatible with existing spatial/export pipeline
+```
+
+---
 
 ## Differentiators
 
-Features that set product apart. Not expected, but valued.
+Features that make this vocoder integration stand out beyond a basic swap.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Musically meaningful parameter controls (timbre, harmony, temporal, spatial) | **Core differentiator vs RAVE's opaque latent dims.** Maps abstract latent space to parameters musicians understand (spectral centroid, temporal envelope, spatial width) | High | Requires post-training PCA/analysis to extract interpretable dimensions. Similar to Autolume's feature extraction. Research: timbre = spectral envelope + temporal envelope; harmony = roughness/tension; temporal = attack time, duration; spatial = stereo width, pan |
-| Incremental training (add files to existing model) | Avoids full retraining when adding examples; supports iterative dataset curation workflow | High | Addresses catastrophic forgetting problem. Online incremental learning approach. Major technical challenge but huge UX win |
-| Output-to-training feedback loop | Enables evolutionary/iterative sound design; generate→select favorites→retrain on them | Medium-High | Combines generation and incremental training. Creates spiral of refinement. Novel workflow pattern not seen in current tools |
-| Small dataset optimization (5-500 files) | **Core differentiator vs Suno/Udio.** Specialization = competitive moat. Personal datasets, not generic models | High | Data augmentation (loudness, noise, shift, time-stretch), transfer learning from pretrained features, architecture choices for sample efficiency |
-| PCA-based feature extraction (Autolume-style) | Automatic discovery of meaningful control dimensions from trained model; reduces guesswork | High | Post-training analysis identifies interpretable axes. User can map MIDI controllers to extracted features. Bridges gap between latent space and musical parameters |
-| Multi-model layering/blending | Generate from multiple models simultaneously, blend outputs; creates hybrid timbres | Medium | Addresses "I want 60% model A + 40% model B" use case. Novel generative technique |
-| Generation history with visual diff | See/hear what changed between parameter adjustments; supports exploration without getting lost | Medium | Thumbnail waveforms in history list, A/B comparison playback, parameter snapshots. Addresses HistoryPalette research findings on creative version control |
-| OSC/MIDI parameter control | Live performance use case; map hardware controllers or receive from DAW/Ableton | Medium | Real-time parameter streaming, MIDI learn, OSC address mapping. Autolume-live pattern |
-| Spatial audio output (stereo/binaural/multi-channel) | Soundscape/texture generation benefits from spatial dimension; immersive output | Medium | Beyond basic stereo: binaural (headphone-optimized), 5.1/7.1 surround, ambisonic. Audiocube-style spatial processing |
-| Granular density/size controls | Texture generation sweet spot; low density = rhythmic stutters, high density = continuous clouds | Medium | Applies to temporal parameter space. Grain count, size, pitch, shape controls familiar from granular synths |
+| Feature | Value Proposition | Complexity | Depends On |
+|---------|-------------------|------------|------------|
+| **Per-model HiFi-GAN V2 training** | Fine-tune a lightweight vocoder on the user's specific audio domain for maximum fidelity; e.g., a vocoder tuned to "my field recordings" will reconstruct those textures better than a universal model | High | Training loop for HiFi-GAN V2, mel-spectrogram ground truth generation, discriminator training, checkpoint management |
+| **Vocoder training integrated in Train tab** | "Train Vocoder" button alongside VAE training; same UX patterns (progress, loss chart, cancel, resume) | Medium | TrainingRunner pattern reuse, HiFi-GAN training loop, UI components |
+| **Vocoder training in CLI** | `distill train-vocoder --model my_model --epochs 500` | Low | CLI command, training loop |
+| **Per-model vocoder bundled in .distill file** | When user saves a model with a trained vocoder, the vocoder weights are stored in the same .distill file | Medium | Model format v2 with optional vocoder_state_dict, backward-compatible loading |
+| **Automatic vocoder selection** | Pipeline auto-selects best available vocoder: per-model HiFi-GAN if trained > BigVGAN universal > Griffin-Lim fallback | Low | Vocoder registry per model, priority logic |
+| **A/B comparison: vocoder vs Griffin-Lim** | Let users hear the difference side-by-side; builds confidence in the upgrade | Low | Generate same mel through both paths, existing A/B comparison UI |
+| **Vocoder quality metrics in UI** | Show SNR, spectral convergence, or PESQ-like score comparing vocoder output to target | Medium | Objective quality metrics, comparison against ground truth (if available) |
+| **Lazy vocoder loading** | BigVGAN model loaded only when first generation is requested, not at app startup | Low | Deferred initialization pattern, existing lazy import conventions |
+
+### Per-Model HiFi-GAN V2 Training Workflow (User Perspective)
+
+1. User has a trained VAE model (e.g., "Field Recordings v3")
+2. In the Train tab, selects "Field Recordings v3" and clicks "Train Vocoder"
+3. Training uses the SAME audio files from the original dataset
+4. Pipeline generates mel spectrograms using the VAE's spectrogram config
+5. HiFi-GAN V2 learns to reconstruct waveforms from THOSE specific mels
+6. Training shows loss curve, previews vocoder reconstruction quality
+7. On completion, vocoder is bundled into the .distill model file
+8. Future generations with that model automatically use the per-model vocoder
+
+### Per-Model HiFi-GAN V2 Training Workflow (Technical)
+
+```
+User's Audio Files (WAV, 48kHz)
+    |
+    v
+AudioSpectrogram.waveform_to_mel() --> ground truth mel spectrograms
+    |
+    v
+HiFi-GAN V2 Generator: mel --> reconstructed waveform
+    |
+    v
+Multi-Period Discriminator + Multi-Scale Discriminator
+    |-- Adversarial loss (generator vs discriminator)
+    |-- Mel spectrogram reconstruction loss
+    |-- Feature matching loss
+    v
+Trained HiFi-GAN V2 weights (~4MB for V2)
+    |
+    v
+Bundled into .distill file alongside VAE weights
+```
+
+**Training time estimate (consumer hardware):**
+- HiFi-GAN V2 has only 0.92M parameters (vs V1's 13.92M)
+- Fine-tuning from universal pretrained weights: ~30-60 min on consumer GPU
+- Training from scratch: ~2-4 hours on consumer GPU
+- V2 chosen specifically because it balances quality (4.23 MOS) with small size and fast training
+
+---
 
 ## Anti-Features
 
-Features to explicitly NOT build.
+Features to explicitly NOT build for v1.1.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Text-to-music generation | Wrong domain. Suno/Udio already dominate this. Requires massive datasets + lyrics handling. Not aligned with "personal small datasets" value prop | Focus on latent space exploration of user's own audio. Let users train on their sounds, not prompt for generic songs |
-| Built-in DAW/multi-track editor | Scope creep. Users already have DAWs (Ableton, Logic, Pro Tools). Tool should integrate, not replace | Export stems at high quality. Support drag-and-drop to DAWs. Focus on being best-in-class generator, not mediocre DAW |
-| Cloud model training | Privacy concerns with personal audio. Latency issues. Requires backend infrastructure, costs, accounts | Local-first training. GPU acceleration via Metal/CUDA. Users own their models and data |
-| Real-time (< 10ms latency) generation | RAVE achieves this but compromises quality. Not needed for "non-real-time, high fidelity" positioning | Accept 100ms-1s generation latency for 48kHz/24-bit quality. Cache generations for responsive playback |
-| Vocal/lyric generation | Legal/ethical minefield. Voice cloning concerns. Outside "textures/soundscapes/building blocks" scope | Focus on instrumental, abstract, timbral content. If voice is in dataset, treat as texture not lyrics |
-| Social/sharing features | Premature. Adds complexity (accounts, storage, moderation). Not core to creative workflow | Export audio files. Users share via SoundCloud/Bandcamp/etc. Keep tool offline-capable |
-| Automatic genre classification | Personal datasets may not fit genres. Adds ML complexity for questionable value | Let users tag/name models themselves. Metadata is freeform text, not constrained taxonomy |
-| Mobile app | Training requires GPU. Generation needs compute. UI complexity requires desktop real estate | Desktop-first (macOS/Windows/Linux). Mobile becomes viable later if models are tiny and generation is fast |
+| **48kHz BigVGAN training from scratch** | Requires 8x A100 GPUs, weeks of training, massive diverse audio dataset; completely infeasible for a product update | Use the 44.1kHz pretrained model and resample output to 48kHz; quality difference between native 48kHz and resampled 44.1kHz is inaudible for generated textures |
+| **Custom BigVGAN fine-tuning per model** | BigVGAN has 122M parameters; fine-tuning is impractical on consumer hardware (OOM on 8GB VRAM GPUs) | Use BigVGAN as-is for universal quality; offer lightweight HiFi-GAN V2 (0.92M params) for per-model fine-tuning |
+| **Real-time vocoder streaming** | BigVGAN is not designed for real-time; project is explicitly non-real-time; adds complexity for no value | Keep non-real-time generation; BigVGAN inference is fast enough (167x real-time on V100, much faster on modern GPUs) |
+| **Vocos as primary vocoder** | The 48kHz Vocos model is an unofficial alpha from an unaffiliated author; not production ready | BigVGAN-v2 is NVIDIA-backed, well-tested, with official HuggingFace integration; revisit Vocos if an official 48kHz model ships |
+| **MusicHiFi stereo vocoder** | Research paper from 2024; no official pretrained models available; cascade of 3 GANs is complex | Handle stereo via existing spatial processing pipeline (mid-side widening, binaural HRTF) applied AFTER mono vocoder output |
+| **Multiple BigVGAN model variants** | Offering 22kHz/24kHz/44kHz variants adds UI complexity and user confusion for marginal benefit | Ship only `bigvgan_v2_44khz_128band_512x` (highest available quality); resample to target SR |
+| **Griffin-Lim removal in v1.1** | Removing the fallback path before the neural vocoder is battle-tested risks breaking generation for users who can't download BigVGAN | Keep Griffin-Lim as fallback; mark as deprecated; remove in v1.2 after vocoder stability is confirmed |
+| **CUDA kernel optimization for BigVGAN** | The fused CUDA kernel requires CUDA 12.1+ and nvcc/ninja compilation; fails on MPS/CPU; adds build complexity | Use standard PyTorch inference (still very fast); add CUDA kernel as optional optimization later |
+
+---
 
 ## Feature Dependencies
 
+### Vocoder Integration Dependency Graph
+
 ```
-Dataset Import
-    └──requires──> Dataset Visualization
-                      └──enables──> Model Training
-                                       └──requires──> Training Progress Monitoring
-                                                         └──produces──> Trained Model
-                                                                           └──enables──> Model Management
-                                                                                            └──requires──> Model Loading
-                                                                                                              └──enables──> Parameter Controls
-                                                                                                                               └──requires──> Audio Generation
-                                                                                                                                                 └──enables──> Audio Preview
-                                                                                                                                                                  └──enables──> Audio Export
-
-PCA Feature Extraction ──enhances──> Parameter Controls (makes them musically meaningful)
-
-Incremental Training ──requires──> Existing Trained Model + New Dataset Import
-
-Output-to-Training Loop ──requires──> Audio Export + Incremental Training + Dataset Import
-
-Generation History ──requires──> Audio Preview + Parameter Controls
-
-OSC/MIDI Control ──requires──> Parameter Controls (provides alternate input method)
-
-Multi-Model Blending ──requires──> Model Management (load multiple) + Parameter Controls (blend ratios)
-
-Preset System ──requires──> Parameter Controls (saves their state)
+BigVGAN Download Manager
+    |
+    +-- Mel Normalization Adapter (converts log1p -> log)
+    |       |
+    |       +-- VocoderWrapper (abstract: BigVGAN / HiFi-GAN / Griffin-Lim)
+    |               |
+    |               +-- GenerationPipeline.generate() integration
+    |                       |
+    |                       +-- UI: Vocoder dropdown in Generate tab
+    |                       |
+    |                       +-- CLI: --vocoder flag on generate command
+    |
+    +-- HiFi-GAN V2 Training Loop
+            |
+            +-- HiFi-GAN V2 Training CLI command
+            |
+            +-- HiFi-GAN V2 Training UI (Train tab)
+            |
+            +-- .distill Model Format v2 (vocoder_state_dict)
+                    |
+                    +-- Model Library: vocoder status indicator
+                    |
+                    +-- Automatic vocoder selection logic
 ```
 
-### Dependency Notes
+### Critical Path (minimum viable vocoder)
 
-- **Dataset Import → Model Training → Generation**: Core linear workflow. Everything depends on having audio in.
-- **PCA Feature Extraction enhances Parameter Controls**: Without PCA, parameters are opaque latent dimensions (RAVE problem). With PCA, they become musically meaningful (timbre, harmony, etc.).
-- **Incremental Training requires existing model**: Can't incrementally train from scratch. Need base model first.
-- **Output-to-Training Loop requires multiple systems**: Most complex workflow. Needs generation, export, import, and incremental training all working.
-- **Generation History is independent**: Nice-to-have that layers on top of generation. No blockers.
+```
+1. Mel Normalization Adapter
+2. BigVGAN Download Manager
+3. VocoderWrapper abstraction
+4. GenerationPipeline integration
+5. UI dropdown + CLI flag
+```
 
-## MVP Recommendation
+This delivers the core value: "press Generate, get better audio." Per-model HiFi-GAN training is a follow-on within the same milestone.
 
-### Launch With (v1)
+### Secondary Path (per-model training)
 
-Minimum viable product — what's needed to validate the concept.
+```
+6. HiFi-GAN V2 training loop (generator + discriminators)
+7. Training CLI command
+8. Training UI integration (reuse TrainingRunner pattern)
+9. .distill format v2 (bundle vocoder weights)
+10. Auto-selection logic (per-model > BigVGAN > Griffin-Lim)
+```
 
-- [x] **Dataset Import (drag & drop)** — Cannot train without data. First step of workflow.
-- [x] **Dataset Visualization** — Prevents "train for 8 hours on corrupt files" scenarios. Confidence builder.
-- [x] **Model Training** — Core value prop. Differentiator is training on small personal datasets.
-- [x] **Training Progress Monitoring** — Training takes hours. Without progress visibility, tool feels broken.
-- [x] **Basic Model Management** — Must save/load trained models. Single model at a time is OK for MVP.
-- [x] **Parameter Controls (latent dims)** — Need some way to generate variants. Can start with raw latent dims before PCA.
-- [x] **Audio Generation** — Obvious. The point.
-- [x] **Audio Preview** — Cannot evaluate without listening.
-- [x] **Audio Export (48kHz/24-bit WAV)** — Getting audio into DAW validates "building blocks for production" use case.
-- [x] **Preset Save/Recall** — Musicians expect this. Low complexity, high value.
+---
 
-**Rationale**: This is the minimal loop: import audio → train model → load model → adjust parameters → generate → listen → export. Proves core value prop ("train on my sounds, explore the space, get high-quality output") without differentiating features that add complexity.
+## Detailed Feature Specifications
 
-### Add After Validation (v1.x)
+### 1. BigVGAN-v2 Download and Cache Management
 
-Features to add once core is working and users are engaged.
+**User story:** On first generation attempt, the app downloads BigVGAN-v2 (~500MB) with a progress bar. On subsequent runs, it loads from cache instantly.
 
-- [ ] **PCA Feature Extraction** — Trigger: Users complain latent dims are opaque/hard to control. Elevates from "works" to "musically useful".
-- [ ] **Generation History** — Trigger: Users say "I had a good one 10 generations ago, can't get back to it". QOL improvement.
-- [ ] **Multi-Model Management** — Trigger: Users train 5+ models, switching becomes painful. Library/browser UI.
-- [ ] **Spatial Audio Output** — Trigger: Soundscape/ambient users request it. Niche but high-value for that segment.
-- [ ] **OSC/MIDI Control** — Trigger: Live performers ask for it. Enables new use case (performance tool).
-- [ ] **Granular Controls** — Trigger: Texture generation users want finer temporal control. Aligns with soundscape positioning.
+**Implementation:**
+- Use `huggingface_hub.hf_hub_download()` for `nvidia/bigvgan_v2_44khz_128band_512x`
+- Cache in `{data_dir}/vocoders/bigvgan_v2_44khz_128band_512x/`
+- Download only `bigvgan_generator.pt` and `config.json` (skip discriminator/optimizer)
+- Show progress via `huggingface_hub`'s built-in tqdm (Gradio wraps this; CLI uses Rich progress)
+- First load also calls `model.remove_weight_norm()` and caches the processed state
 
-### Future Consideration (v2+)
+**Files affected:** New `distill/vocoder/download.py`
 
-Features to defer until product-market fit is established.
+**Complexity:** Medium (HuggingFace API is straightforward; error handling for offline/partial downloads needs care)
 
-- [ ] **Incremental Training** — Why defer: High complexity (catastrophic forgetting), low urgency (users can retrain from scratch early on). Add when "retrain my 500-file model every time I add 5 files" becomes painful.
-- [ ] **Output-to-Training Feedback Loop** — Why defer: Requires incremental training. Workflow novelty needs validation. Could be killer feature or unused complexity.
-- [ ] **Multi-Model Blending** — Why defer: Advanced use case. Need multiple models first (v1.x multi-model management). Niche until user base is sophisticated.
-- [ ] **Configurable Export Formats** — Why defer: WAV covers 90% of use cases. MP3/FLAC/OGG are conveniences, not blockers. Add when users explicitly request.
-- [ ] **Batch Generation** — Why defer: "Generate 100 variants overnight" is power user feature. Validate single-generation workflow first.
+### 2. Mel Normalization Adapter
+
+**User story:** Invisible to user. VAE produces log1p-normalized mels at 48kHz; BigVGAN expects log-normalized mels at 44.1kHz.
+
+**Implementation:**
+```python
+def adapt_mel_for_bigvgan(mel_log1p: Tensor, source_sr: int = 48000, target_sr: int = 44100) -> Tensor:
+    """Convert VAE mel output to BigVGAN mel input.
+
+    1. Undo log1p: mel_linear = expm1(mel_log1p)
+    2. Apply BigVGAN's log: mel_log = log(clamp(mel_linear, min=1e-5))
+    3. (Optional) Resample time axis if source_sr != target_sr
+    """
+```
+
+The frequency axis (128 mels, 0 to Nyquist) maps differently between 48kHz (0-24kHz) and 44.1kHz (0-22.05kHz). However, BigVGAN was trained as a UNIVERSAL vocoder on diverse audio. The mel filterbank mismatch is minor (top 2kHz of frequency range) and BigVGAN's robustness should handle it. The normalization conversion is the critical part.
+
+**Alternative approach:** Resample audio to 44.1kHz before mel computation, use BigVGAN's own mel function, then resample output to 48kHz. This is "safer" but slower and requires changing the generation flow.
+
+**Recommended approach:** Direct mel normalization conversion (log1p -> log) without resampling, generating at 44.1kHz and resampling vocoder output to 48kHz. This is simpler and leverages BigVGAN's universality. The existing pipeline already has a resampler cache for sample rate conversion.
+
+**Files affected:** New `distill/vocoder/adapter.py`
+
+**Complexity:** Medium (math is simple; validating audio quality requires listening tests)
+
+### 3. Vocoder Wrapper Abstraction
+
+**User story:** Pipeline code calls `vocoder.mel_to_waveform(mel)` regardless of which vocoder is active.
+
+**Implementation:**
+```python
+class BaseVocoder(Protocol):
+    def mel_to_waveform(self, mel: Tensor) -> Tensor: ...
+    def to(self, device: torch.device) -> "BaseVocoder": ...
+
+class BigVGANVocoder(BaseVocoder):
+    """Universal vocoder using BigVGAN-v2."""
+
+class HiFiGANVocoder(BaseVocoder):
+    """Per-model vocoder using HiFi-GAN V2."""
+
+class GriffinLimVocoder(BaseVocoder):
+    """Legacy vocoder wrapping existing AudioSpectrogram.mel_to_waveform()."""
+```
+
+**Files affected:** New `distill/vocoder/__init__.py`, `distill/vocoder/bigvgan.py`, `distill/vocoder/hifigan.py`, `distill/vocoder/griffinlim.py`
+
+**Complexity:** Low (wrapper pattern, existing mel_to_waveform interface)
+
+### 4. Generation Pipeline Integration
+
+**User story:** `GenerationPipeline.generate()` uses selected vocoder instead of `spectrogram.mel_to_waveform()`.
+
+**Current code path (line 339 in generation.py):**
+```python
+wav = spectrogram.mel_to_waveform(combined_mel)
+```
+
+**New code path:**
+```python
+wav = self.vocoder.mel_to_waveform(combined_mel)
+```
+
+The vocoder is set on the pipeline via constructor or setter. The rest of the pipeline (spatial processing, normalization, resampling, quality metrics, export) is unchanged.
+
+**Files affected:** `distill/inference/generation.py`, `distill/inference/chunking.py`
+
+**Complexity:** Low (single method call replacement; wrapper handles mel format conversion internally)
+
+### 5. UI: Vocoder Selection
+
+**User story:** Generate tab shows a dropdown: "Auto (best available)" / "BigVGAN (universal)" / "Per-model HiFi-GAN" / "Griffin-Lim (legacy)". "Auto" is default and picks the best available for the loaded model.
+
+**Implementation:**
+- Add `gr.Dropdown` to Generate tab, below the existing output mode selector
+- "Auto" logic: if loaded model has trained HiFi-GAN weights -> use HiFi-GAN; else -> use BigVGAN; if BigVGAN not downloaded -> use Griffin-Lim
+- Dropdown updates when model is loaded (shows "Per-model HiFi-GAN" only if model has vocoder weights)
+- First selection of BigVGAN triggers download if not cached
+
+**Files affected:** `distill/ui/tabs/generate_tab.py`, `distill/ui/state.py`
+
+**Complexity:** Low (follows existing dropdown patterns in the Generate tab)
+
+### 6. CLI: Vocoder Selection
+
+**User story:** `distill generate my_model --vocoder bigvgan` or `distill generate my_model --vocoder auto`
+
+**Implementation:**
+- Add `--vocoder` option to generate command: `auto` (default), `bigvgan`, `hifigan`, `griffinlim`
+- `auto` follows same priority as UI
+- `bigvgan` triggers download if not cached, shows Rich progress bar
+- `hifigan` fails with clear error if model has no trained vocoder
+
+**Files affected:** `distill/cli/generate.py`
+
+**Complexity:** Low (single Typer option, pipeline routing)
+
+### 7. Per-Model HiFi-GAN V2 Training
+
+**User story:** User clicks "Train Vocoder" for a model. Training uses the same audio files. After training (~30-60 min on consumer GPU), the vocoder is bundled with the model and automatically used for generation.
+
+**Implementation:**
+- HiFi-GAN V2 architecture (0.92M params): generator with multi-receptive field fusion
+- Multi-Period Discriminator (MPD) + Multi-Scale Discriminator (MSD)
+- Training loop: adversarial loss + mel reconstruction loss + feature matching loss
+- Input: ground-truth audio from user's dataset
+- Target: reconstruct waveform from mel spectrogram (computed via the model's SpectrogramConfig)
+- Fine-tune from BigVGAN or train from scratch (BigVGAN fine-tune preferred for faster convergence)
+- Save vocoder weights separately first, then bundle into .distill on completion
+
+**Files affected:** New `distill/vocoder/training.py`, `distill/vocoder/discriminators.py`, `distill/vocoder/hifigan_model.py`
+
+**Complexity:** High (full GAN training loop with multiple discriminators and losses)
+
+### 8. .distill Model Format v2
+
+**User story:** When a user saves a model with a trained vocoder, loading that model on another machine brings the vocoder along.
+
+**Implementation:**
+- Increment `SAVED_MODEL_VERSION` to 2
+- Add optional `vocoder_state_dict` and `vocoder_config` to saved dict
+- Backward compatible: v1 files load without vocoder (BigVGAN used as fallback)
+- Forward compatible: v2 files fail gracefully on older software (version check already exists)
+
+**Format change:**
+```python
+saved = {
+    "format": "distill_model",
+    "version": 2,  # was 1
+    "model_state_dict": ...,
+    "latent_dim": ...,
+    "spectrogram_config": ...,
+    "latent_analysis": ...,
+    "training_config": ...,
+    "metadata": ...,
+    # NEW in v2:
+    "vocoder_type": "hifigan_v2",  # or None
+    "vocoder_state_dict": ...,     # or None
+    "vocoder_config": ...,         # or None
+}
+```
+
+**Size impact:** HiFi-GAN V2 adds ~4MB to .distill files (0.92M params * 4 bytes). Current .distill files are ~2-5MB. Total ~6-9MB. Acceptable.
+
+**Files affected:** `distill/models/persistence.py`, `distill/library/catalog.py` (add `has_vocoder` field to ModelEntry)
+
+**Complexity:** Medium (format migration, backward compatibility testing)
+
+### 9. Vocoder Training UI Integration
+
+**User story:** Train tab shows "Train Vocoder" button when a saved model exists. Uses same UX patterns as VAE training: progress bar, loss chart, cancel, preview audio.
+
+**Implementation:**
+- Add "Vocoder Training" section to Train tab (or new sub-tab)
+- Model selector dropdown (from library)
+- "Train Vocoder" button, reuses TrainingRunner threading pattern
+- Loss chart shows generator loss, discriminator loss, mel reconstruction loss
+- Audio preview: original vs reconstructed comparison
+- On completion: auto-saves vocoder to model, refreshes library
+
+**Files affected:** `distill/ui/tabs/train_tab.py` (or new `vocoder_train_tab.py`)
+
+**Complexity:** Medium (follows existing patterns; new training loop integration)
+
+### 10. Vocoder Training CLI
+
+**User story:** `distill train-vocoder --model "Field Recordings v3" --epochs 500`
+
+**Implementation:**
+- New Typer sub-command `train-vocoder`
+- Options: `--model` (required), `--epochs` (default 500), `--batch-size` (default 4), `--learning-rate` (default 2e-4)
+- Shows Rich progress bar and periodic loss updates
+- On completion: saves vocoder weights to model's .distill file
+
+**Files affected:** New `distill/cli/vocoder.py`, register in `distill/cli/__init__.py`
+
+**Complexity:** Low (follows existing CLI patterns)
+
+---
+
+## MVP Recommendation for v1.1
+
+### Phase A: Core Vocoder Swap (generates better audio)
+
+Ship these first. They deliver the primary value with minimum risk.
+
+1. **Mel Normalization Adapter** - Enables BigVGAN to consume VAE output
+2. **BigVGAN Download Manager** - Gets the model onto user's machine
+3. **VocoderWrapper abstraction** - Clean architecture for multiple vocoders
+4. **GenerationPipeline integration** - The actual swap
+5. **UI vocoder dropdown** - User control
+6. **CLI --vocoder flag** - Script/batch control
+7. **Graceful Griffin-Lim fallback** - Safety net
+
+**Estimated effort:** 3-5 days for a developer familiar with the codebase.
+
+### Phase B: Per-Model Training (maximum fidelity)
+
+Ship after Phase A is validated by listening tests.
+
+8. **HiFi-GAN V2 model architecture** - Generator + discriminators
+9. **HiFi-GAN V2 training loop** - Full GAN training
+10. **.distill format v2** - Bundle vocoder with model
+11. **Training UI** - Train tab integration
+12. **Training CLI** - `distill train-vocoder` command
+13. **Auto-selection logic** - Per-model > BigVGAN > Griffin-Lim
+
+**Estimated effort:** 5-8 days. GAN training is the most complex part.
+
+### Defer to v1.2
+
+- Full Griffin-Lim removal (after vocoder stability confirmed)
+- CUDA kernel optimization for BigVGAN
+- Vocoder quality comparison metrics
+- Vocos investigation (if official 48kHz model ships)
+
+---
+
+## User Workflow Descriptions
+
+### Workflow 1: New User, First Generation (BigVGAN)
+
+1. User has already trained a VAE model in v1.0
+2. Updates to v1.1
+3. Goes to Generate tab, loads their model
+4. Presses "Generate"
+5. **NEW:** App detects BigVGAN not downloaded. Shows: "Downloading BigVGAN-v2 universal vocoder (489 MB)... This is a one-time download."
+6. Progress bar fills over 30-120 seconds (depending on connection)
+7. Generation proceeds with BigVGAN. Audio output is noticeably cleaner.
+8. Subsequent generations are instant (model cached)
+
+### Workflow 2: Power User Trains Per-Model Vocoder
+
+1. User has a model trained on "Modular Synth Patches" (200 files)
+2. Goes to Train tab, sees "Train Vocoder" section
+3. Selects "Modular Synth Patches" model from dropdown
+4. Clicks "Train Vocoder" (uses same audio files from original dataset)
+5. Training runs for ~45 minutes on their RTX 3070
+6. Loss chart shows generator and discriminator losses converging
+7. Periodic previews: "original audio" vs "vocoder reconstruction"
+8. Training completes. Vocoder is auto-saved to the model file.
+9. Goes to Generate tab. Vocoder dropdown now shows "Per-model HiFi-GAN" option
+10. "Auto" mode automatically selects per-model HiFi-GAN
+11. Generated audio has even better fidelity for modular synth textures
+
+### Workflow 3: CLI Batch Generation
+
+```bash
+# Auto-selects best vocoder (downloads BigVGAN on first run)
+distill generate "Modular Synth" -n 10 -d 5.0 --vocoder auto
+
+# Force BigVGAN for universal quality
+distill generate "Modular Synth" -n 10 --vocoder bigvgan
+
+# Use per-model vocoder (fails if not trained)
+distill generate "Modular Synth" -n 10 --vocoder hifigan
+
+# Train a per-model vocoder from CLI
+distill train-vocoder --model "Modular Synth" --epochs 500
+
+# Fall back to Griffin-Lim (legacy, for comparison)
+distill generate "Modular Synth" -n 10 --vocoder griffinlim
+```
+
+### Workflow 4: Offline/No-Download Scenario
+
+1. User is on an air-gapped machine or behind a firewall
+2. Attempts generation. BigVGAN download fails.
+3. App shows warning: "Could not download BigVGAN-v2. Using Griffin-Lim (legacy quality). To use neural vocoder, connect to internet or manually place model files in {path}."
+4. Generation proceeds with Griffin-Lim (same quality as v1.0)
+5. Manual download instructions in docs for offline deployment
+
+---
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Dataset Import | HIGH | LOW | P1 |
-| Model Training | HIGH | HIGH | P1 |
-| Training Progress Monitoring | HIGH | MEDIUM | P1 |
-| Audio Generation | HIGH | HIGH | P1 |
-| Audio Preview | HIGH | LOW | P1 |
-| Audio Export (WAV) | HIGH | LOW | P1 |
-| Basic Model Management | HIGH | MEDIUM | P1 |
-| Parameter Controls (raw latent) | HIGH | MEDIUM | P1 |
-| Preset Save/Recall | MEDIUM | LOW | P1 |
-| Dataset Visualization | MEDIUM | LOW | P1 |
-| PCA Feature Extraction | HIGH | HIGH | P2 |
-| Generation History | MEDIUM | MEDIUM | P2 |
-| Multi-Model Management (library) | MEDIUM | MEDIUM | P2 |
-| OSC/MIDI Control | LOW | MEDIUM | P2 |
-| Spatial Audio Output | MEDIUM | MEDIUM | P2 |
-| Granular Controls | MEDIUM | MEDIUM | P2 |
-| Incremental Training | HIGH | HIGH | P3 |
-| Output-to-Training Loop | MEDIUM | HIGH | P3 |
-| Multi-Model Blending | LOW | MEDIUM | P3 |
-| Batch Generation | LOW | MEDIUM | P3 |
-| Configurable Export Formats | LOW | LOW | P3 |
+| Feature | User Value | Implementation Cost | Priority | Phase |
+|---------|------------|---------------------|----------|-------|
+| BigVGAN generation (transparent swap) | CRITICAL | MEDIUM | P0 | A |
+| Mel normalization adapter | CRITICAL | MEDIUM | P0 | A |
+| BigVGAN auto-download with progress | HIGH | MEDIUM | P0 | A |
+| Vocoder wrapper abstraction | HIGH | LOW | P0 | A |
+| UI vocoder dropdown | HIGH | LOW | P0 | A |
+| CLI --vocoder flag | HIGH | LOW | P0 | A |
+| Griffin-Lim fallback (graceful) | HIGH | LOW | P0 | A |
+| HiFi-GAN V2 training loop | HIGH | HIGH | P1 | B |
+| .distill format v2 (vocoder bundling) | HIGH | MEDIUM | P1 | B |
+| Vocoder training UI | MEDIUM | MEDIUM | P1 | B |
+| Vocoder training CLI | MEDIUM | LOW | P1 | B |
+| Auto vocoder selection | MEDIUM | LOW | P1 | B |
+| Lazy vocoder loading | MEDIUM | LOW | P1 | A |
+| A/B vocoder comparison | LOW | LOW | P2 | B |
+| Vocoder quality metrics | LOW | MEDIUM | P2 | Defer |
+| CUDA kernel optimization | LOW | MEDIUM | P3 | Defer |
+| Griffin-Lim full removal | LOW | LOW | P3 | v1.2 |
 
 **Priority key:**
-- P1: Must have for launch (proves core value prop)
-- P2: Should have, add when possible (elevates from viable to compelling)
-- P3: Nice to have, future consideration (advanced/niche use cases)
+- P0: Must ship for vocoder to work at all
+- P1: Must ship for milestone to be complete
+- P2: Nice to have, adds polish
+- P3: Defer to future milestone
 
-## Competitor Feature Analysis
-
-| Feature | Suno/Udio (Text-to-Music) | RAVE (Neural Audio VAE) | Our Approach (Small Dataset + Musical Params) |
-|---------|--------------------------|------------------------|----------------------------------------------|
-| **Training Data** | Massive datasets (millions of songs) | Medium datasets (hours of audio) | **Small datasets (5-500 files, minutes to hours)** |
-| **Training Workflow** | No user training (pretrained models) | Command-line, technical setup | **GUI-driven, accessible to musicians** |
-| **Parameter Controls** | Text prompts, genre tags | Opaque latent dimensions (z1-z16) | **Musically meaningful (timbre, harmony, temporal, spatial)** |
-| **Output Quality** | 44.1kHz, vocals/instruments | 48kHz but quality compromises | **48kHz/24-bit, high fidelity focus** |
-| **Generation Speed** | 10-30 seconds for full song | Real-time (< 10ms latency) | **Non-real-time (100ms-1s), quality over speed** |
-| **Use Case** | Complete songs with lyrics | Timbre transfer, audio effects | **Textures, soundscapes, building blocks for production** |
-| **Dataset Personalization** | None (generic output) | Possible but technical | **Core value prop (train on YOUR sounds)** |
-| **Export** | MP3/WAV stems | WAV output | **Configurable sample rate/bit depth/channels** |
-| **Model Management** | N/A (single global model) | Manual file management | **GUI library, metadata, switching** |
-| **Preset System** | N/A (prompt-based) | No presets | **Save/recall parameter states** |
-| **Live Performance** | Not applicable | Real-time capable | **OSC/MIDI for performance control (v2)** |
-| **Incremental Learning** | N/A | No | **Add files to existing models (v2)** |
-| **Feature Extraction** | N/A | Manual latent space analysis | **Automatic PCA-based musical parameter discovery** |
-
-**Key Differentiation**:
-- **vs Suno/Udio**: Small personal datasets (not generic), instrumental/abstract (not songs), musician-owned training (not cloud service)
-- **vs RAVE**: Musical parameters (not opaque), GUI workflow (not command-line), incremental training (not static), quality focus (not real-time)
-
-## Domain-Specific Insights
-
-### Generative Audio Tool Patterns (2026)
-
-**Current Landscape**: AI music tools split into two camps:
-1. **Text-to-music (Suno, Udio)**: Consumer-facing, prompt-driven, complete song generation. 44.1kHz+ audio, vocals/lyrics, genre/mood controls. Not trainable by users.
-2. **Neural synthesis (RAVE, Magenta NSynth)**: Developer/researcher-facing, VAE-based, requires technical setup. Real-time capable but opaque parameters.
-
-**Gap Our Tool Fills**: Musician-facing neural synthesis with small dataset training and musical parameter control. Not trying to make "songs" (Suno's domain) or replace DAWs (they integrate). Focus: personal sound palette → controllable generation → DAW integration.
-
-### Training Workflow Expectations
-
-Research shows users expect:
-- **Visual feedback**: Loss curves, sample rate consistency checks, dataset file counts
-- **Time estimates**: "8 hours remaining" more reassuring than spinner
-- **Sample monitoring**: Hear validation samples during training (TensorBoard audio tab pattern)
-- **Cancellation/resumption**: Long processes need abort and checkpoint recovery
-
-### Parameter Control Paradigms
-
-Audio synthesis tools use several control patterns:
-1. **Sliders (ADSR, filter cutoff)**: Precise, familiar, but high cognitive load at scale
-2. **XY pads (NSynth instrument)**: Spatial exploration, intuitive but limited to 2D
-3. **MIDI/OSC (Autolume-live)**: Hardware integration, performance-oriented
-4. **Automated discovery (PCA, GANspace)**: Extract meaningful dims from latent space
-
-**Recommendation**: Hybrid approach. Start with sliders for MVP (table stakes). Add PCA to make sliders musically meaningful (v1.x differentiator). Add XY pads + MIDI for performance use cases (v2).
-
-### Audio Export Considerations
-
-DAW integration requires:
-- **Sample rate parity**: Generate at 44.1kHz or 48kHz (project SR). Mismatched SR causes resampling artifacts.
-- **Bit depth headroom**: 24-bit preferred over 16-bit for post-processing. 32-bit float ideal for mixing.
-- **Uncompressed formats**: WAV/AIFF only. MP3/OGG lose detail.
-- **Stem export**: Multi-model blending should output separate files, not premixed (like Suno's stem download).
-
-### Small Dataset Best Practices
-
-Machine learning on limited data requires:
-- **Data augmentation**: Loudness variation, noise injection, pitch shift, time stretch. Increases effective dataset size 5-10x.
-- **Transfer learning**: Pretrained feature extractors (YAMNet, VGGish) provide robust representations. Fine-tune decoder only.
-- **Architectural choices**: Smaller latent dim (4-8 vs 16-32), shallower networks, regularization (dropout, weight decay).
-- **Quality over quantity**: 50 high-quality, diverse samples > 500 similar samples.
-
-### Preset System Patterns
-
-Musicians expect:
-- **Factory presets**: Ship with 10-20 curated examples showing range of tool
-- **User presets**: Save to user library, shareable files (FXP/FXB format or JSON)
-- **Categorization**: Tag by mood/genre/instrument, searchable
-- **Recall behavior**: "Morphing" between current state and recalled preset (crossfade option)
-
-### Incremental Training Challenges
-
-Research highlights:
-- **Catastrophic forgetting**: Adding new data erases old knowledge. Mitigation: regularization, replay buffers, freezing encoder layers.
-- **Distribution shift**: New samples may differ from original dataset. Need domain adaptation.
-- **Efficiency**: Full retrain vs partial fine-tune. Trade-off between quality and speed.
-- **User expectations**: "Add 5 files" should take minutes, not hours. Implies frozen encoder, decoder-only updates.
+---
 
 ## Sources
 
-**Generative Audio Tools (2026)**:
-- [Top-13 AI Tools for Audio Creation & Editing in 2026](https://dataforest.ai/blog/best-ai-tools-for-audio-editing)
-- [Best AI Music Generators in 2026](https://wavespeed.ai/blog/posts/best-ai-music-generators-2026/)
-- [Best AI Music Generator Software in 2026](https://www.audiocipher.com/post/ai-music-app)
+**BigVGAN-v2:**
+- [NVIDIA BigVGAN GitHub](https://github.com/NVIDIA/BigVGAN) - Official implementation, training configs
+- [BigVGAN-v2 44kHz 128band 512x on HuggingFace](https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_512x) - Model weights, config.json (verified: n_fft=2048, hop_size=512, num_mels=128, sampling_rate=44100)
+- [BigVGAN-v2 meldataset.py](https://github.com/NVIDIA/BigVGAN/blob/main/meldataset.py) - Mel spectrogram computation (verified: log normalization, NOT log1p)
+- [NVIDIA BigVGAN-v2 Blog Post](https://developer.nvidia.com/blog/achieving-state-of-the-art-zero-shot-waveform-audio-generation-across-audio-types/) - v2 improvements, CUDA kernel
 
-**AI Music Tool Comparison**:
-- [Best 8 AI Music Generators in 2026: Complete Guide & Comparison](https://song.bio/en/blog/best-ai-music-generators-2026)
-- [The 2 Best AI Music Generators (Which One Wins In 2026?)](https://musicmadepro.com/blogs/news/comparing-the-2-best-ai-music-generators)
+**HiFi-GAN:**
+- [HiFi-GAN GitHub](https://github.com/jik876/hifi-gan) - Original implementation (V1/V2/V3 configs)
+- [HiFi-GAN Paper (NeurIPS 2020)](https://arxiv.org/abs/2010.05646) - Architecture details (V2: 0.92M params, 4.23 MOS, 764.8x real-time)
+- [NVIDIA HiFi-GAN on HuggingFace](https://huggingface.co/nvidia/tts_hifigan) - Pretrained universal model
 
-**Audio Synthesis Parameter Controls**:
-- [The Best 15 Granular Synthesis VST Plugins in 2026](https://artistsindsp.com/the-best-15-granular-synthesis-vst-plugins-in-2026/)
-- [Granular Synthesis 101: A Portal Exploration](https://output.com/blog/granular-synthesis-101-a-portal-exploration)
-- [Basics of Synthesis and Sound Design](https://medium.com/@kusekiakorame/basics-of-synthesis-and-sound-design-a-beginners-guide-9c3d0314c6d5)
+**Vocos (considered, not recommended):**
+- [Vocos Paper (ICLR 2024)](https://arxiv.org/html/2306.00814v3) - 13x faster than HiFi-GAN, 70x faster than BigVGAN
+- [kittn/vocos-mel-48khz-alpha1](https://huggingface.co/kittn/vocos-mel-48khz-alpha1) - Unofficial 48kHz alpha (NOT production ready)
 
-**RAVE Neural Audio Synthesis**:
-- [GitHub - RAVE Official Implementation](https://github.com/acids-ircam/RAVE)
-- [RAVE: A variational autoencoder for fast and high-quality neural audio synthesis](https://arxiv.org/abs/2111.05011)
-- [Tutorial: Neural Synthesis in Max 8 with RAVE](https://forum.ircam.fr/article/detail/tutorial-neural-synthesis-in-max-8-with-rave/)
+**MusicHiFi (considered, not recommended):**
+- [MusicHiFi Paper](https://arxiv.org/abs/2403.10493) - Stereo vocoder, cascade of 3 GANs, no pretrained models available
 
-**VST Plugin Preset Management**:
-- [Making Audio Plugins Part 6: Presets](https://www.martin-finke.de/articles/audio-plugins-006-presets/)
-- [GitHub - vst-presets: Curated collection of VST presets](https://github.com/delaudio/vst-presets)
-
-**Small Dataset Machine Learning**:
-- [Make the Most of Limited Datasets Using Audio Data Augmentation](https://www.edgeimpulse.com/blog/make-the-most-of-limited-datasets-using-audio-data-augmentation/)
-- [A Complete Guide to Audio Datasets](https://huggingface.co/blog/audio-datasets)
-- [Working with Audio Data for Machine Learning in Python](https://www.comet.com/site/blog/working-with-audio-data-for-machine-learning-in-python/)
-
-**Latent Space Exploration**:
-- [A Mapping Strategy for Interacting with Latent Audio Synthesis](https://arxiv.org/html/2407.04379v1)
-- [Latent Timbre Synthesis](https://github.com/ktatar/latent-timbre-synthesis)
-- [TIMBRE LATENT SPACE: EXPLORATION AND CREATIVE ASPECTS](https://acids-ircam.github.io/timbre_exploration/)
-- [Making a Neural Synthesizer Instrument](https://magenta.tensorflow.org/nsynth-instrument)
-
-**Audio Export & DAW Integration**:
-- [Sample Rate & Bit Depth Explained](https://www.blackghostaudio.com/blog/sample-rate-bit-depth-explained)
-- [How to Export Your Mix for Mastering](https://veniamastering.studio/blogs/learn/how-to-export-your-mix-for-mastering)
-- [Exporting Your Song: Best Bouncing Settings Explained](https://splice.com/blog/exporting-your-track/)
-
-**Incremental Training**:
-- [Online incremental learning for audio classification](https://arxiv.org/html/2508.20732)
-- [Incremental Learning: Adaptive and real-time machine learning](https://blogs.mathworks.com/deep-learning/2024/03/04/incremental-learning-adaptive-and-real-time-machine-learning/)
-
-**Autolume (Visual Equivalent)**:
-- [Autolume 2.0: A GAN-based No-Coding Small Data](https://creativity-ai.github.io/assets/papers/49.pdf)
-- [Autolume-Live: Interface for Live Visual Performances using GANs](https://summit.sfu.ca/_flysystem/fedora/2023-07/etd22382.pdf)
-
-**Soundscape Generation**:
-- [Soundscaping Guide - The Art Of Soundscape Creation](https://www.audiocube.app/blog/soundscaping)
-- [Ambient Suite | Tools for Textural Soundscapes](https://puremagnetik.com/products/drone-texture-suite-tools-for-textural-soundscapes)
-
-**Musical Parameters (Timbre/Harmony/Temporal/Spatial)**:
-- [Timbre Space as a Musical Control Structure](https://cnmat.berkeley.edu/sites/default/files/attachments/Timbre-Space.pdf)
-- [Timbre and harmony: interpolations of timbral structures](https://saariaho.org/media/pages/texts/896aa80481-1717024697/timbre-and-harmony-interpolations-of-timbral-structures.pdf)
-
-**Training Progress Visualization**:
-- [Guide 3: Model Training & Fine-tuning | Universal TTS Guide](https://actepukc.github.io/Universal-TTS-Guide/guides/3_MODEL_TRAINING.html)
-- [10 Best Tools for Machine Learning Model Visualization (2024)](https://dagshub.com/blog/best-tools-for-machine-learning-model-visualization/)
-
-**Creative Version Control**:
-- [Towards Creative Version Control](https://www.researchgate.net/publication/365331522_Towards_Creative_Version_Control)
-- [Undo and redo Mixer and plug-in adjustments in Logic Pro](https://support.apple.com/guide/logicpro/undo-and-redo-mixer-and-plug-in-adjustments-lgcpe30a5c12/mac)
+**Model Management Patterns:**
+- [Coqui TTS Model Management](https://deepwiki.com/coqui-ai/TTS/3.2-model-management) - Download, cache, auto-load patterns
+- [HuggingFace Hub File Download](https://huggingface.co/docs/huggingface_hub/package_reference/file_download) - Progress bars, caching, local_files_only
 
 ---
-*Feature research for: Small Dataset Generative Audio Tool*
-*Researched: 2026-02-12*
-*Confidence: MEDIUM (WebSearch-verified with multiple sources; some findings from official docs/GitHub; no Context7 verification available for domain)*
+*Feature research for: v1.1 Neural Vocoder Integration*
+*Researched: 2026-02-21*
+*Confidence: HIGH (mel parameters verified from official BigVGAN config.json; HiFi-GAN architecture from original NeurIPS paper; codebase integration points identified from direct code reading)*

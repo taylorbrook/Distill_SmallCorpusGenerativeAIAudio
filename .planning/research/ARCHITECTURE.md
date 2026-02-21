@@ -1,666 +1,753 @@
-# Architecture Research
+# Architecture: Neural Vocoder Integration
 
-**Domain:** Generative Audio from Small Datasets
-**Researched:** 2026-02-12
-**Confidence:** MEDIUM-HIGH
+**Domain:** HiFi-GAN / BigVGAN-v2 neural vocoder integration into existing generative audio pipeline
+**Researched:** 2026-02-21
+**Confidence:** HIGH
 
-## Standard Architecture
+## Executive Summary
+
+The neural vocoder replaces Griffin-Lim (the weakest link in the current pipeline) with a learned mel-to-waveform conversion. The integration point is surgically narrow: only `AudioSpectrogram.mel_to_waveform()` and a small set of callers need to change. However, the mel spectrogram normalization mismatch between the existing project (`log1p`) and BigVGAN (`log(clamp(x))`) is a critical compatibility issue that drives several architectural decisions.
+
+The recommended architecture introduces a `vocoder/` module alongside the existing `audio/` module, a mel normalization adapter layer, a shared vocoder cache for BigVGAN weights, optional per-model HiFi-GAN state bundled into `.distill` files, and a new HiFi-GAN training pipeline that runs independently from the VAE training loop.
+
+## Current Generation Pipeline
+
+```
+VAE Decoder                        AudioSpectrogram               Output
+   |                                    |                           |
+   z [B, latent_dim]                    |                           |
+   |                                    |                           |
+   model.decode(z)                      |                           |
+   |                                    |                           |
+   mel_log [B, 1, n_mels, time]        |                           |
+   |                                    |                           |
+   +--- spectrogram.mel_to_waveform(mel_log) ----+                  |
+        |                                         |                 |
+        torch.expm1(mel_log)  [undo log1p]       |                 |
+        |                                         |                 |
+        InverseMelScale(mel) -> linear_spec      |                 |
+        |                                         |                 |
+        GriffinLim(linear_spec) -> waveform  ----+----> waveform   |
+```
+
+### Current Callers of mel_to_waveform
+
+| Caller | File | Context |
+|--------|------|---------|
+| `generate_chunks_crossfade` | `inference/chunking.py` | Main generation path |
+| `generate_chunks_latent_interp` | `inference/chunking.py` | Alternative generation path |
+| `_generate_chunks_from_vector` | `inference/generation.py` | Slider-controlled generation |
+| `generate_preview` | `training/preview.py` | Training preview audio |
+| `generate_reconstruction_preview` | `training/preview.py` | Original vs. reconstruction |
+
+All five callers use the same pattern: `spectrogram.mel_to_waveform(combined_mel)`. This is the single integration seam.
+
+## Proposed Architecture
 
 ### System Overview
 
-Small-dataset generative audio systems follow a multi-stage pipeline architecture, combining data preprocessing, neural model training, latent space manipulation, and high-fidelity synthesis. The dominant pattern is a **Variational Autoencoder (VAE) or hybrid VAE-GAN architecture** with differentiable DSP components.
-
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          UI LAYER (Gradio)                              │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────┐   │
-│  │ File Upload      │  │ Parameter Sliders │  │ Audio Playback     │   │
-│  │ Management       │  │ (Timbre/Harmonic) │  │ Export Controls    │   │
-│  └────────┬─────────┘  └─────────┬─────────┘  └─────────┬──────────┘   │
-├───────────┴────────────────┬─────┴────────────────┬──────┴──────────────┤
-│                     GENERATION ENGINE                                   │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  Latent Space Navigator                                          │   │
-│  │  - Maps UI sliders → latent dimensions                           │   │
-│  │  - Preset save/load                                              │   │
-│  │  - Interpolation & exploration                                   │   │
-│  └────────────────────────────┬─────────────────────────────────────┘   │
-├────────────────────────────────┴─────────────────────────────────────────┤
-│                        TRAINED MODEL CORE                                │
-│  ┌──────────────┐  ┌───────────────┐  ┌──────────────────────────┐     │
-│  │   Encoder    │  │ Latent Space  │  │      Decoder             │     │
-│  │  (compress   │→ │ (bottleneck   │→ │  (reconstruct/generate   │     │
-│  │   to latent) │  │  disentangled)│  │   audio waveform)        │     │
-│  └──────────────┘  └───────────────┘  └──────────────────────────┘     │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  DSP Synthesis Components (DDSP-style, optional)                 │   │
-│  │  - Harmonic Additive Synthesizer                                 │   │
-│  │  - Filtered Noise Synthesizer                                    │   │
-│  │  - Differentiable Reverb                                         │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────────────────┤
-│                        TRAINING PIPELINE                                 │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  ┌──────────┐   │
-│  │ Data Loader │→ │ Feature      │→ │ Augmentation  │→ │ Training │   │
-│  │             │  │ Extraction   │  │ (pitch/time/  │  │ Loop     │   │
-│  │             │  │ (mel/MFCC)   │  │  noise/spec)  │  │ (VAE+GAN)│   │
-│  └─────────────┘  └──────────────┘  └───────────────┘  └──────────┘   │
-├──────────────────────────────────────────────────────────────────────────┤
-│                        MODEL MANAGEMENT                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │ Checkpointing│  │ Versioning   │  │ Model Blend  │                  │
-│  │ (PyTorch)    │  │ (Hub/local)  │  │ (averaging)  │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-├──────────────────────────────────────────────────────────────────────────┤
-│                        DATA PIPELINE                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────┐   │
-│  │ Audio Ingest │→ │ Normalization│→ │ Resampling   │→ │ Chunking │   │
-│  │ (5-500 files)│  │ Peak/RMS     │  │ 48kHz/24bit  │  │ (segments│   │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────┘   │
-└──────────────────────────────────────────────────────────────────────────┘
+VAE Decoder                   Vocoder Router                    Output
+   |                               |                              |
+   mel_log [B, 1, n_mels, T]      |                              |
+   |                               |                              |
+   +--- vocoder_router(mel_log) ---+                              |
+        |                          |                              |
+        +--- BigVGAN path ----+    +--- HiFi-GAN path ----+     |
+        |                     |    |                       |     |
+        | mel_adapter(mel_log)|    | mel_adapter(mel_log)  |     |
+        | [undo log1p, apply  |    | [undo log1p, apply   |     |
+        |  log(clamp)]        |    |  log(clamp)]         |     |
+        |                     |    |                       |     |
+        | bigvgan(mel) -------+    | hifigan(mel) --------+     |
+        |                          |                              |
+        +--- waveform [B, 1, T] --+--- waveform [B, 1, T] ------+
 ```
 
-### Component Responsibilities
-
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| **Data Pipeline** | Ingest, validate, normalize, chunk raw audio | torchaudio or librosa for I/O, preprocessing, augmentation |
-| **Feature Extraction** | Extract spectral/temporal features for model input | Mel-spectrograms, MFCC, CQT via torchaudio.transforms |
-| **Augmentation Module** | Expand small datasets with pitch shift, time stretch, noise injection, SpecAugment | audiomentations, torchaudio transforms, custom |
-| **Training Engine** | Orchestrate model training, loss computation, optimization | PyTorch training loop, PyTorch Lightning for complex workflows |
-| **Encoder** | Compress audio to low-dimensional latent representation | Convolutional or recurrent neural network layers |
-| **Latent Space** | Bottleneck representation with disentangled dimensions | VAE with regularization (beta-VAE, disentanglement constraints) |
-| **Decoder** | Reconstruct/generate audio from latent codes | Transposed convolutions, upsampling layers, or DSP synthesizers |
-| **DSP Synthesis** | Interpretable signal generation (harmonic + noise) | DDSP modules: additive synth, subtractive filters, reverb |
-| **Discriminator (GAN)** | Adversarial refinement for perceptual quality | Multi-scale or multi-period discriminators on waveform/spectrogram |
-| **Latent Space Mapper** | Map user-friendly controls (timbre, harmony) to latent dims | Learned or heuristic mapping from interpretable params to z-space |
-| **Generation Engine** | Non-realtime inference, parameter control, preset management | PyTorch inference mode, parameter interpolation logic |
-| **Model Manager** | Checkpoint saving, versioning, incremental training, blending | PyTorch checkpointing, PyTorch Lightning callbacks, Hugging Face Hub |
-| **Export Pipeline** | Format conversion, sample rate/bit depth adjustment, dithering | soundfile, torchaudio for writing WAV/FLAC with target specs |
-| **UI Layer** | Sliders, file upload, playback, export controls | Gradio interfaces with Audio, Slider, File components |
-| **CLI Interface** | Batch generation, scripting, automation | argparse-based Python scripts wrapping generation engine |
-
-## Recommended Project Structure
+### New Module: `src/distill/vocoder/`
 
 ```
-src/
-├── data/                  # Data pipeline
-│   ├── dataset.py         # PyTorch Dataset for audio files
-│   ├── augmentation.py    # Augmentation transforms for small datasets
-│   ├── preprocessing.py   # Normalization, resampling, chunking
-│   └── features.py        # Feature extraction (mel, MFCC, CQT)
-├── models/                # Neural architecture
-│   ├── encoder.py         # Encoder network (audio → latent)
-│   ├── decoder.py         # Decoder network (latent → audio or DSP params)
-│   ├── vae.py             # VAE wrapper combining encoder/decoder
-│   ├── discriminator.py   # GAN discriminator (optional adversarial loss)
-│   ├── dsp.py             # DDSP synthesis modules (harmonic, noise, reverb)
-│   └── losses.py          # Reconstruction, KL, adversarial, perceptual losses
-├── training/              # Training orchestration
-│   ├── train.py           # Main training script
-│   ├── trainer.py         # Training loop logic (or PyTorch Lightning module)
-│   ├── config.py          # Hyperparameters, architecture configs
-│   └── callbacks.py       # Checkpointing, early stopping, logging
-├── inference/             # Generation engine
-│   ├── generator.py       # Non-realtime generation from latent codes
-│   ├── latent_mapper.py   # Map sliders (timbre, harmony) → latent dims
-│   ├── presets.py         # Save/load slider configurations
-│   └── interpolation.py   # Latent space exploration (interpolation, random walk)
-├── export/                # Audio export pipeline
-│   ├── converter.py       # Sample rate conversion, bit depth, dithering
-│   └── formats.py         # WAV, FLAC, MP3 export
-├── ui/                    # Gradio interface
-│   ├── gradio_app.py      # Main Gradio app with sliders, playback, export
-│   └── components.py      # Reusable UI components
-├── cli/                   # Command-line interface
-│   ├── train_cli.py       # CLI for training
-│   ├── generate_cli.py    # CLI for batch generation
-│   └── export_cli.py      # CLI for export operations
-├── checkpoints/           # Model storage (gitignored)
-│   └── .gitkeep
-└── utils/                 # Shared utilities
-    ├── audio_io.py        # Load/save audio files
-    ├── device.py          # MPS/CUDA/CPU device selection
-    └── logging.py         # Logging setup
+src/distill/vocoder/
+    __init__.py              # Public API: VocoderType, get_vocoder, VocoderConfig
+    adapter.py               # Mel normalization adapter (log1p <-> log(clamp))
+    base.py                  # Abstract Vocoder interface
+    bigvgan.py               # BigVGAN-v2 wrapper (loads from HF, caches)
+    hifigan.py               # HiFi-GAN V2 model definition + wrapper
+    training.py              # HiFi-GAN adversarial training loop
+    discriminator.py         # MPD + MSD/CQTD discriminators for HiFi-GAN training
+    config.py                # VocoderConfig, HiFiGANTrainingConfig
+    cache.py                 # Shared model cache management
 ```
 
-### Structure Rationale
+### Component Boundaries
 
-- **data/:** Groups all preprocessing, augmentation, and feature extraction. Small-dataset systems rely heavily on augmentation, so this is a first-class concern.
-- **models/:** Modular components (encoder, decoder, VAE, discriminator, DSP) allow mix-and-match architectures. DDSP components are optional but improve interpretability.
-- **training/:** Training is complex (multi-stage VAE + GAN, checkpointing, hyperparameter tuning), so isolate it from inference.
-- **inference/:** Generation is a separate workflow from training. Latent mapping is the key innovation layer.
-- **export/:** High-fidelity export (48kHz/24bit+) requires careful sample rate conversion and dithering, so isolate this.
-- **ui/ and cli/:** Separate interfaces for interactive (Gradio) and batch (CLI) use cases.
+| Component | Responsibility | Communicates With |
+|-----------|----------------|-------------------|
+| `vocoder.base.Vocoder` | Abstract interface: `mel_to_waveform(mel_log) -> waveform` | Called by `AudioSpectrogram`, `chunking.py`, `generation.py` |
+| `vocoder.adapter.MelAdapter` | Converts between VAE's log1p normalization and vocoder's log(clamp) normalization | Used by BigVGAN and HiFi-GAN wrappers |
+| `vocoder.bigvgan.BigVGANVocoder` | Loads BigVGAN-v2 from HuggingFace, runs inference | Uses `adapter`, `cache` |
+| `vocoder.hifigan.HiFiGANVocoder` | HiFi-GAN V2 generator model definition and inference | Uses `adapter` |
+| `vocoder.training.HiFiGANTrainer` | Adversarial training loop for per-model HiFi-GAN | Uses `hifigan`, `discriminator`, existing training data |
+| `vocoder.discriminator` | Multi-Period + Multi-Scale discriminators | Used only by `training` |
+| `vocoder.cache.VocoderCache` | Downloads/caches BigVGAN weights, tracks HiFi-GAN checkpoints | Used by `bigvgan`, persistence |
+| `vocoder.config.VocoderConfig` | Vocoder selection + parameters | Stored in `.distill` files, used by UI/CLI |
 
-## Architectural Patterns
+### Modified Existing Components
 
-### Pattern 1: Two-Stage Training (Representation + Adversarial)
+| Component | Change | Reason |
+|-----------|--------|--------|
+| `audio/spectrogram.py` | Add optional `vocoder` parameter to constructor; delegate `mel_to_waveform` to vocoder when present | Backward-compatible: default behavior unchanged |
+| `models/persistence.py` | Add `vocoder_state_dict` and `vocoder_config` to saved model dict; bump `SAVED_MODEL_VERSION` to 2 | Store per-model HiFi-GAN weights alongside VAE |
+| `inference/generation.py` | Accept vocoder in `GenerationPipeline.__init__`; pass to spectrogram | Pipeline carries vocoder through |
+| `training/preview.py` | Use vocoder (if available) for preview generation | Better preview quality during training |
+| `ui/tabs/generate_tab.py` | Add vocoder selection dropdown | User selects BigVGAN vs HiFi-GAN vs Griffin-Lim |
+| `ui/tabs/train_tab.py` | Add "Train Vocoder" section | HiFi-GAN training UI |
+| `ui/state.py` | Add `vocoder` field to `AppState` | Track active vocoder |
+| `cli/generate.py` | Add `--vocoder` flag | CLI vocoder selection |
+| `cli/train.py` | Add `train-vocoder` subcommand | CLI HiFi-GAN training |
+| `config/defaults.py` | Add `vocoder` section to `DEFAULT_CONFIG` | Default vocoder settings |
 
-**What:** Train the VAE first for reconstruction, then add adversarial loss (GAN) for perceptual refinement.
+## Critical Design Decisions
 
-**When to use:** Always for high-quality audio synthesis. VAE alone produces blurry audio; adversarial loss sharpens it.
+### Decision 1: Mel Normalization Adapter
 
-**Trade-offs:**
-- **Pros:** Higher perceptual quality, better high-frequency detail.
-- **Cons:** More complex training (GAN instability), longer training time, hyperparameter sensitivity.
+**Problem:** The VAE produces mel spectrograms normalized with `log1p(mel)` (range: 0 to ~11 for typical audio). BigVGAN and HiFi-GAN expect `log(clamp(mel, min=1e-5))` (range: ~-11.5 to ~11). These are NOT interchangeable -- feeding one format to a model trained on the other produces garbage audio.
 
-**Example:**
+**Solution:** A stateless adapter that converts between normalizations at the vocoder boundary.
+
 ```python
-# Stage 1: Train VAE (reconstruction + KL divergence)
-for epoch in range(vae_epochs):
-    recon_loss = F.mse_loss(recon_audio, target_audio)
-    kl_loss = compute_kl_divergence(mu, logvar)
-    vae_loss = recon_loss + beta * kl_loss
-    vae_loss.backward()
+class MelAdapter:
+    """Convert between VAE mel normalization and vocoder mel normalization."""
 
-# Stage 2: Add GAN (adversarial loss on top of VAE)
-for epoch in range(gan_epochs):
-    # Generator (VAE decoder)
-    recon_audio = vae.decode(latent)
-    adv_loss = discriminator_loss(recon_audio, fake=False)
-    total_loss = recon_loss + beta * kl_loss + lambda_adv * adv_loss
-    total_loss.backward()
+    @staticmethod
+    def vae_to_vocoder(mel_log1p: torch.Tensor) -> torch.Tensor:
+        """Convert log1p-normalized mel to log-normalized mel.
 
-    # Discriminator
-    d_real = discriminator(target_audio)
-    d_fake = discriminator(recon_audio.detach())
-    d_loss = gan_loss(d_real, d_fake)
-    d_loss.backward()
+        VAE output:    log1p(mel) = log(1 + mel)
+        Vocoder input: log(clamp(mel, min=1e-5))
+
+        Conversion:    mel = expm1(mel_log1p)
+                       mel_vocoder = log(clamp(mel, min=1e-5))
+        """
+        mel_linear = torch.expm1(mel_log1p.clamp(min=0))
+        return torch.log(torch.clamp(mel_linear, min=1e-5))
+
+    @staticmethod
+    def vocoder_to_vae(mel_log: torch.Tensor) -> torch.Tensor:
+        """Convert log-normalized mel back to log1p-normalized mel.
+
+        Used during HiFi-GAN training when computing mel loss
+        on VAE-reconstructed spectrograms.
+        """
+        mel_linear = torch.exp(mel_log)
+        return torch.log1p(mel_linear)
 ```
 
-### Pattern 2: Multi-Band Decomposition (PQMF)
+**Confidence:** HIGH -- both normalizations are well-defined, and the conversion is mathematically exact.
 
-**What:** Use a pseudo-quadrature mirror filter (PQMF) bank to decompose audio into 8-16 frequency bands, process in parallel, then recompose.
+**Why not retrain the VAE with different normalization?** This would invalidate all existing trained models and require retraining. The adapter is zero-cost at inference time and preserves backward compatibility.
 
-**When to use:** For high sample rates (48kHz) and real-time targets. RAVE uses 16-band PQMF to run 20x faster than real-time.
+### Decision 2: BigVGAN-v2 Model Variant Selection
 
-**Trade-offs:**
-- **Pros:** Dramatically reduces computational cost (16x reduction in sequence length), enables realtime synthesis, near-perfect reconstruction.
-- **Cons:** Adds complexity, requires careful filter design, slightly less interpretable than full waveform.
+**Problem:** BigVGAN-v2 has multiple pretrained checkpoints. The project uses 48kHz/128 mels/512 hop_length/2048 n_fft. No BigVGAN variant matches 48kHz exactly.
 
-**Example:**
+**Available BigVGAN-v2 variants:**
+
+| Variant | Sample Rate | n_mels | hop_size | n_fft | Params | Match Quality |
+|---------|-------------|--------|----------|-------|--------|---------------|
+| `44khz_128band_512x` | 44100 | 128 | 512 | 2048 | 122M | Closest: n_mels, hop, n_fft match |
+| `44khz_128band_256x` | 44100 | 128 | 256 | 1024 | 112M | n_mels match, but hop/n_fft differ |
+| `24khz_100band_256x` | 24000 | 100 | 256 | 1024 | 112M | Nothing matches |
+| `22khz_80band_256x` | 22050 | 80 | 256 | 1024 | -- | Nothing matches |
+
+**Recommendation:** Use `bigvgan_v2_44khz_128band_512x` (122M params).
+
+Rationale:
+- **n_mels=128** matches exactly
+- **hop_size=512** matches exactly
+- **n_fft=2048** matches exactly
+- **fmin=0, fmax=null** matches exactly
+- Only **sample_rate differs**: 44100 vs 48000
+
+The sample rate mismatch (44.1kHz vs 48kHz) is handled by:
+1. Resample the VAE's mel spectrogram time axis from 48kHz-equivalent to 44.1kHz-equivalent frame rate (ratio: 44100/48000 = 0.91875), or
+2. Generate BigVGAN output at 44.1kHz and resample the waveform to 48kHz (the project already has resampling infrastructure in `_get_resampler`)
+
+Option 2 is simpler and recommended: let BigVGAN produce 44.1kHz audio, then resample to 48kHz. The resampler already exists in the generation pipeline.
+
+**Confidence:** HIGH for the model selection. MEDIUM for the sample rate handling -- perceptual testing needed to confirm quality.
+
+### Decision 3: Vocoder Storage Strategy
+
+**Problem:** Where do vocoder model weights live? Options:
+1. Bundle vocoder state into each `.distill` file
+2. Separate vocoder files alongside `.distill` files
+3. Shared cache directory
+
+**Recommendation:** Hybrid approach with three tiers.
+
+```
+Tier 1: BigVGAN (shared cache, ~500MB one-time download)
+    data/vocoders/bigvgan_v2_44khz_128band_512x/
+        bigvgan_generator.pt
+        config.json
+
+Tier 2: Per-model HiFi-GAN (bundled in .distill file)
+    data/models/my_model.distill
+        format: "distill_model"
+        version: 2
+        model_state_dict: {...}          # VAE weights
+        vocoder_state_dict: {...}        # HiFi-GAN weights (optional)
+        vocoder_config: {...}            # HiFi-GAN config (optional)
+        spectrogram_config: {...}
+        latent_analysis: {...}
+        training_config: {...}
+        metadata: {...}
+
+Tier 3: No vocoder (Griffin-Lim fallback)
+    Older .distill files without vocoder_state_dict
+    Still work with BigVGAN universal or Griffin-Lim
+```
+
+**Rationale:**
+- BigVGAN is 122M params (~500MB on disk). Bundling it in every `.distill` file would waste disk space and slow save/load. A shared cache downloaded once is the right approach.
+- Per-model HiFi-GAN is small enough to bundle (~5-15MB) and is model-specific, so it belongs in the `.distill` file.
+- Griffin-Lim requires zero storage. Keeping it as fallback ensures models work even without vocoder downloads.
+
+**Model version bump:** `SAVED_MODEL_VERSION = 2`. Version 1 files load fine (no vocoder fields). Version 2 files include optional vocoder fields.
+
+**Confidence:** HIGH
+
+### Decision 4: HiFi-GAN Training Integration
+
+**Problem:** HiFi-GAN training is adversarial (generator + discriminator), which is fundamentally different from the existing VAE training loop. How to integrate?
+
+**Recommendation:** Separate training pipeline, not integrated into the VAE training loop.
+
+```
+Existing VAE Training Loop (unchanged)
+    train() -> {model, metrics, checkpoint}
+                |
+                v (after VAE training completes)
+HiFi-GAN Training Pipeline (new, optional)
+    train_vocoder(
+        vae_model,        # Frozen, used to generate mel specs
+        audio_files,      # Same training data
+        vocoder_config,   # HiFi-GAN architecture config
+    ) -> {vocoder, metrics}
+```
+
+**Why separate?**
+1. VAE training produces mel spectrograms; HiFi-GAN training consumes them. They have a producer-consumer relationship, not a joint optimization.
+2. HiFi-GAN has its own discriminator, loss functions (adversarial + mel-spec L1), and optimizer -- mixing these with VAE training would be fragile.
+3. HiFi-GAN training is optional (BigVGAN universal is the default).
+4. The user should be able to train a HiFi-GAN vocoder for an already-saved model without retraining the VAE.
+
+**HiFi-GAN training data flow:**
+
+```
+For each batch:
+    1. Load audio waveforms from dataset
+    2. Compute mel spectrogram (using VAE's spectrogram config)
+    3. Convert mel to vocoder normalization (MelAdapter)
+    4. Generator: mel -> waveform_gen
+    5. Discriminator: evaluate waveform_gen vs waveform_real
+    6. Loss: adversarial + mel-spectrogram L1 (on generated vs real)
+    7. Update generator and discriminator
+```
+
+**Training time estimate:** HiFi-GAN fine-tuning from scratch takes ~200K-500K steps. At ~3 steps/sec on a consumer GPU, that is roughly 18-46 hours. However, since this is on a small dataset (5-500 files), convergence should be faster -- likely 50K-100K steps (4-9 hours).
+
+**Confidence:** HIGH for architecture, MEDIUM for training time estimates.
+
+### Decision 5: Vocoder Selection and Routing
+
+**Problem:** Three vocoder backends with different characteristics. How does the user choose?
+
+| Backend | Quality | Speed | Requirements | When to Use |
+|---------|---------|-------|-------------|-------------|
+| BigVGAN-v2 | Very High | ~50x realtime on GPU | ~500MB download, GPU recommended | Default for all models |
+| Per-model HiFi-GAN | Highest (tuned) | ~150x realtime on GPU | Training required | Maximum fidelity after vocoder training |
+| Griffin-Lim | Low | ~5x realtime on CPU | None | Fallback, quick previews |
+
+**Recommendation:** Enum-based selection with automatic fallback.
+
 ```python
-from rave.pqmf import PQMF
+class VocoderType(Enum):
+    AUTO = "auto"           # HiFi-GAN if available, else BigVGAN, else Griffin-Lim
+    BIGVGAN = "bigvgan"     # BigVGAN-v2 universal
+    HIFIGAN = "hifigan"     # Per-model HiFi-GAN (error if not trained)
+    GRIFFIN_LIM = "griffin_lim"  # Legacy Griffin-Lim
 
-# Decompose 48kHz waveform into 16 bands
-pqmf = PQMF(attenuation=100, n_band=16)
-multiband = pqmf.forward(waveform)  # [batch, 16, time/16]
-
-# Process each band with encoder/decoder
-latent = encoder(multiband)
-recon_multiband = decoder(latent)
-
-# Recompose to full waveform
-recon_waveform = pqmf.inverse(recon_multiband)  # [batch, 1, time]
+def get_vocoder(
+    vocoder_type: VocoderType,
+    model_path: Path | None = None,    # For loading HiFi-GAN from .distill
+    device: torch.device = "cpu",
+    cache_dir: Path | None = None,     # For BigVGAN cache
+) -> Vocoder:
+    ...
 ```
 
-### Pattern 3: Disentangled Latent Space with Explicit Regularization
+`AUTO` checks: (1) does this `.distill` file contain HiFi-GAN weights? If yes, use them. (2) Is BigVGAN cached or downloadable? If yes, use it. (3) Fall back to Griffin-Lim.
 
-**What:** Use beta-VAE, semi-supervised constraints, or orthogonalization to ensure latent dimensions correspond to interpretable audio properties (pitch, timbre, etc.).
+**Confidence:** HIGH
 
-**When to use:** When user-controllable parameters are a core feature. Essential for musically meaningful sliders.
+## Data Flow Changes
 
-**Trade-offs:**
-- **Pros:** Interpretable controls, predictable behavior, easier to map sliders to latent dims.
-- **Cons:** Harder to train, may reduce reconstruction quality, requires domain knowledge to define disentanglement targets.
+### Generation Pipeline (Modified)
 
-**Example:**
+```
+Before (v1.0):
+    chunking.py: synthesize_continuous_mel() -> mel [B, 1, n_mels, T]
+    chunking.py: spectrogram.mel_to_waveform(mel) -> waveform  (Griffin-Lim)
+
+After (v1.1):
+    chunking.py: synthesize_continuous_mel() -> mel [B, 1, n_mels, T]
+    chunking.py: vocoder.mel_to_waveform(mel) -> waveform  (BigVGAN/HiFi-GAN/Griffin-Lim)
+```
+
+The vocoder is injected through `AudioSpectrogram` or passed alongside it. The change is localized to the five callers listed above.
+
+### Model Save/Load (Modified)
+
+```
+Save (v1.1):
+    save_model() now accepts optional vocoder_state_dict + vocoder_config
+    Writes version: 2 in saved dict
+    Vocoder state is None when no per-model HiFi-GAN trained
+
+Load (v1.1):
+    load_model() reads vocoder_state_dict if present
+    Reconstructs HiFi-GAN generator if vocoder state exists
+    Returns LoadedModel with new vocoder field
+    Backward compatible: version 1 files load with vocoder=None
+```
+
+### Training Pipeline (Extended)
+
+```
+Existing VAE flow (unchanged):
+    audio files -> DataLoader -> waveform -> mel -> VAE -> loss -> optimize
+
+New HiFi-GAN flow (separate, optional):
+    audio files -> DataLoader -> waveform --------+
+                                                   |
+    audio files -> DataLoader -> waveform -> mel --+
+                                                   |
+    HiFi-GAN Generator: mel -> waveform_gen ------+
+                                                   |
+    Discriminator: (waveform_real, waveform_gen) --+
+                                                   |
+    Loss: adversarial + mel_L1 -> optimize generator + discriminator
+```
+
+## Vocoder Abstract Interface
+
 ```python
-# Beta-VAE: Increase beta to encourage disentanglement
-kl_loss = compute_kl_divergence(mu, logvar)
-vae_loss = recon_loss + beta * kl_loss  # beta > 1 (e.g., 4-10)
+from abc import ABC, abstractmethod
+import torch
 
-# Semi-supervised: Explicitly disentangle pitch and timbre
-# Assume we have pitch labels f0 for a subset of data
-pitch_pred = pitch_predictor(latent[:, 0:2])  # First 2 dims = pitch
-pitch_loss = F.mse_loss(pitch_pred, f0)
+class Vocoder(ABC):
+    """Abstract base for all vocoder backends."""
 
-timbre_latent = latent[:, 2:]  # Remaining dims = timbre
-# Ensure timbre is independent of pitch via orthogonality constraint
-orth_loss = orthogonality_penalty(latent[:, 0:2], latent[:, 2:])
+    @abstractmethod
+    def mel_to_waveform(self, mel_log: torch.Tensor) -> torch.Tensor:
+        """Convert log1p-normalized mel spectrogram to waveform.
 
-total_loss = recon_loss + beta * kl_loss + alpha * pitch_loss + gamma * orth_loss
+        Parameters
+        ----------
+        mel_log : torch.Tensor
+            Shape [B, 1, n_mels, time] -- VAE's log1p normalization.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape [B, 1, samples] -- audio waveform.
+        """
+        ...
+
+    @abstractmethod
+    def to(self, device: torch.device) -> "Vocoder":
+        """Move vocoder to device."""
+        ...
+
+    @property
+    @abstractmethod
+    def sample_rate(self) -> int:
+        """Native output sample rate of this vocoder."""
+        ...
 ```
 
-### Pattern 4: DDSP Hybrid (Neural Encoder + DSP Decoder)
+The key design choice: the vocoder interface accepts **VAE-normalized mel** (log1p), not vocoder-normalized mel. Each implementation handles its own normalization internally via `MelAdapter`. This keeps callers simple -- they pass the same mel tensor they always did.
 
-**What:** Use a neural encoder to extract features/parameters, then feed them to differentiable DSP modules (harmonic synth, filtered noise, reverb) instead of a neural decoder.
+## HiFi-GAN V2 Architecture (for per-model training)
 
-**When to use:** When interpretability and computational efficiency are priorities. DDSP achieves high quality with less data (10 min per instrument).
+Use HiFi-GAN V2 (not V1 or V3) because it balances quality and model size. Configuration adapted for this project:
 
-**Trade-offs:**
-- **Pros:** Highly interpretable, efficient inference, strong inductive bias (good for small datasets), fewer parameters.
-- **Cons:** Less flexible than pure neural decoders, may not capture all timbral nuances, requires DSP expertise.
-
-**Example:**
 ```python
-from ddsp import harmonic, filtered_noise, reverb
+@dataclass
+class HiFiGANConfig:
+    """HiFi-GAN V2 generator configuration for 48kHz audio."""
 
-# Encoder extracts f0, loudness, and timbre features
-f0, loudness, timbre = encoder(audio)
+    # Generator
+    upsample_rates: list[int] = field(default_factory=lambda: [8, 8, 2, 2, 2])
+    upsample_kernel_sizes: list[int] = field(default_factory=lambda: [16, 16, 4, 4, 4])
+    upsample_initial_channel: int = 128
+    resblock_kernel_sizes: list[int] = field(default_factory=lambda: [3, 7, 11])
+    resblock_dilation_sizes: list[list[int]] = field(
+        default_factory=lambda: [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+    )
 
-# Map to DSP parameters
-harmonic_amplitudes = timbre_to_harmonics(timbre)  # Neural net
-filter_coeffs = timbre_to_filter(timbre)
+    # Matches existing SpectrogramConfig
+    sample_rate: int = 48_000
+    n_fft: int = 2048
+    hop_size: int = 512
+    n_mels: int = 128
 
-# Differentiable DSP synthesis
-harmonic_audio = harmonic.synthesize(f0, harmonic_amplitudes)
-noise_audio = filtered_noise.synthesize(loudness, filter_coeffs)
-mixed = harmonic_audio + noise_audio
-output = reverb.apply(mixed)
-
-# Train end-to-end with spectral loss
-loss = spectral_loss(output, target_audio)
+    # Training
+    learning_rate: float = 2e-4
+    adam_betas: tuple[float, float] = (0.8, 0.99)
+    lr_decay: float = 0.999
+    segment_size: int = 24_576  # ~0.5 sec at 48kHz (must be multiple of product(upsample_rates))
 ```
 
-### Pattern 5: Aggressive Augmentation for Small Datasets
+Note: `product(upsample_rates) = 8 * 8 * 2 * 2 * 2 = 512` which matches the project's `hop_length=512`. This means each mel frame produces 512 audio samples, which is exactly right.
 
-**What:** Apply pitch shift, time stretch, noise injection, SpecAugment, and mixup to artificially expand the dataset.
+**Model size estimate:** ~5-8M parameters (~20-30MB on disk). Small enough to bundle in `.distill` files.
 
-**When to use:** Always when working with <500 files. Critical for preventing overfitting.
+## Integration with AudioSpectrogram
 
-**Trade-offs:**
-- **Pros:** Dramatically improves generalization, reduces overfitting, enables training with minimal data.
-- **Cons:** Can introduce artifacts if too aggressive, increases training time, may dilute original dataset characteristics.
+The cleanest integration preserves backward compatibility while enabling vocoder injection:
 
-**Example:**
 ```python
-import torchaudio.transforms as T
-from audiomentations import Compose, PitchShift, TimeStretch, AddGaussianNoise
+class AudioSpectrogram:
+    def __init__(
+        self,
+        config: SpectrogramConfig | None = None,
+        vocoder: Vocoder | None = None,  # NEW: optional vocoder
+    ) -> None:
+        ...
+        self._vocoder = vocoder
 
-# Waveform-level augmentation
-wave_aug = Compose([
-    PitchShift(min_semitones=-2, max_semitones=2, p=0.5),
-    TimeStretch(min_rate=0.9, max_rate=1.1, p=0.5),
-    AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.01, p=0.3),
-])
+    def mel_to_waveform(self, mel_log: torch.Tensor) -> torch.Tensor:
+        """Convert mel to waveform using vocoder or Griffin-Lim fallback."""
+        if self._vocoder is not None:
+            return self._vocoder.mel_to_waveform(mel_log)
 
-# Spectrogram-level augmentation (SpecAugment)
-spec_aug = T.FrequencyMasking(freq_mask_param=10)
-time_aug = T.TimeMasking(time_mask_param=20)
+        # Existing Griffin-Lim path (unchanged)
+        mel = torch.expm1(mel_log.squeeze(1).clamp(min=0))
+        linear_spec = self.inverse_mel(mel.cpu())
+        waveform = self.griffin_lim(linear_spec)
+        return waveform.unsqueeze(1)
 
-# Apply during data loading
-waveform = wave_aug(samples=waveform, sample_rate=48000)
-spectrogram = mel_transform(waveform)
-spectrogram = spec_aug(time_aug(spectrogram))
+    def set_vocoder(self, vocoder: Vocoder | None) -> None:
+        """Set or clear the vocoder backend."""
+        self._vocoder = vocoder
 ```
 
-### Pattern 6: Transfer Learning from Pretrained Models
+This approach:
+- Zero breaking changes for existing code
+- All callers of `mel_to_waveform` automatically get vocoder output
+- Vocoder can be swapped at runtime (useful for A/B comparison)
+- Griffin-Lim remains as fallback when `vocoder=None`
 
-**What:** Start from a pretrained audio model (e.g., HuBERT, Wav2Vec2, pretrained RAVE) and fine-tune on the small dataset.
+## BigVGAN Integration Details
 
-**When to use:** When <100 files or when training from scratch fails. Especially effective for similar audio domains (speech models → voice, music models → instruments).
+### Loading and Caching
 
-**Trade-offs:**
-- **Pros:** Requires less data, faster training, better generalization, leverages large-scale pretraining.
-- **Cons:** Pretrained models may not match target domain perfectly, requires finding/adapting compatible architectures.
-
-**Example:**
 ```python
-# Load pretrained RAVE model
-from rave import RAVE
-pretrained = RAVE.from_pretrained("acids-ircam/rave-vintage")
+class BigVGANVocoder(Vocoder):
+    """BigVGAN-v2 universal vocoder wrapper."""
 
-# Freeze encoder, fine-tune decoder on new dataset
-for param in pretrained.encoder.parameters():
-    param.requires_grad = False
+    MODEL_ID = "nvidia/bigvgan_v2_44khz_128band_512x"
+    NATIVE_SAMPLE_RATE = 44100
 
-# Train only decoder + latent space with new data
-optimizer = torch.optim.Adam(pretrained.decoder.parameters(), lr=1e-4)
+    def __init__(self, device: torch.device, cache_dir: Path | None = None):
+        # Load from HuggingFace (cached after first download)
+        import bigvgan as bigvgan_lib
+        self._model = bigvgan_lib.BigVGAN.from_pretrained(
+            self.MODEL_ID,
+            cache_dir=str(cache_dir) if cache_dir else None,
+        )
+        self._model.remove_weight_norm()
+        self._model.eval().to(device)
+        self._adapter = MelAdapter()
+        self._device = device
 
-for batch in small_dataset:
-    latent = pretrained.encode(batch)  # Frozen encoder
-    recon = pretrained.decode(latent)  # Trainable decoder
-    loss = reconstruction_loss(recon, batch)
-    loss.backward()
-    optimizer.step()
+    def mel_to_waveform(self, mel_log: torch.Tensor) -> torch.Tensor:
+        # 1. Squeeze channel dim: [B, 1, n_mels, T] -> [B, n_mels, T]
+        mel_squeezed = mel_log.squeeze(1)
+
+        # 2. Convert normalization: log1p -> log(clamp)
+        mel_vocoder = self._adapter.vae_to_vocoder(mel_squeezed)
+
+        # 3. Run BigVGAN inference
+        with torch.inference_mode():
+            wav = self._model(mel_vocoder.to(self._device))
+
+        # 4. Return [B, 1, samples]
+        return wav.unsqueeze(1) if wav.ndim == 2 else wav
+
+    @property
+    def sample_rate(self) -> int:
+        return self.NATIVE_SAMPLE_RATE  # 44100 -- caller resamples to 48kHz
 ```
 
-## Data Flow
+### Dependency: `bigvgan` package
 
-### Training Flow (Audio → Trained Model)
+BigVGAN is NOT on PyPI. It is cloned from GitHub and installed locally, or loaded via `huggingface_hub`. The recommended approach is to vendor-install the BigVGAN package:
 
-```
-[Raw Audio Files (5-500)]
-    ↓
-[Preprocessing]
-- Load with torchaudio/librosa (48kHz/24bit → float32 [-1,1])
-- Normalize (peak or RMS)
-- Chunk into fixed-length segments (e.g., 2-4 sec)
-    ↓
-[Augmentation]
-- Pitch shift (±2 semitones)
-- Time stretch (0.9-1.1x)
-- Noise injection (SNR 40-60dB)
-- SpecAugment (frequency/time masking)
-    ↓
-[Feature Extraction] (Optional for DDSP/hybrid)
-- Mel-spectrogram (n_mels=128, hop_length=256)
-- Fundamental frequency (f0) via CREPE/YIN
-- Loudness (A-weighted RMS)
-    ↓
-[Training Loop]
-- Forward pass: waveform → encoder → latent (mu, logvar) → decoder → recon
-- Loss computation:
-  * Reconstruction (spectral loss: multi-scale STFT + L1/L2)
-  * KL divergence (for VAE regularization)
-  * Adversarial loss (if GAN discriminator enabled)
-  * Perceptual loss (optional: pretrained feature matching)
-- Backward pass, optimizer step
-- Checkpointing every N epochs
-    ↓
-[Trained Model Checkpoint]
-- encoder.pt, decoder.pt, config.yaml
-- Latent space metadata (dimension meanings, ranges)
+```bash
+pip install git+https://github.com/NVIDIA/BigVGAN.git
 ```
 
-### Generation Flow (Sliders → Audio)
-
-```
-[User Adjusts Sliders]
-- Timbre (brightness, warmth, roughness)
-- Harmonic (pitch class, harmonic content)
-- Temporal (attack, decay, rhythm)
-- Spatial (stereo width, reverb amount)
-    ↓
-[Latent Mapper]
-- Map slider values to latent space coordinates
-- Options:
-  * Learned mapping (train small MLP: sliders → z)
-  * Heuristic mapping (manually assign dims based on disentanglement analysis)
-  * PCA/t-SNE projection (for 2D exploration)
-    ↓
-[Latent Code z]
-- N-dimensional vector (e.g., 16-128 dims)
-- Optionally: blend multiple presets, interpolate, add noise for variation
-    ↓
-[Decoder (Inference Mode)]
-- z → decoder → audio waveform or DSP parameters
-- If DDSP: decoder outputs (f0, amplitudes, filter coeffs) → DSP synth → waveform
-- Non-realtime: no streaming, full context, high quality
-    ↓
-[Post-Processing]
-- Normalize to target peak level (-1dBFS typical)
-- Apply fade in/out if needed
-- Stereo widening, final reverb (if not in model)
-    ↓
-[Export Pipeline]
-- Convert to target sample rate (if ≠ 48kHz) using high-quality resampler
-- Convert to target bit depth (16/24/32 bit) with dithering if reducing bit depth
-- Save as WAV/FLAC/MP3
-    ↓
-[Audio File (48kHz/24bit WAV)]
+Or add to `pyproject.toml`:
+```toml
+dependencies = [
+    ...
+    "bigvgan @ git+https://github.com/NVIDIA/BigVGAN.git",
+]
 ```
 
-### Key Data Flows
+Alternatively, the BigVGAN model can be loaded directly via `torch.hub` or by cloning the repo. The HuggingFace Hub integration is the cleanest path.
 
-1. **Audio Ingestion → Training:** Raw files are preprocessed, augmented heavily (due to small dataset), then fed to VAE training loop. Checkpoints saved periodically.
+**MPS Compatibility Note:** BigVGAN uses custom CUDA kernels for anti-aliased activations (`use_cuda_kernel=True`). On MPS/CPU, set `use_cuda_kernel=False` (the default). All standard PyTorch ops in BigVGAN should work on MPS. However, this needs verification -- the Snake activation and filtered nonlinearities may have MPS edge cases.
 
-2. **Sliders → Latent → Audio:** UI sliders map to latent dimensions (via learned or heuristic mapper), latent code is decoded to audio, then exported. This is the core user interaction loop.
+**Confidence:** MEDIUM for MPS compatibility -- needs testing.
 
-3. **Incremental Training:** User adds new audio files → preprocess → continue training from last checkpoint → updated model. Model versioning tracks improvements.
+## Suggested Build Order
 
-4. **Preset System:** Current slider positions → save as JSON → load later → map to latent → generate. Enables reproducibility and exploration.
+### Phase 1: Vocoder Interface and BigVGAN Integration (Core Path)
 
-## Build Order and Risk Assessment
+**Goal:** Replace Griffin-Lim with BigVGAN-v2 for generation.
 
-### Suggested Build Order (Lowest Risk → Highest Risk)
+**New files:**
+- `vocoder/__init__.py`
+- `vocoder/base.py` (Vocoder ABC)
+- `vocoder/adapter.py` (MelAdapter)
+- `vocoder/bigvgan.py` (BigVGANVocoder)
+- `vocoder/config.py` (VocoderType, VocoderConfig)
+- `vocoder/cache.py` (download/cache management)
 
-| Phase | Component | Why Build This Order | Risk Level |
-|-------|-----------|---------------------|------------|
-| 1 | **Data Pipeline** | Foundation. Can't train without it. Validates data quality early. | Low |
-| 2 | **Feature Extraction** | Needed for both training and DDSP. Straightforward with torchaudio. | Low |
-| 3 | **Basic VAE (No GAN)** | Simplest trainable model. Proves training loop works. May produce blurry audio but validates architecture. | Low-Medium |
-| 4 | **Augmentation Module** | Essential for small datasets. Add after basic VAE works to improve generalization. | Low |
-| 5 | **Checkpointing & Model Management** | Prevents losing training progress. Add before long training runs. | Low |
-| 6 | **Gradio UI (Basic)** | Early user feedback. Start with simple file upload, play generated audio. | Low |
-| 7 | **GAN Discriminator** | Adds perceptual quality. Riskier (training instability). Prototype first. | Medium-High |
-| 8 | **Latent Space Mapping (Sliders)** | Core innovation. High risk if latent space isn't disentangled. Requires experimentation. | High |
-| 9 | **DDSP Synthesis (Optional)** | Alternative to neural decoder. High reward (interpretability) but requires DSP expertise. | Medium |
-| 10 | **Transfer Learning** | Fallback if training from scratch fails. Lower risk if pretrained model matches domain. | Medium |
-| 11 | **Export Pipeline (High-Fidelity)** | Polish. Sample rate conversion, dithering are well-understood but finicky. | Low-Medium |
-| 12 | **CLI & Batch Generation** | Convenience. Low risk, builds on working generation engine. | Low |
+**Modified files:**
+- `audio/spectrogram.py` (add vocoder parameter)
+- `config/defaults.py` (add vocoder section)
 
-### Component Risk Assessment
+**Why first:** This is the highest-value change. BigVGAN replaces Griffin-Lim with zero per-model training required. Every existing model immediately sounds better.
 
-| Component | Risk | Why Risky? | Mitigation Strategy |
-|-----------|------|-----------|---------------------|
-| **Latent Space Mapping** | HIGH | No guarantee latent dims will align with musical concepts. May require extensive trial/error. | Prototype beta-VAE and semi-supervised disentanglement early. Visualize latent space with t-SNE. Test with 2D latent first. |
-| **GAN Training** | MEDIUM-HIGH | Mode collapse, instability, hyperparameter sensitivity. | Start with pretrained discriminator or simple architecture. Use spectral normalization, gradient penalties. Monitor carefully. |
-| **Small Dataset Overfitting** | MEDIUM | 5-500 files is tiny. Model may memorize instead of generalize. | Aggressive augmentation, transfer learning, early stopping, validation split. |
-| **DDSP Implementation** | MEDIUM | Requires DSP knowledge. Differentiable modules need careful gradient flow. | Use existing DDSP library (Magenta). Start with harmonic synth only, add noise/reverb later. |
-| **High Sample Rate (48kHz)** | MEDIUM | Longer sequences, more memory, slower training. | Use PQMF multi-band decomposition (16 bands → 16x speedup). Start with 24kHz, scale up. |
-| **Disentanglement** | MEDIUM | Hard to achieve without labels. Beta-VAE may hurt reconstruction. | Try multiple approaches: beta-VAE (beta=4-10), semi-supervised (label pitch manually for subset), group-supervised (timbre families). |
-| **Inference Speed** | LOW-MEDIUM | Non-realtime is acceptable, but very slow generation hurts UX. | Use model.eval(), torch.no_grad(), optimize with torch.jit if needed. Consider smaller models. |
-| **Apple Silicon (MPS)** | LOW | MPS backend is mature in PyTorch 2.x, but some ops may not be supported. | Test early on target hardware. Fallback to CPU if MPS fails. Use `device = torch.device("mps" if torch.has_mps else "cpu")`. |
+**Dependencies:** None on existing training pipeline. Only touches generation path.
 
-### Critical Path (Must Work)
+**Risk:** LOW-MEDIUM. Mel normalization adapter is the main risk. Testing with existing trained models validates it.
 
-1. **Data Pipeline + Augmentation:** Can't train without data. Small dataset means augmentation is mandatory.
-2. **VAE Training:** Core architecture. If this doesn't converge, nothing else matters.
-3. **Latent Space Mapping:** The innovation. If latent space is uninterpretable, the entire premise fails.
-4. **Gradio UI:** User interaction. If sliders don't control audio meaningfully, product has no value.
+### Phase 2: Model Persistence Update
 
-### Nice-to-Have (Can Defer)
+**Goal:** Version 2 `.distill` format that supports vocoder state.
 
-- **GAN Refinement:** VAE alone may suffice for MVP. Add GAN if audio quality is insufficient.
-- **DDSP Synthesis:** Neural decoder is simpler. DDSP is a performance/interpretability optimization.
-- **Transfer Learning:** Only needed if training from scratch fails.
-- **CLI:** Batch generation is useful but not essential for initial validation.
+**Modified files:**
+- `models/persistence.py` (version bump, optional vocoder fields)
+- `library/catalog.py` (add vocoder metadata to entries)
+
+**Why second:** Required before HiFi-GAN training (need to store results). But BigVGAN-only path (Phase 1) works without this -- BigVGAN weights are shared, not per-model.
+
+**Dependencies:** Phase 1 (vocoder config types).
+
+**Risk:** LOW. Backward-compatible version bump. Well-understood pattern from existing code.
+
+### Phase 3: Generation Pipeline Integration
+
+**Goal:** Wire vocoder through GenerationPipeline, chunking, and preview.
+
+**Modified files:**
+- `inference/generation.py` (GenerationPipeline accepts vocoder)
+- `inference/chunking.py` (pass vocoder through)
+- `training/preview.py` (use vocoder for previews)
+
+**Why third:** Makes the vocoder actually reachable from the UI/CLI. Phase 1 created the vocoder; Phase 3 connects it.
+
+**Dependencies:** Phase 1 (vocoder exists).
+
+**Risk:** LOW. Small changes to well-understood code paths. The five callers are clearly identified.
+
+### Phase 4: UI and CLI Integration
+
+**Goal:** User can select vocoder type, see download progress.
+
+**Modified files:**
+- `ui/tabs/generate_tab.py` (vocoder dropdown)
+- `ui/state.py` (vocoder field)
+- `cli/generate.py` (--vocoder flag)
+
+**Why fourth:** User-facing changes come after the backend works.
+
+**Dependencies:** Phases 1-3 (working vocoder pipeline).
+
+**Risk:** LOW. Standard Gradio/Typer UI patterns already established.
+
+### Phase 5: HiFi-GAN V2 Model + Training
+
+**Goal:** Per-model HiFi-GAN training for maximum fidelity.
+
+**New files:**
+- `vocoder/hifigan.py` (HiFi-GAN V2 generator)
+- `vocoder/discriminator.py` (MPD + MSD discriminators)
+- `vocoder/training.py` (adversarial training loop)
+
+**Modified files:**
+- `models/persistence.py` (save/load HiFi-GAN state in .distill)
+- `training/runner.py` (add VocoderTrainingRunner or extend)
+- `ui/tabs/train_tab.py` ("Train Vocoder" section)
+- `cli/train.py` (train-vocoder subcommand)
+
+**Why fifth:** This is the most complex phase. It introduces GAN training (adversarial loss, discriminator, dual optimizer), which is fundamentally different from the existing VAE training. The BigVGAN universal vocoder (Phase 1) provides good quality without this. HiFi-GAN training is an optimization for users who want the best possible quality.
+
+**Dependencies:** Phases 1-4 (vocoder infrastructure, persistence, UI).
+
+**Risk:** MEDIUM-HIGH. GAN training is finicky (mode collapse, instability). Small datasets may not train well.
+
+### Phase 6: Griffin-Lim Removal
+
+**Goal:** Remove Griffin-Lim as a generation path, keep only neural vocoders.
+
+**Modified files:**
+- `audio/spectrogram.py` (remove InverseMelScale, GriffinLim imports and usage)
+- Tests and references
+
+**Why last:** Only remove Griffin-Lim after neural vocoders are proven stable on all hardware (CUDA, MPS, CPU).
+
+**Dependencies:** All previous phases validated.
+
+**Risk:** LOW if previous phases work. But removing fallback means vocoder failures are fatal.
+
+**Recommendation:** Consider keeping Griffin-Lim as an emergency fallback even after Phase 6, gated behind a hidden debug flag. If BigVGAN download fails or MPS has issues, Griffin-Lim still works.
+
+## Patterns to Follow
+
+### Pattern 1: Lazy Vocoder Loading
+
+```python
+# Match existing project pattern: lazy imports, initialize on first use
+class BigVGANVocoder(Vocoder):
+    def __init__(self, device, cache_dir=None):
+        self._model = None  # Lazy
+        self._device = device
+        self._cache_dir = cache_dir
+
+    def _ensure_loaded(self):
+        if self._model is None:
+            import bigvgan  # Lazy import
+            self._model = bigvgan.BigVGAN.from_pretrained(...)
+            self._model.remove_weight_norm()
+            self._model.eval().to(self._device)
+
+    def mel_to_waveform(self, mel_log):
+        self._ensure_loaded()
+        ...
+```
+
+### Pattern 2: Vocoder-Aware Chunk Processing
+
+The existing pipeline builds a continuous mel via overlap-add, then converts the entire mel to audio in one pass. This is ideal for neural vocoders -- they handle long sequences better than short ones (more context for phase estimation).
+
+```python
+# GOOD: Single vocoder call on full mel (existing pattern works perfectly)
+combined_mel = synthesize_continuous_mel(model, spectrogram, trajectory)
+wav = vocoder.mel_to_waveform(combined_mel)  # One call on full mel
+
+# BAD: Per-chunk vocoder calls with waveform crossfade
+for chunk in chunks:
+    mel = model.decode(z)
+    wav = vocoder.mel_to_waveform(mel)  # Separate call per chunk
+    # Crossfade waveform chunks -- introduces artifacts at boundaries
+```
+
+### Pattern 3: HiFi-GAN Training Checkpoint Independence
+
+```python
+# HiFi-GAN checkpoints are separate from VAE checkpoints
+# Saved in training output dir, then bundled into .distill on completion
+data/
+    training_output/
+        checkpoints/           # VAE checkpoints (existing)
+        vocoder_checkpoints/   # HiFi-GAN checkpoints (new)
+            hifigan_step_050000.pt
+            hifigan_step_100000.pt
+```
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Training on Raw Waveforms at 48kHz Without Multi-Band Decomposition
+### Anti-Pattern 1: Joint VAE + HiFi-GAN Training
 
-**What people do:** Directly encode/decode full 48kHz waveforms, leading to massive sequence lengths (e.g., 4 sec = 192k samples).
+**What:** Training the VAE and HiFi-GAN simultaneously in the same loop.
 
-**Why it's wrong:** Extremely slow training, massive memory usage, gradient vanishing over long sequences, unnecessary detail at high frequencies.
+**Why bad:** The VAE mel output changes as the VAE trains, making the HiFi-GAN chase a moving target. This leads to instability and poor convergence.
 
-**Do this instead:** Use PQMF to decompose into 16 bands (12x speedup, near-perfect reconstruction). Or train at 24kHz, then upsample with a neural vocoder if needed.
+**Instead:** Train VAE first, freeze it, then train HiFi-GAN on the frozen VAE's mel outputs.
 
-**Example:**
-```python
-# BAD: Direct encoding of 48kHz waveform
-waveform = load_audio("file.wav")  # [1, 192000] for 4 sec
-latent = encoder(waveform)  # Extremely slow, huge memory
+### Anti-Pattern 2: Bundling BigVGAN Weights in Every .distill File
 
-# GOOD: Multi-band decomposition
-from rave.pqmf import PQMF
-pqmf = PQMF(n_band=16)
-multiband = pqmf.forward(waveform)  # [16, 12000] - 16x smaller
-latent = encoder(multiband)  # Much faster
-```
+**What:** Saving 500MB of BigVGAN weights inside each model file.
 
-### Anti-Pattern 2: Using Only Reconstruction Loss (L1/L2) for Audio
+**Why bad:** A user with 10 models would use 5GB just for identical copies of BigVGAN. Save/load becomes slow. Download bandwidth wasted.
 
-**What people do:** Train VAE with only MSE or L1 loss on waveforms or spectrograms.
+**Instead:** Shared cache directory, downloaded once. Only per-model HiFi-GAN weights go in .distill files.
 
-**Why it's wrong:** Produces blurry, muffled audio. Misses perceptual quality. L1/L2 optimize for average, not sharpness.
+### Anti-Pattern 3: Computing Vocoder-Format Mel in the VAE Pipeline
 
-**Do this instead:** Use multi-scale spectral loss (multiple STFT window sizes) + adversarial loss (GAN) + perceptual loss (feature matching).
+**What:** Changing `waveform_to_mel()` to produce BigVGAN-format mel throughout the pipeline.
 
-**Example:**
-```python
-# BAD: L1 waveform loss only
-recon_loss = F.l1_loss(recon_audio, target_audio)
+**Why bad:** Breaks all existing trained models. Changes the VAE's training target. Invalidates the latent space analysis.
 
-# GOOD: Multi-scale spectral + adversarial
-spectral_loss = multi_scale_stft_loss(recon_audio, target_audio,
-                                       fft_sizes=[512, 1024, 2048])
-adv_loss = discriminator_loss(recon_audio)
-perceptual_loss = feature_matching_loss(recon_audio, target_audio)
-total_loss = spectral_loss + lambda_adv * adv_loss + lambda_perc * perceptual_loss
-```
+**Instead:** Adapter converts at the vocoder boundary only. VAE pipeline remains unchanged.
 
-### Anti-Pattern 3: Assuming Latent Dimensions are Interpretable by Default
+### Anti-Pattern 4: Ignoring Sample Rate Mismatch
 
-**What people do:** Train a standard VAE, then try to map sliders to random latent dimensions.
+**What:** Feeding 48kHz-parameterized mel to a 44.1kHz BigVGAN model without adjustment.
 
-**Why it's wrong:** Latent dims are entangled by default. Changing one dim affects multiple audio properties unpredictably.
+**Why bad:** The mel-to-waveform upsampling ratio is baked into the model. BigVGAN's 512x upsampling at 44.1kHz means each mel frame = 512/44100 seconds. At 48kHz, each mel frame = 512/48000 seconds. The waveform will be slightly time-stretched/compressed.
 
-**Do this instead:** Use disentanglement regularization (beta-VAE, orthogonality constraints, semi-supervised labels). Analyze latent space post-training. Accept that some dims may not be interpretable.
+**Instead:** Accept BigVGAN output at 44.1kHz and resample to 48kHz. The existing `_get_resampler` handles this cleanly.
 
-**Example:**
-```python
-# BAD: Assume latent[0] = timbre, latent[1] = pitch (no basis)
-z = torch.zeros(latent_dim)
-z[0] = timbre_slider  # Hope it controls timbre (it won't)
-z[1] = pitch_slider
+## Hardware Considerations
 
-# GOOD: Train with disentanglement, then analyze
-# During training: beta-VAE with beta > 1
-kl_loss = compute_kl_divergence(mu, logvar)
-vae_loss = recon_loss + beta * kl_loss  # beta = 4-10
+### MPS (Apple Silicon)
 
-# Post-training: Analyze latent traversals
-for dim in range(latent_dim):
-    z = torch.zeros(latent_dim)
-    z[dim] = torch.linspace(-3, 3, 10)  # Traverse dim
-    audios = decoder(z)
-    # Listen and label: "dim 3 controls brightness, dim 7 controls pitch"
-```
+BigVGAN inference should work on MPS with `use_cuda_kernel=False`. The Snake activation function and anti-aliased upsampling use standard PyTorch ops. However, BigVGAN's 122M parameters may stress MPS memory on smaller MacBooks (8GB unified memory). Need to test:
+- Does BigVGAN inference run on MPS without errors?
+- Memory usage during inference
+- Fallback to CPU if MPS fails
 
-### Anti-Pattern 4: No Augmentation or Minimal Augmentation with <100 Files
+### CUDA
 
-**What people do:** Train on 50 audio files with no augmentation or only pitch shift.
+Full support expected. BigVGAN's CUDA kernels provide 1.5-3x speedup. HiFi-GAN training requires CUDA for practical training times.
 
-**Why it's wrong:** Model will memorize the dataset perfectly (overfitting) and fail to generalize. Validation loss diverges from training loss.
+### CPU Fallback
 
-**Do this instead:** Apply aggressive augmentation: pitch shift, time stretch, noise injection, SpecAugment, mixup. Aim for 10-100x effective dataset expansion.
-
-**Example:**
-```python
-# BAD: No augmentation
-dataset = AudioDataset(files)  # 50 files, no transforms
-
-# GOOD: Aggressive augmentation
-from audiomentations import Compose, PitchShift, TimeStretch, AddGaussianNoise
-aug = Compose([
-    PitchShift(min_semitones=-3, max_semitones=3, p=0.7),
-    TimeStretch(min_rate=0.8, max_rate=1.2, p=0.7),
-    AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.5),
-])
-dataset = AudioDataset(files, transform=aug)
-# Also add SpecAugment during training
-```
-
-### Anti-Pattern 5: Ignoring Perceptual Quality (Only Optimizing for Loss Metrics)
-
-**What people do:** Celebrate low reconstruction loss (MSE, spectral distance) without listening to generated audio.
-
-**Why it's wrong:** Low loss ≠ good audio. Models can have great metrics but sound terrible (artifacts, muffled, unnatural).
-
-**Do this instead:** Listen to outputs frequently. Use perceptual metrics (ViSQOL, PESQ) alongside loss metrics. Get human feedback. Prioritize subjective quality over loss numbers.
-
-**Example:**
-```python
-# BAD: Only log numerical loss
-print(f"Epoch {epoch}, Loss: {loss.item()}")
-
-# GOOD: Save audio samples every N epochs and listen
-if epoch % 10 == 0:
-    with torch.no_grad():
-        sample_audio = decoder(sample_latent)
-        torchaudio.save(f"samples/epoch_{epoch}.wav", sample_audio, 48000)
-    # Listen and assess: "Epoch 50 sounds better than Epoch 40, even though loss is similar"
-```
-
-### Anti-Pattern 6: Premature Real-Time Optimization
-
-**What people do:** Focus on real-time inference before the model even generates good audio.
-
-**Why it's wrong:** Real-time is unnecessary for this use case (non-realtime synthesis). Adds complexity, limits architecture choices, distracts from core goal (quality + controllability).
-
-**Do this instead:** Focus on quality and controllability first. Optimize inference speed only if generation time becomes a UX issue (e.g., >30 sec per sample). Non-realtime is fine.
-
-**Example:**
-```python
-# BAD: Limit model size and features to hit real-time targets
-# "Model must run on CPU in <10ms" (unnecessary constraint)
-
-# GOOD: Prioritize quality, use GPU, accept seconds of latency
-with torch.no_grad():
-    audio = decoder(latent)  # Takes 2 sec on GPU, that's fine for non-realtime use
-```
-
-## Integration Points
-
-### External Libraries
-
-| Library | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| **torchaudio** | Audio I/O, feature extraction, augmentation | Use torchaudio.load, torchaudio.save, torchaudio.transforms. GPU-accelerated transforms. |
-| **librosa** | Fallback for I/O, some feature extraction | Slower than torchaudio but more features (e.g., onset detection, tempo). |
-| **audiomentations** | Waveform augmentation | Compose transforms. Faster than torchaudio for some augs (pitch shift, time stretch). |
-| **DDSP (Magenta)** | Differentiable DSP modules | Import ddsp.core, ddsp.losses. Integrate as decoder replacement or parallel path. |
-| **Gradio** | UI components | Use gr.Audio, gr.Slider, gr.File. Launch with app.launch(). |
-| **Hugging Face Hub** | Model versioning and sharing | Use huggingface_hub.upload_file for checkpoints. Download with from_pretrained. |
-| **PyTorch Lightning** | Training orchestration (optional) | Use LightningModule for complex training loops. Callbacks for checkpointing, logging. |
-| **soundfile** | High-quality audio I/O | Alternative to torchaudio for FLAC, bit depth control. |
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| **Data Pipeline ↔ Training** | PyTorch DataLoader yields batches of augmented spectrograms/waveforms | Prefetch with num_workers > 0. Pin memory for GPU efficiency. |
-| **Training ↔ Model Management** | Callbacks or manual saving: `torch.save(model.state_dict(), checkpoint_path)` | Save every N epochs. Include optimizer state for resume. |
-| **Model ↔ Generation Engine** | Load checkpoint: `model.load_state_dict(torch.load(path))`, then `model.eval()` | Use torch.no_grad() for inference. Device mapping (MPS/CUDA/CPU). |
-| **Generation ↔ Latent Mapper** | Latent mapper outputs z, generator decodes z → audio | Mapper can be learned (MLP) or heuristic (manual assignment). |
-| **Generation ↔ Export Pipeline** | Pass waveform tensor to export module → convert format/SR/bit depth | Ensure sample rate matches model output (e.g., 48kHz). Apply dithering if reducing bit depth. |
-| **UI ↔ Generation** | Gradio calls generation function with slider values, receives audio file path | Use Gradio's `inputs=[slider1, slider2, ...]`, `outputs=gr.Audio()`. |
-| **CLI ↔ Training/Generation** | argparse parses CLI args, calls training or generation functions | Shared config files (YAML) for reproducibility. |
-
-## Scaling Considerations
-
-| Concern | Small Scale (5-50 files) | Medium Scale (50-500 files) | Large Scale (500+ files) |
-|---------|--------------------------|----------------------------|--------------------------|
-| **Training Time** | Minutes to hours on laptop GPU (MPS/RTX 3060) | Hours on single GPU (A100, 4090) | May need multi-GPU or cloud (GCP, AWS) |
-| **Overfitting Risk** | VERY HIGH - Aggressive augmentation mandatory, early stopping | HIGH - Augmentation + validation split + regularization | MODERATE - Standard techniques |
-| **Model Complexity** | Small models (latent_dim=16-32, shallow encoder/decoder) | Medium models (latent_dim=64-128, deeper networks) | Can use larger models (latent_dim=128-256) |
-| **Augmentation** | 100x expansion via augmentation (pitch, time, noise, mixup) | 10-50x expansion | 2-10x expansion |
-| **Transfer Learning** | RECOMMENDED - Start from pretrained model (RAVE, HuBERT) | OPTIONAL - Helps but not mandatory | OPTIONAL |
-| **Data Storage** | Local disk (<1GB) | Local disk (1-10GB) | Cloud storage (S3, GCS) if needed |
-| **Inference** | Single-threaded, seconds per sample on CPU/MPS is fine | Single-threaded, GPU recommended | Batch inference, GPU required |
-
-### Scaling Priorities
-
-1. **First bottleneck (5-50 files):** Overfitting. Model memorizes dataset. Generalization fails.
-   - **Fix:** Aggressive augmentation (10-100x), transfer learning, beta-VAE regularization, early stopping.
-
-2. **Second bottleneck (50-500 files):** Training time. Hours to days on single GPU.
-   - **Fix:** Use PQMF multi-band (16x speedup), smaller models, mixed precision (torch.cuda.amp), multi-GPU if available.
-
-3. **Third bottleneck (500+ files):** Data management. Loading/augmenting hundreds of files is slow.
-   - **Fix:** DataLoader with num_workers=4-8, prefetching, cache preprocessed features to disk.
+Both BigVGAN and HiFi-GAN inference work on CPU. Slower (~5-10x realtime instead of 50-150x) but functional. HiFi-GAN training on CPU is impractical (days instead of hours).
 
 ## Sources
 
-### High Confidence (Official Docs, GitHub Repos)
+### High Confidence (Official Documentation)
 
-- [RAVE GitHub Repository](https://github.com/acids-ircam/RAVE) - Official RAVE implementation, architecture details
-- [DDSP Official Documentation](https://magenta.tensorflow.org/ddsp) - DDSP architecture and components
-- [PyTorch Audio Documentation](https://docs.pytorch.org/audio/stable/index.html) - Torchaudio official docs
-- [PyTorch Lightning Checkpointing](https://lightning.ai/docs/pytorch/stable/common/checkpointing_basic.html) - Model checkpointing best practices
+- [BigVGAN GitHub Repository](https://github.com/NVIDIA/BigVGAN) -- Official NVIDIA implementation, model architecture, mel processing code
+- [BigVGAN-v2 44kHz 128band 512x HuggingFace](https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_512x) -- Pretrained weights, config.json, 122M params
+- [BigVGAN-v2 44kHz 128band 256x HuggingFace](https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_256x) -- Alternative variant, 112M params
+- [HiFi-GAN GitHub Repository](https://github.com/jik876/hifi-gan) -- Original HiFi-GAN implementation, config files, training pipeline
+- [NVIDIA BigVGAN Technical Blog](https://developer.nvidia.com/blog/achieving-state-of-the-art-zero-shot-waveform-audio-generation-across-audio-types/) -- BigVGAN-v2 capabilities and training details
+- [BigVGAN meldataset.py](https://github.com/NVIDIA/BigVGAN/blob/main/meldataset.py) -- Mel spectrogram computation with `dynamic_range_compression_torch`
 
-### Medium Confidence (Research Papers, Web Search)
+### Medium Confidence (Verified Cross-References)
 
-- [RAVE Paper (arXiv 2111.05011)](https://arxiv.org/abs/2111.05011) - RAVE architecture and training methodology
-- [DDSP Paper (arXiv 2001.04643)](https://arxiv.org/abs/2001.04643) - DDSP system design and data flow
-- [Pitch-Conditioned Instrument Sound Synthesis (arXiv 2510.04339)](https://arxiv.org/abs/2510.04339) - 2D latent space disentanglement for timbre
-- [Learning Interpretable Features in Audio Latent Spaces (arXiv 2510.23802)](https://arxiv.org/abs/2510.23802) - Sparse autoencoders for interpretable audio features
-- [Is Disentanglement Enough? (arXiv 2108.01450)](https://arxiv.org/abs/2108.01450) - Latent space disentanglement for controllable music generation
-- [Automated Data Augmentation for Audio Classification (IEEE TASLP 2024)](https://dl.acm.org/doi/10.1109/TASLP.2024.3402049) - Audio augmentation techniques
-- [Sample Rate & Bit Depth Guide](https://www.blackghostaudio.com/blog/sample-rate-bit-depth-explained) - Export pipeline best practices
+- [torchaudio HiFiGAN Vocoder](https://docs.pytorch.org/audio/stable/generated/torchaudio.prototype.pipelines.HiFiGANVocoderBundle.html) -- torchaudio's HiFi-GAN (deprecated in 2.8, removed in 2.9 -- do NOT use)
+- [HiFi-GAN Paper](https://arxiv.org/abs/2010.05646) -- Architecture details, discriminator design, loss functions
+- [BigVGAN Paper](https://arxiv.org/abs/2206.04658) -- Anti-aliased multi-periodicity composition, Snake activation
 
-### Low Confidence (WebSearch Only, Needs Verification)
+### Low Confidence (Needs Validation)
 
-- General audio synthesis architecture patterns - Inferred from multiple sources but not explicitly documented in a single authoritative reference
-- Component boundary recommendations - Based on common patterns observed across projects, not standardized
-- Build order prioritization - Derived from experience patterns, not empirically validated for this specific domain
+- MPS compatibility for BigVGAN inference -- inferred from PyTorch MPS support, not tested with BigVGAN specifically
+- HiFi-GAN training time on small datasets -- extrapolated from general HiFi-GAN training, not validated for 5-500 file datasets
+- BigVGAN model file size estimate (~500MB) -- based on parameter count, not verified download size
 
 ---
 
-*Architecture research for: Generative Audio from Small Datasets*
-*Researched: 2026-02-12*
+*Architecture research for: Neural Vocoder Integration (v1.1 Milestone)*
+*Researched: 2026-02-21*
