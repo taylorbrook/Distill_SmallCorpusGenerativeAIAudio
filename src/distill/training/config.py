@@ -108,6 +108,39 @@ class RegularizationConfig:
 
 
 # ---------------------------------------------------------------------------
+# Complex Spectrogram Config
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ComplexSpectrogramConfig:
+    """Configuration for 2-channel magnitude + IF spectrogram computation.
+
+    Attributes
+    ----------
+    enabled:
+        If True, use 2-channel complex spectrograms instead of 1-channel
+        magnitude-only mel spectrograms. Default True for v2.0.
+    if_masking_threshold:
+        Power threshold below which IF values are masked to zero.
+        Phase information in low-energy bins is meaningless noise.
+        Higher values mask more aggressively. Default 1e-5.
+    n_fft:
+        FFT window size. Default 2048 (v1.0 default).
+    hop_length:
+        Hop length between STFT frames. Default 512 (v1.0 default).
+    n_mels:
+        Number of mel frequency bins. Default 128 (v1.0 default).
+    """
+
+    enabled: bool = True
+    if_masking_threshold: float = 1e-5
+    n_fft: int = 2048
+    hop_length: int = 512
+    n_mels: int = 128
+
+
+# ---------------------------------------------------------------------------
 # Training Config
 # ---------------------------------------------------------------------------
 
@@ -157,7 +190,7 @@ class TrainingConfig:
         DataLoader worker processes.  0 = main process (safest cross-platform).
     """
 
-    latent_dim: int = 64
+    latent_dim: int = 128
     batch_size: int = 32
     max_epochs: int = 200
     learning_rate: float = 1e-3
@@ -172,6 +205,9 @@ class TrainingConfig:
     max_checkpoints: int = 3
     preset: OverfittingPreset = OverfittingPreset.BALANCED
     regularization: RegularizationConfig = field(default_factory=RegularizationConfig)
+    complex_spectrogram: ComplexSpectrogramConfig = field(
+        default_factory=ComplexSpectrogramConfig
+    )
     device: str = "auto"
     num_workers: int = 0
 
@@ -244,7 +280,7 @@ def get_adaptive_config(file_count: int) -> TrainingConfig:
     )
 
     return TrainingConfig(
-        latent_dim=64,
+        latent_dim=128,
         batch_size=batch_size,
         max_epochs=int(params["max_epochs"]),
         learning_rate=params["learning_rate"],  # type: ignore[arg-type]

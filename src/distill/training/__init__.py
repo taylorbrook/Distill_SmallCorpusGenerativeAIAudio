@@ -13,6 +13,7 @@ from distill.training.checkpoint import (
     save_checkpoint,
 )
 from distill.training.config import (
+    ComplexSpectrogramConfig,
     OverfittingPreset,
     RegularizationConfig,
     TrainingConfig,
@@ -41,6 +42,7 @@ from distill.training.runner import TrainingRunner
 
 __all__ = [
     # config.py
+    "ComplexSpectrogramConfig",
     "TrainingConfig",
     "OverfittingPreset",
     "RegularizationConfig",
