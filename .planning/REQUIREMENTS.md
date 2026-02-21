@@ -83,37 +83,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VOC-01 | — | Pending |
-| VOC-02 | — | Pending |
-| VOC-03 | — | Pending |
-| VOC-04 | — | Pending |
-| VOC-05 | — | Pending |
-| VOC-06 | — | Pending |
-| GEN-01 | — | Pending |
-| GEN-02 | — | Pending |
-| GEN-03 | — | Pending |
-| GEN-04 | — | Pending |
-| PERS-01 | — | Pending |
-| PERS-02 | — | Pending |
-| PERS-03 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| UI-04 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| TRAIN-01 | — | Pending |
-| TRAIN-02 | — | Pending |
-| TRAIN-03 | — | Pending |
-| TRAIN-04 | — | Pending |
-| TRAIN-05 | — | Pending |
+| VOC-01 | Phase 12 | Pending |
+| VOC-02 | Phase 12 | Pending |
+| VOC-03 | Phase 12 | Pending |
+| VOC-04 | Phase 12 | Pending |
+| VOC-05 | Phase 16 | Pending |
+| VOC-06 | Phase 12 | Pending |
+| GEN-01 | Phase 14 | Pending |
+| GEN-02 | Phase 14 | Pending |
+| GEN-03 | Phase 14 | Pending |
+| GEN-04 | Phase 16 | Pending |
+| PERS-01 | Phase 13 | Pending |
+| PERS-02 | Phase 13 | Pending |
+| PERS-03 | Phase 13 | Pending |
+| UI-01 | Phase 15 | Pending |
+| UI-02 | Phase 15 | Pending |
+| UI-03 | Phase 16 | Pending |
+| UI-04 | Phase 16 | Pending |
+| CLI-01 | Phase 15 | Pending |
+| CLI-02 | Phase 16 | Pending |
+| CLI-03 | Phase 15 | Pending |
+| TRAIN-01 | Phase 16 | Pending |
+| TRAIN-02 | Phase 16 | Pending |
+| TRAIN-03 | Phase 16 | Pending |
+| TRAIN-04 | Phase 16 | Pending |
+| TRAIN-05 | Phase 16 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25
+- Mapped to phases: 25
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-21*
-*Last updated: 2026-02-21 after initial definition*
+*Last updated: 2026-02-21 after roadmap creation (traceability complete)*
