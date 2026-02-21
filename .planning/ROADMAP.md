@@ -47,7 +47,10 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   2. Magnitude and IF channels are independently normalized (zero mean, unit variance) with stored statistics for denormalization
   3. IF values in low-amplitude bins (where phase is meaningless noise) are masked to zero
   4. Preprocessed 2-channel spectrograms are cached to disk and reloaded without recomputation on subsequent training runs
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 12-01-PLAN.md — Core 2-channel spectrogram computation (magnitude + IF in mel domain, normalization, IF masking, config)
+- [ ] 12-02-PLAN.md — Cache pipeline and training integration (preprocessing, caching, manifest, change detection, training loop wiring)
 
 ### Phase 13: 2-Channel VAE Architecture
 **Goal**: The VAE model accepts 2-channel input and produces 2-channel output with appropriate per-channel handling
@@ -111,7 +114,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. 2-Channel Data Pipeline | v2.0 | 0/? | Not started | - |
+| 12. 2-Channel Data Pipeline | v2.0 | 0/2 | Planned | - |
 | 13. 2-Channel VAE Architecture | v2.0 | 0/? | Not started | - |
 | 14. Multi-Resolution Loss | v2.0 | 0/? | Not started | - |
 | 15. ISTFT Reconstruction | v2.0 | 0/? | Not started | - |
@@ -119,4 +122,4 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after v2.0 milestone roadmap creation*
+*Last updated: 2026-02-21 after Phase 12 planning (2 plans)*
