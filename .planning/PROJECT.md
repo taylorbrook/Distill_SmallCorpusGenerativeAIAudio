@@ -31,6 +31,15 @@ Controllable exploration — users can reliably navigate between sound worlds us
 
 ### Active
 
+<!-- Milestone v1.1: HiFi-GAN Vocoder -->
+- [ ] Replace Griffin-Lim with BigVGAN-v2 universal neural vocoder as default reconstruction
+- [ ] Optional per-model HiFi-GAN V2 training for maximum fidelity on user's audio
+- [ ] Full removal of Griffin-Lim reconstruction path
+- [ ] UI integration for vocoder selection and per-model vocoder training
+- [ ] CLI integration for vocoder selection and training commands
+- [ ] Model format updates to store/load vocoder state alongside VAE
+
+<!-- Carried forward from v1.0 (not in current milestone) -->
 - [ ] Incrementally add more training audio to an existing model
 - [ ] Feed generated outputs back into training data for iterative refinement
 - [ ] Bundle HRTF SOFA file for binaural mode (currently requires user download)
@@ -93,5 +102,16 @@ Architecture: Convolutional VAE operating on mel spectrograms with PCA-based lat
 | PCA with 2% variance threshold | Conservative filter removes noise dimensions while preserving meaningful ones | ✓ Good — gives 4-8 meaningful sliders per model |
 | sofar library for HRTF/binaural | Standard SOFA format for head-related transfer functions | ⚠️ Revisit — requires user to download SOFA file |
 
+## Current Milestone: v1.1 HiFi-GAN Vocoder
+
+**Goal:** Replace Griffin-Lim reconstruction with neural vocoders (BigVGAN-v2 universal + optional per-model HiFi-GAN V2) for dramatically improved audio quality.
+
+**Target features:**
+- BigVGAN-v2 as default universal vocoder (zero per-model training, works on any audio)
+- Optional per-model HiFi-GAN V2 training for users who want maximum fidelity
+- Full removal of Griffin-Lim reconstruction
+- UI and CLI integration for vocoder selection and training
+- Model format updates to include vocoder state
+
 ---
-*Last updated: 2026-02-15 after v1.0 milestone*
+*Last updated: 2026-02-21 after v1.1 milestone start*

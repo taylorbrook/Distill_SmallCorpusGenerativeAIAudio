@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-15)
+See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** v1.0 MVP shipped — planning next milestone
+**Current focus:** v1.1 HiFi-GAN Vocoder — replace Griffin-Lim with neural vocoders
 
 ## Current Position
 
-Phase: v1.0 complete (11 phases, 34 plans)
-Plan: All complete
-Status: v1.0 MVP shipped 2026-02-15
-Last activity: 2026-02-15 -- Milestone v1.0 archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-21 — Milestone v1.1 started
 
-Progress: [████████████████████] 100% (v1.0)
+Progress: ░░░░░░░░░░░░░░░░░░░░ 0% (v1.1)
 
 ## Performance Metrics
 
