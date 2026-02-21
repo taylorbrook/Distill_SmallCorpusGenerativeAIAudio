@@ -49,7 +49,10 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   2. Codebook size automatically scales based on dataset size (64 for 5-20 files, 128 for 20-100, 256 for 100-500) without user intervention
   3. Codebooks initialize via k-means on first batch, update via EMA, and automatically reset dead codes during training
   4. Training uses commitment loss (single weight parameter) with no KL divergence, free bits, or annealing logic
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 12-01-PLAN.md -- Install vector-quantize-pytorch, create VQVAEConfig with adaptive sizing, build ConvVQVAE model architecture
+- [ ] 12-02-PLAN.md -- Create vqvae_loss with multi-scale spectral loss, wire VQ-VAE exports through models __init__.py
 
 ### Phase 13: VQ-VAE Training Pipeline
 **Goal**: Users can train an RVQ-VAE model end-to-end through the UI or CLI, see codebook health during training, and save/load trained models in v2 format
@@ -137,7 +140,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. RVQ-VAE Core Architecture | v1.1 | 0/0 | Not started | - |
+| 12. RVQ-VAE Core Architecture | v1.1 | 0/2 | Planning complete | - |
 | 13. VQ-VAE Training Pipeline | v1.1 | 0/0 | Not started | - |
 | 14. Autoregressive Prior | v1.1 | 0/0 | Not started | - |
 | 15. Generation Pipeline | v1.1 | 0/0 | Not started | - |
@@ -147,4 +150,4 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after v1.1 milestone roadmap creation*
+*Last updated: 2026-02-21 after Phase 12 planning complete*
