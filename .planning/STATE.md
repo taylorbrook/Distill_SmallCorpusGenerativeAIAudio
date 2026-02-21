@@ -61,5 +61,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-21
-Stopped at: v1.1 roadmap created — Phases 12-16 defined, ready to plan Phase 12
-Resume file: None
+Stopped at: Phase 12 context gathered — ready to plan
+Resume file: .planning/phases/12-vocoder-interface-bigvgan-integration/12-CONTEXT.md
