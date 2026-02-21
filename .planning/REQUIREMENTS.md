@@ -1,0 +1,105 @@
+# Requirements: Small DataSet Audio
+
+**Defined:** 2026-02-21
+**Core Value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
+
+## v2.0 Requirements
+
+Requirements for complex spectrogram milestone. Each maps to roadmap phases.
+
+### Data Pipeline
+
+- [ ] **DATA-01**: System computes magnitude + instantaneous frequency from STFT as 2-channel representation
+- [ ] **DATA-02**: System normalizes magnitude and IF channels independently (zero mean, unit variance)
+- [ ] **DATA-03**: System computes IF in mel domain to preserve existing mel-scale pipeline
+- [ ] **DATA-04**: System masks IF values in low-amplitude regions where phase is meaningless noise
+- [ ] **DATA-05**: System preprocesses and caches 2-channel spectrograms for training
+
+### Model Architecture
+
+- [ ] **ARCH-01**: VAE encoder accepts 2-channel input (magnitude + IF)
+- [ ] **ARCH-02**: VAE decoder outputs 2-channel reconstruction (magnitude + IF)
+- [ ] **ARCH-03**: Default latent dimension is 128 (configurable)
+- [ ] **ARCH-04**: Decoder activation handles both magnitude (non-negative) and IF (unbounded) channels appropriately
+
+### Loss Function
+
+- [ ] **LOSS-01**: Training uses multi-resolution STFT loss (auraloss) at multiple window sizes
+- [ ] **LOSS-02**: Training uses per-channel reconstruction loss (magnitude + IF)
+- [ ] **LOSS-03**: IF channel loss is weighted by magnitude to focus on perceptually relevant regions
+- [ ] **LOSS-04**: Loss terms are balanced with configurable weights
+
+### Reconstruction
+
+- [ ] **RECON-01**: Phase is reconstructed from IF via cumulative sum
+- [ ] **RECON-02**: Waveform is reconstructed via ISTFT from magnitude + reconstructed phase
+- [ ] **RECON-03**: Griffin-Lim code is removed from the generation pipeline
+
+### Integration
+
+- [ ] **INTEG-01**: Generation pipeline produces audio via ISTFT (not Griffin-Lim)
+- [ ] **INTEG-02**: Export pipeline works with new reconstruction (all formats: WAV/MP3/FLAC/OGG)
+- [ ] **INTEG-03**: Training previews use ISTFT reconstruction
+- [ ] **INTEG-04**: PCA-based latent space analysis works with 128-dim latent space
+- [ ] **INTEG-05**: UI and CLI function without changes to user-facing interfaces
+
+## Future Requirements
+
+Deferred from active requirements. Tracked but not in current roadmap.
+
+### Incremental Training
+
+- **INCR-01**: User can add more training audio to an existing model
+- **INCR-02**: User can feed generated outputs back into training data
+
+### Bundled Assets
+
+- **ASSET-01**: HRTF SOFA file bundled for binaural mode (currently requires user download)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Real + imaginary representation | Requires moving from mel to linear STFT (more freq bins, bigger architecture change). Mag+IF preserves mel pipeline. |
+| VQ-VAE / discrete latent space | Breaks PCA-based slider UI. Different generation paradigm. |
+| Neural vocoder (HiFi-GAN/BigVGAN) | Separate model adds training complexity. Complex spectrogram eliminates Griffin-Lim without it. |
+| Raw phase prediction | Notoriously hard for neural networks (wrapping, quasi-random at low energy). IF is the proven alternative. |
+| v1.0 model backward compatibility | New representation is fundamentally different. Clean break. |
+| Real-time generation | Quality over latency — unchanged from v1.0 |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DATA-01 | — | Pending |
+| DATA-02 | — | Pending |
+| DATA-03 | — | Pending |
+| DATA-04 | — | Pending |
+| DATA-05 | — | Pending |
+| ARCH-01 | — | Pending |
+| ARCH-02 | — | Pending |
+| ARCH-03 | — | Pending |
+| ARCH-04 | — | Pending |
+| LOSS-01 | — | Pending |
+| LOSS-02 | — | Pending |
+| LOSS-03 | — | Pending |
+| LOSS-04 | — | Pending |
+| RECON-01 | — | Pending |
+| RECON-02 | — | Pending |
+| RECON-03 | — | Pending |
+| INTEG-01 | — | Pending |
+| INTEG-02 | — | Pending |
+| INTEG-03 | — | Pending |
+| INTEG-04 | — | Pending |
+| INTEG-05 | — | Pending |
+
+**Coverage:**
+- v2.0 requirements: 18 total
+- Mapped to phases: 0
+- Unmapped: 18 ⚠️
+
+---
+*Requirements defined: 2026-02-21*
+*Last updated: 2026-02-21 after initial definition*
