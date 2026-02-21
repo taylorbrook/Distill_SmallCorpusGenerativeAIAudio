@@ -80,6 +80,7 @@ class TrainingRunner:
         callback: "MetricsCallback | None" = None,
         models_dir: "Path | None" = None,
         dataset_name: str = "",
+        model_name: str = "",
     ) -> None:
         """Start training in a background thread.
 
@@ -99,6 +100,8 @@ class TrainingRunner:
             Directory to save the .distill model file into.
         dataset_name:
             Name of the dataset (used for model metadata).
+        model_name:
+            User-specified model name (used for saved model name).
 
         Raises
         ------
@@ -116,7 +119,7 @@ class TrainingRunner:
         self._thread = threading.Thread(
             target=self._run_training,
             args=(config, file_paths, output_dir, device, callback, None,
-                  models_dir, dataset_name),
+                  models_dir, dataset_name, model_name),
             daemon=True,
             name="training-runner",
         )
@@ -142,6 +145,7 @@ class TrainingRunner:
         callback: "MetricsCallback | None" = None,
         models_dir: "Path | None" = None,
         dataset_name: str = "",
+        model_name: str = "",
     ) -> None:
         """Resume training from a checkpoint.
 
@@ -166,6 +170,8 @@ class TrainingRunner:
             Directory to save the .distill model file into.
         dataset_name:
             Name of the dataset (used for model metadata).
+        model_name:
+            User-specified model name (used for saved model name).
 
         Raises
         ------
@@ -183,7 +189,7 @@ class TrainingRunner:
         self._thread = threading.Thread(
             target=self._run_training,
             args=(config, file_paths, output_dir, device, callback, checkpoint_path,
-                  models_dir, dataset_name),
+                  models_dir, dataset_name, model_name),
             daemon=True,
             name="training-runner-resume",
         )
@@ -236,6 +242,7 @@ class TrainingRunner:
         resume_checkpoint: Path | None,
         models_dir: "Path | None" = None,
         dataset_name: str = "",
+        model_name: str = "",
     ) -> None:
         """Thread target: run the training loop with error handling."""
         from distill.training.loop import train
@@ -251,6 +258,7 @@ class TrainingRunner:
                 resume_checkpoint=resume_checkpoint,
                 models_dir=models_dir,
                 dataset_name=dataset_name,
+                model_name=model_name,
             )
             self._result = result
         except Exception as exc:

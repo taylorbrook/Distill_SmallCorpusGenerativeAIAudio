@@ -64,8 +64,11 @@ def vae_loss(
     # Sum over latent dims, mean over batch
     kl_loss = kl_per_dim.sum(dim=1).mean()
 
-    # Total loss with annealing weight
-    total_loss = recon_loss + kl_weight * kl_loss
+    # Total loss with annealing weight (guard against 0.0 * inf = NaN)
+    if kl_weight > 0:
+        total_loss = recon_loss + kl_weight * kl_loss
+    else:
+        total_loss = recon_loss
 
     return total_loss, recon_loss, kl_loss
 

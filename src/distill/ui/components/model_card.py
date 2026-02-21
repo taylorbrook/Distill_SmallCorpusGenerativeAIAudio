@@ -68,10 +68,20 @@ def render_single_card(model: "ModelEntry") -> str:
 
     return f"""\
 <div style="border: 1px solid #ddd; border-radius: 8px; padding: 16px;
-            transition: box-shadow 0.2s; cursor: default;"
-     data-model-id="{html.escape(model.model_id)}"
-     onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'"
-     onmouseout="this.style.boxShadow='none'">
+            transition: box-shadow 0.2s, border-color 0.2s; cursor: pointer;"
+     data-model-name="{name}"
+     onclick="
+       var modelName = this.getAttribute('data-model-name');
+       var tb = document.querySelector('#model-card-selected-name textarea');
+       if (tb) {{
+         var nativeSet = Object.getOwnPropertyDescriptor(
+           window.HTMLTextAreaElement.prototype, 'value').set;
+         nativeSet.call(tb, modelName);
+         tb.dispatchEvent(new Event('input', {{bubbles: true}}));
+       }}
+     "
+     onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'; this.style.borderColor='#6366f1'"
+     onmouseout="this.style.boxShadow='none'; this.style.borderColor='#ddd'">
     <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">{name}</h3>
     <p style="margin: 4px 0; color: #666; font-size: 0.9em;">
         {dataset} &middot; {file_count} files

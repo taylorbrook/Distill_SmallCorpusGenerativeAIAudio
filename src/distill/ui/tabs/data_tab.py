@@ -46,7 +46,9 @@ def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
     """Common import logic for both drag-and-drop and folder upload.
 
     Copies files to the datasets directory, creates a Dataset, computes
-    summary with thumbnails, and updates app_state.
+    summary with thumbnails, and updates app_state.  New files are added
+    to any previously imported files so users can build a dataset
+    incrementally from multiple drops or folder selections.
 
     Returns:
         Tuple of (stats_markdown, thumbnail_paths, None).
@@ -54,11 +56,8 @@ def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
     if not file_paths:
         return "No files provided.", [], None
 
-    # Clear and recreate import directory so each import starts fresh
-    # (previous files accumulate otherwise, inflating stats)
+    # Create import directory (keep existing files for incremental import)
     import_dir = app_state.datasets_dir / "imported"
-    if import_dir.exists():
-        shutil.rmtree(import_dir)
     import_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy files to import directory
@@ -162,6 +161,28 @@ def _handle_folder_upload(files: list[str] | None) -> tuple:
     )
 
 
+def _clear_dataset() -> tuple:
+    """Remove all imported files and reset the Data tab to its initial state.
+
+    Returns:
+        Tuple of (file_upload, stats_md, gallery_images, audio_player,
+                  stats_visible, gallery_visible).
+    """
+    import_dir = app_state.datasets_dir / "imported"
+    if import_dir.exists():
+        shutil.rmtree(import_dir)
+    app_state.current_dataset = None
+    app_state.current_summary = None
+    return (
+        None,  # clear file upload component
+        "",
+        [],
+        None,
+        gr.update(visible=False),
+        gr.update(visible=False),
+    )
+
+
 def _handle_thumbnail_click(evt: gr.SelectData) -> str | None:
     """Play the audio file corresponding to the clicked thumbnail.
 
@@ -212,6 +233,11 @@ def build_data_tab() -> dict:
             file_count="directory",
             scale=1,
         )
+        clear_btn = gr.Button(
+            "Clear All",
+            variant="secondary",
+            scale=1,
+        )
 
     stats_display = gr.Markdown(
         value="",
@@ -246,6 +272,13 @@ def build_data_tab() -> dict:
         outputs=outputs,
     )
 
+    clear_outputs = [file_upload, stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
+    clear_event = clear_btn.click(
+        fn=_clear_dataset,
+        inputs=None,
+        outputs=clear_outputs,
+    )
+
     thumbnail_gallery.select(
         fn=_handle_thumbnail_click,
         inputs=None,
@@ -255,4 +288,5 @@ def build_data_tab() -> dict:
     return {
         "file_upload_event": file_upload_event,
         "folder_upload_event": folder_upload_event,
+        "clear_event": clear_event,
     }

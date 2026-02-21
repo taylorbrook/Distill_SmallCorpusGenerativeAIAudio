@@ -106,7 +106,10 @@ class ConvEncoder(nn.Module):
             self._init_linear(h_flat.shape[1])
         assert self.fc_mu is not None  # for type checker
 
-        return self.fc_mu(h_flat), self.fc_logvar(h_flat)
+        mu = self.fc_mu(h_flat)
+        logvar = self.fc_logvar(h_flat)
+        logvar = torch.clamp(logvar, min=-20.0, max=20.0)
+        return mu, logvar
 
 
 # ---------------------------------------------------------------------------

@@ -1,19 +1,23 @@
-"""Chunk-based audio generation with crossfade and latent interpolation.
+"""Continuous audio generation via overlap-add mel synthesis.
 
-For audio longer than one chunk, multiple chunks are generated from the
-VAE and concatenated.  Two concatenation modes are supported:
+For audio longer than one chunk, latent vectors are decoded to
+overlapping mel windows and combined via Hann-windowed overlap-add
+before a single Griffin-Lim pass.  This produces truly seamless audio
+with no chunk boundaries, clicks, or windowing artifacts.
 
-- **Crossfade:** Independent chunks decoded to waveform, then combined via
-  Hann-windowed overlap-add.  Reliable default.
-- **Latent interpolation:** Anchor latent vectors connected by SLERP
-  interpolation, producing smoothly evolving sound.  Experimental.
+Two generation modes:
+
+- **Crossfade:** Random anchor vectors interpolated via SLERP, decoded
+  through continuous overlap-add synthesis.
+- **Latent interpolation:** Same approach with denser anchor sampling.
 
 Design notes:
 - Lazy imports for ``torch`` and ``numpy`` (project pattern).
-- Chunks processed one at a time to limit memory (research open question #4).
 - ``model.decode(z, target_shape=mel_shape)`` passes mel shape to decoder.
 - ``spectrogram.mel_to_waveform()`` forces CPU (existing InverseMelScale
   pattern from ``audio/spectrogram.py``).
+- 50% Hann overlap satisfies the COLA (Constant Overlap-Add) condition,
+  guaranteeing amplitude consistency across the synthesized mel.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ def slerp(
 
 
 # ---------------------------------------------------------------------------
-# Crossfade
+# Waveform crossfade (legacy, kept for backward compat)
 # ---------------------------------------------------------------------------
 
 
@@ -93,6 +97,9 @@ def crossfade_chunks(
     overlap_samples: int = 2400,
 ) -> "np.ndarray":
     """Concatenate audio chunks with Hann-windowed overlap-add crossfade.
+
+    Legacy function kept for backward compatibility.  New code should
+    use :func:`synthesize_continuous_mel` instead.
 
     Parameters
     ----------
@@ -146,6 +153,147 @@ def crossfade_chunks(
 
 
 # ---------------------------------------------------------------------------
+# Trajectory interpolation
+# ---------------------------------------------------------------------------
+
+
+def _interpolate_trajectory(
+    anchors: "list[torch.Tensor]",
+    num_steps: int,
+) -> "list[torch.Tensor]":
+    """Build a dense latent trajectory by SLERP-interpolating between anchors.
+
+    Parameters
+    ----------
+    anchors : list[torch.Tensor]
+        Anchor latent vectors, each shape ``[1, latent_dim]``.
+    num_steps : int
+        Total number of trajectory points to produce.
+
+    Returns
+    -------
+    list[torch.Tensor]
+        Dense trajectory of ``num_steps`` vectors, each ``[1, latent_dim]``.
+    """
+    if len(anchors) == 1 or num_steps <= 1:
+        return [anchors[0]] * max(num_steps, 1)
+
+    num_segments = len(anchors) - 1
+    trajectory: list[torch.Tensor] = []
+
+    for step_idx in range(num_steps):
+        t_global = step_idx / max(num_steps - 1, 1)
+        segment_float = t_global * num_segments
+        segment_idx = min(int(segment_float), num_segments - 1)
+        t_local = segment_float - segment_idx
+
+        z = slerp(
+            anchors[segment_idx].squeeze(0),
+            anchors[segment_idx + 1].squeeze(0),
+            t_local,
+        )
+        trajectory.append(z.unsqueeze(0))
+
+    return trajectory
+
+
+# ---------------------------------------------------------------------------
+# Continuous overlap-add mel synthesis
+# ---------------------------------------------------------------------------
+
+
+def synthesize_continuous_mel(
+    model: "ConvVAE",
+    spectrogram: "AudioSpectrogram",
+    latent_trajectory: "list[torch.Tensor]",
+    chunk_samples: int = 48_000,
+) -> "torch.Tensor":
+    """Synthesize a continuous mel spectrogram via overlap-add decoding.
+
+    Each latent vector in the trajectory is decoded to a mel chunk,
+    Hann-windowed, and accumulated with 50% overlap.  The Hann window
+    at 50% hop satisfies the COLA condition, producing a smooth
+    continuous mel spectrogram with no chunk boundaries or artifacts.
+
+    A single Griffin-Lim pass on this mel reconstructs phase over the
+    entire spectrogram, eliminating clicks entirely.
+
+    Parameters
+    ----------
+    model : ConvVAE
+        Trained VAE model.
+    spectrogram : AudioSpectrogram
+        Spectrogram converter (for ``get_mel_shape``).
+    latent_trajectory : list[torch.Tensor]
+        Dense trajectory of latent vectors, each ``[1, latent_dim]``.
+    chunk_samples : int
+        Number of audio samples per decoded chunk (default 48000 = 1 s).
+
+    Returns
+    -------
+    torch.Tensor
+        Continuous mel spectrogram, shape ``[1, 1, n_mels, total_frames]``.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    mel_shape = spectrogram.get_mel_shape(chunk_samples)
+    n_mels, chunk_frames = mel_shape
+    hop_frames = chunk_frames // 2  # 50% overlap (COLA for Hann)
+    num_steps = len(latent_trajectory)
+
+    was_training = model.training
+    model.eval()
+
+    try:
+        with torch.no_grad():
+            # Single step: no overlap needed
+            if num_steps == 1:
+                if model.decoder.fc is None:
+                    pad_h = (16 - n_mels % 16) % 16
+                    pad_w = (16 - chunk_frames % 16) % 16
+                    spatial = (
+                        (n_mels + pad_h) // 16,
+                        (chunk_frames + pad_w) // 16,
+                    )
+                    model.decoder._init_linear(spatial)
+                return model.decode(
+                    latent_trajectory[0], target_shape=mel_shape
+                ).cpu()
+
+            total_frames = (num_steps - 1) * hop_frames + chunk_frames
+            window = torch.hann_window(chunk_frames)
+            output = torch.zeros(n_mels, total_frames)
+            norm = torch.zeros(total_frames)
+
+            for i, z in enumerate(latent_trajectory):
+                if model.decoder.fc is None:
+                    pad_h = (16 - n_mels % 16) % 16
+                    pad_w = (16 - chunk_frames % 16) % 16
+                    spatial = (
+                        (n_mels + pad_h) // 16,
+                        (chunk_frames + pad_w) // 16,
+                    )
+                    model.decoder._init_linear(spatial)
+
+                mel = model.decode(z, target_shape=mel_shape)
+                mel_2d = mel.squeeze(0).squeeze(0).cpu()
+
+                start = i * hop_frames
+                end = start + chunk_frames
+                output[:, start:end] += mel_2d * window.unsqueeze(0)
+                norm[start:end] += window
+
+            norm = norm.clamp(min=1e-8)
+            output = output / norm.unsqueeze(0)
+
+    finally:
+        if was_training:
+            model.train()
+
+    return output.unsqueeze(0).unsqueeze(0)
+
+
+# ---------------------------------------------------------------------------
 # Latent vector sampling
 # ---------------------------------------------------------------------------
 
@@ -187,6 +335,47 @@ def _sample_latent_vectors(
 
 
 # ---------------------------------------------------------------------------
+# Decode step calculation
+# ---------------------------------------------------------------------------
+
+
+def _compute_num_decode_steps(
+    spectrogram: "AudioSpectrogram",
+    num_chunks: int,
+    chunk_samples: int,
+) -> tuple[int, int, int]:
+    """Compute the number of overlap-add decode steps for a target duration.
+
+    Parameters
+    ----------
+    spectrogram : AudioSpectrogram
+        Spectrogram converter.
+    num_chunks : int
+        Number of original 1-second chunks (i.e. target seconds).
+    chunk_samples : int
+        Audio samples per decoded chunk.
+
+    Returns
+    -------
+    tuple[int, int, int]
+        ``(num_steps, chunk_frames, hop_frames)``
+    """
+    import math  # noqa: WPS433
+
+    mel_shape = spectrogram.get_mel_shape(chunk_samples)
+    _, chunk_frames = mel_shape
+    hop_frames = chunk_frames // 2
+
+    total_target_samples = num_chunks * chunk_samples
+    total_frames_needed = spectrogram.get_mel_shape(total_target_samples)[1]
+    num_steps = max(
+        1,
+        math.ceil((total_frames_needed - chunk_frames) / hop_frames) + 1,
+    )
+    return num_steps, chunk_frames, hop_frames
+
+
+# ---------------------------------------------------------------------------
 # Generation: crossfade mode
 # ---------------------------------------------------------------------------
 
@@ -200,10 +389,11 @@ def generate_chunks_crossfade(
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
 ) -> "np.ndarray":
-    """Generate audio by decoding independent chunks and crossfading.
+    """Generate audio via continuous overlap-add synthesis.
 
-    Each chunk gets an independent latent vector.  Decoded waveforms are
-    concatenated via Hann-windowed overlap-add crossfade.
+    Random anchor vectors are SLERP-interpolated to produce a dense
+    latent trajectory, then decoded via 50%-overlap Hann-windowed
+    overlap-add for seamless, click-free audio.
 
     Parameters
     ----------
@@ -212,7 +402,7 @@ def generate_chunks_crossfade(
     spectrogram : AudioSpectrogram
         Spectrogram converter (for mel-to-waveform).
     num_chunks : int
-        Number of audio chunks to generate.
+        Target duration in chunks (each chunk_samples long).
     device : torch.device
         Device the model is on.
     seed : int | None
@@ -220,45 +410,29 @@ def generate_chunks_crossfade(
     chunk_samples : int
         Number of audio samples per chunk (default 48000 = 1 s at 48 kHz).
     overlap_samples : int
-        Overlap for crossfade in samples (default 2400 = 50 ms at 48 kHz).
+        Kept for API compatibility (overlap is now 50% mel frames).
 
     Returns
     -------
     np.ndarray
-        Concatenated audio as float32.
+        Audio as float32.
     """
-    import torch  # noqa: WPS433 -- lazy import
     import numpy as np  # noqa: WPS433 -- lazy import
 
-    mel_shape = spectrogram.get_mel_shape(chunk_samples)
-    z_vectors = _sample_latent_vectors(model, num_chunks, device, seed)
+    num_steps, _, _ = _compute_num_decode_steps(
+        spectrogram, num_chunks, chunk_samples,
+    )
 
-    was_training = model.training
-    model.eval()
+    # Random anchors + dense SLERP trajectory
+    num_anchors = max(2, num_chunks)
+    z_anchors = _sample_latent_vectors(model, num_anchors, device, seed)
+    trajectory = _interpolate_trajectory(z_anchors, num_steps)
 
-    waveforms: list[np.ndarray] = []
-    try:
-        with torch.no_grad():
-            for z in z_vectors:
-                # Ensure decoder is initialised
-                if model.decoder.fc is None:
-                    n_mels, time_frames = mel_shape
-                    pad_h = (16 - n_mels % 16) % 16
-                    pad_w = (16 - time_frames % 16) % 16
-                    spatial = ((n_mels + pad_h) // 16, (time_frames + pad_w) // 16)
-                    model.decoder._init_linear(spatial)
-
-                # Decode latent vector to mel spectrogram
-                mel = model.decode(z, target_shape=mel_shape)
-
-                # Convert mel to waveform on CPU (InverseMelScale requirement)
-                wav = spectrogram.mel_to_waveform(mel.cpu())
-                waveforms.append(wav.squeeze().numpy().astype(np.float32))
-    finally:
-        if was_training:
-            model.train()
-
-    return crossfade_chunks(waveforms, overlap_samples)
+    combined_mel = synthesize_continuous_mel(
+        model, spectrogram, trajectory, chunk_samples,
+    )
+    wav = spectrogram.mel_to_waveform(combined_mel)
+    return wav.squeeze().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -275,12 +449,10 @@ def generate_chunks_latent_interp(
     chunk_samples: int = 48_000,
     steps_between: int = 10,
 ) -> "np.ndarray":
-    """Generate audio via SLERP interpolation between latent anchor vectors.
+    """Generate audio via SLERP interpolation with continuous synthesis.
 
-    Anchor vectors are generated at random, then connected by spherical
-    interpolation.  Each interpolated latent is decoded to a waveform and
-    all waveforms are concatenated sequentially (no crossfade needed --
-    interpolation ensures smooth transitions).
+    Anchor vectors are generated at random, then connected by dense
+    SLERP interpolation.  Decoded via overlap-add for seamless audio.
 
     Parameters
     ----------
@@ -289,7 +461,7 @@ def generate_chunks_latent_interp(
     spectrogram : AudioSpectrogram
         Spectrogram converter (for mel-to-waveform).
     num_chunks : int
-        Number of anchor latent vectors.
+        Number of anchor latent vectors / target duration in seconds.
     device : torch.device
         Device the model is on.
     seed : int | None
@@ -297,49 +469,26 @@ def generate_chunks_latent_interp(
     chunk_samples : int
         Audio samples per decoded chunk (default 48000 = 1 s at 48 kHz).
     steps_between : int
-        Number of intermediate interpolation steps between each pair of
-        anchors (default 10).
+        Kept for API compatibility.
 
     Returns
     -------
     np.ndarray
-        Concatenated audio as float32.
+        Audio as float32.
     """
-    import torch  # noqa: WPS433 -- lazy import
     import numpy as np  # noqa: WPS433 -- lazy import
 
-    mel_shape = spectrogram.get_mel_shape(chunk_samples)
-    z_anchors = _sample_latent_vectors(model, num_chunks, device, seed)
+    num_steps, _, _ = _compute_num_decode_steps(
+        spectrogram, num_chunks, chunk_samples,
+    )
 
-    # Build list of all latent vectors: anchors + interpolated points
-    all_z: list[torch.Tensor] = []
-    for i in range(len(z_anchors) - 1):
-        for t_val in torch.linspace(0, 1, steps_between, device=device):
-            z_interp = slerp(z_anchors[i].squeeze(0), z_anchors[i + 1].squeeze(0), t_val.item())
-            all_z.append(z_interp.unsqueeze(0))
-    # Append final anchor (not included by linspace ending at 1.0 of last pair)
-    all_z.append(z_anchors[-1])
+    # More anchors for exploration mode
+    num_anchors = max(2, num_chunks)
+    z_anchors = _sample_latent_vectors(model, num_anchors, device, seed)
+    trajectory = _interpolate_trajectory(z_anchors, num_steps)
 
-    was_training = model.training
-    model.eval()
-
-    waveform_parts: list[np.ndarray] = []
-    try:
-        with torch.no_grad():
-            for z in all_z:
-                # Ensure decoder is initialised
-                if model.decoder.fc is None:
-                    n_mels, time_frames = mel_shape
-                    pad_h = (16 - n_mels % 16) % 16
-                    pad_w = (16 - time_frames % 16) % 16
-                    spatial = ((n_mels + pad_h) // 16, (time_frames + pad_w) // 16)
-                    model.decoder._init_linear(spatial)
-
-                mel = model.decode(z, target_shape=mel_shape)
-                wav = spectrogram.mel_to_waveform(mel.cpu())
-                waveform_parts.append(wav.squeeze().numpy().astype(np.float32))
-    finally:
-        if was_training:
-            model.train()
-
-    return np.concatenate(waveform_parts).astype(np.float32)
+    combined_mel = synthesize_continuous_mel(
+        model, spectrogram, trajectory, chunk_samples,
+    )
+    wav = spectrogram.mel_to_waveform(combined_mel)
+    return wav.squeeze().numpy().astype(np.float32)

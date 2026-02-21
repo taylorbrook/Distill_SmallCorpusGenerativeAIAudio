@@ -158,6 +158,13 @@ def build_train_tab() -> dict:
     with gr.Column(visible=False) as train_ui:
         gr.Markdown("## Train")
 
+        # -- Model name -----------------------------------------------------
+        model_name_input = gr.Textbox(
+            label="Model Name",
+            placeholder="e.g. Ambient Pads v1",
+            value="",
+        )
+
         # -- Config section -----------------------------------------------
         with gr.Row():
             preset_dd = gr.Dropdown(
@@ -278,6 +285,7 @@ def build_train_tab() -> dict:
         )
 
     def _start_training(
+        model_name: str,
         max_epochs: int,
         learning_rate: float,
         dropout: float,
@@ -331,6 +339,7 @@ def build_train_tab() -> dict:
                 callback=_training_callback,
                 models_dir=app_state.models_dir,
                 dataset_name=ds.name if ds else "untitled",
+                model_name=model_name.strip() if model_name else "",
             )
         except RuntimeError as exc:
             app_state.training_active = False
@@ -354,6 +363,7 @@ def build_train_tab() -> dict:
     start_btn.click(
         fn=_start_training,
         inputs=[
+            model_name_input,
             max_epochs_num,
             learning_rate_num,
             dropout_slider,
@@ -384,6 +394,7 @@ def build_train_tab() -> dict:
     )
 
     def _resume_training(
+        model_name: str,
         max_epochs: int,
         learning_rate: float,
         dropout: float,
@@ -445,6 +456,7 @@ def build_train_tab() -> dict:
                 callback=_training_callback,
                 models_dir=app_state.models_dir,
                 dataset_name=ds.name,
+                model_name=model_name.strip() if model_name else "",
             )
         except RuntimeError as exc:
             app_state.training_active = False
@@ -467,6 +479,7 @@ def build_train_tab() -> dict:
     resume_btn.click(
         fn=_resume_training,
         inputs=[
+            model_name_input,
             max_epochs_num,
             learning_rate_num,
             dropout_slider,

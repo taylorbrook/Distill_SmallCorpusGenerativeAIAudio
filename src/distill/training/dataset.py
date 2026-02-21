@@ -150,6 +150,11 @@ class AudioTrainingDataset:
                 )
                 chunk = torch.cat([chunk, padding], dim=1)
 
+        # Peak-normalize each chunk so the model learns spectral content, not volume
+        peak = chunk.abs().max()
+        if peak > 1e-6:  # avoid amplifying near-silence to noise
+            chunk = chunk / peak
+
         return chunk
 
     # -----------------------------------------------------------------

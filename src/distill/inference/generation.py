@@ -104,6 +104,15 @@ class GenerationConfig:
     overlap_samples: int = 2400
     """Crossfade overlap in samples (50 ms at 48 kHz)."""
 
+    evolution_amount: float = 0.5
+    """Latent-space drift for multi-chunk slider generation.
+
+    Controls how far the latent vector walks from the slider position
+    across chunks via SLERP interpolation.  ``0`` = static (all chunks
+    identical), ``1`` = full drift toward a random anchor.  Only affects
+    slider-controlled generation (when ``latent_vector`` is set).
+    """
+
     latent_vector: "np.ndarray | None" = None
     """User-controlled latent vector from slider mapping.
 
@@ -254,13 +263,15 @@ def _generate_chunks_from_vector(
     seed: int,
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
+    evolution_amount: float = 0.5,
 ) -> "np.ndarray":
-    """Generate audio from a user-provided latent vector.
+    """Generate continuous audio from a user-provided latent vector.
 
-    Uses the provided latent vector as a base.  For multi-chunk
-    generation, adds small random perturbations (scaled by 0.1) to
-    each chunk so longer audio has variation while staying in the
-    same latent-space region.
+    Builds a multi-anchor SLERP trajectory starting from the user's
+    slider position, with each anchor drifted toward a random target
+    by ``evolution_amount``.  The trajectory is decoded via overlap-add
+    continuous synthesis (50% Hann overlap), producing seamless audio
+    with no chunk boundaries.
 
     Parameters
     ----------
@@ -271,65 +282,62 @@ def _generate_chunks_from_vector(
     latent_vector : torch.Tensor
         1-D latent vector on the target device.
     num_chunks : int
-        Number of audio chunks to generate.
+        Target duration in chunks (each chunk_samples long).
     device : torch.device
         Device the model is on.
     seed : int
-        Random seed for reproducible per-chunk perturbations.
+        Random seed for reproducible evolution path.
     chunk_samples : int
         Number of audio samples per chunk (default 48000 = 1 s at 48 kHz).
     overlap_samples : int
-        Overlap for crossfade in samples (default 2400 = 50 ms at 48 kHz).
+        Kept for API compatibility.
+    evolution_amount : float
+        How far each anchor drifts from the starting vector (0-1).
+        0 = static, 1 = anchors are fully random targets.
 
     Returns
     -------
     np.ndarray
-        Concatenated audio as float32.
+        Audio as float32.
     """
     import torch  # noqa: WPS433 -- lazy import
     import numpy as np  # noqa: WPS433 -- lazy import
 
-    from distill.inference.chunking import crossfade_chunks
+    from distill.inference.chunking import (
+        slerp,
+        _compute_num_decode_steps,
+        _interpolate_trajectory,
+        synthesize_continuous_mel,
+    )
 
-    mel_shape = spectrogram.get_mel_shape(chunk_samples)
     torch.manual_seed(seed)
 
-    was_training = model.training
-    model.eval()
+    num_steps, _, _ = _compute_num_decode_steps(
+        spectrogram, num_chunks, chunk_samples,
+    )
 
-    waveforms: list[np.ndarray] = []
-    try:
-        with torch.no_grad():
-            for chunk_idx in range(num_chunks):
-                # Base vector with small perturbation for variety
-                if chunk_idx == 0:
-                    z = latent_vector.unsqueeze(0)  # [1, latent_dim]
-                else:
-                    perturbation = torch.randn_like(latent_vector) * 0.1
-                    z = (latent_vector + perturbation).unsqueeze(0)
+    if num_steps == 1 or evolution_amount == 0:
+        # Static: replicate user's vector for all decode steps
+        trajectory = [latent_vector.unsqueeze(0)] * max(num_steps, 1)
+    else:
+        # Multi-anchor trajectory: user's position + evolved anchors
+        # One anchor roughly every 1.5 seconds of audio
+        num_anchors = max(2, (num_chunks * 2 + 2) // 3)
 
-                # Ensure decoder is initialised
-                if model.decoder.fc is None:
-                    n_mels, time_frames = mel_shape
-                    pad_h = (16 - n_mels % 16) % 16
-                    pad_w = (16 - time_frames % 16) % 16
-                    spatial = (
-                        (n_mels + pad_h) // 16,
-                        (time_frames + pad_w) // 16,
-                    )
-                    model.decoder._init_linear(spatial)
+        anchors_1d = [latent_vector]
+        for _ in range(num_anchors - 1):
+            random_target = torch.randn_like(latent_vector)
+            anchor = slerp(latent_vector, random_target, evolution_amount)
+            anchors_1d.append(anchor)
 
-                # Decode latent vector to mel spectrogram
-                mel = model.decode(z, target_shape=mel_shape)
+        anchors = [a.unsqueeze(0) for a in anchors_1d]
+        trajectory = _interpolate_trajectory(anchors, num_steps)
 
-                # Convert mel to waveform on CPU
-                wav = spectrogram.mel_to_waveform(mel.cpu())
-                waveforms.append(wav.squeeze().numpy().astype(np.float32))
-    finally:
-        if was_training:
-            model.train()
-
-    return crossfade_chunks(waveforms, overlap_samples)
+    combined_mel = synthesize_continuous_mel(
+        model, spectrogram, trajectory, chunk_samples,
+    )
+    wav = spectrogram.mel_to_waveform(combined_mel)
+    return wav.squeeze().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +451,7 @@ class GenerationPipeline:
                 seed=seed_used,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                evolution_amount=config.evolution_amount,
             )
         elif config.concat_mode == "crossfade":
             audio = generate_chunks_crossfade(
@@ -593,6 +602,7 @@ class GenerationPipeline:
                 seed=seed_used + 1,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                evolution_amount=config.evolution_amount,
             )
         elif config.concat_mode == "crossfade":
             return generate_chunks_crossfade(

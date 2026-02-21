@@ -345,6 +345,13 @@ def build_library_tab() -> dict[str, Any]:
             )
             save_btn = gr.Button("Save to Library", variant="primary")
 
+        # Hidden textbox for card click -> dropdown selection (JS bridge)
+        card_selected_name = gr.Textbox(
+            value="",
+            visible=False,
+            elem_id="model-card-selected-name",
+        )
+
         # Card grid view (default visible)
         with gr.Column(visible=True) as card_section:
             card_html = gr.HTML(value=render_model_cards([]))
@@ -396,6 +403,8 @@ def build_library_tab() -> dict[str, Any]:
         outputs=refresh_outputs,
     )
 
+    # Card click -> load handled via cross-tab wiring in app.py
+
     # Load model
     load_btn.click(
         fn=_load_model_handler,
@@ -428,6 +437,7 @@ def build_library_tab() -> dict[str, Any]:
 
     return {
         "load_btn": load_btn,
+        "card_selected_name": card_selected_name,
         "model_dropdown": model_dropdown,
         "status_msg": status_msg,
     }

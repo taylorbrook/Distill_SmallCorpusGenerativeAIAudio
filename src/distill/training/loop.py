@@ -293,6 +293,7 @@ def train(
     resume_checkpoint: "Path | None" = None,
     models_dir: "Path | None" = None,
     dataset_name: str = "",
+    model_name: str = "",
 ) -> dict:
     """Full training orchestrator.
 
@@ -710,7 +711,7 @@ def train(
             from distill.models.persistence import ModelMetadata, save_model
 
             metadata = ModelMetadata(
-                name=dataset_name or "Untitled Model",
+                name=model_name or dataset_name or "Untitled Model",
                 dataset_name=dataset_name,
                 dataset_file_count=len(file_paths),
                 training_epochs=config.max_epochs,

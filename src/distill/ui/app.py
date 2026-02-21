@@ -94,21 +94,55 @@ def create_app(
             inputs=None,
             outputs=_train_outputs,
         )
+        data_refs["clear_event"].then(
+            fn=train_refs["check_dataset_ready"],
+            inputs=None,
+            outputs=_train_outputs,
+        )
 
         # After loading a model from Library, update Generate tab sliders.
         # The Library load handler sets app_state, then this chained event
         # reads app_state and updates slider visibility/labels.
+        _gen_slider_outputs = (
+            gen_refs["sliders"]
+            + [
+                gen_refs["preset_dd"],
+                gen_refs["controls_section"],
+                gen_refs["empty_msg"],
+            ]
+        )
+
         lib_refs["load_btn"].click(
             fn=_update_sliders_for_model,
             inputs=None,
-            outputs=(
-                gen_refs["sliders"]
-                + [
-                    gen_refs["preset_dd"],
-                    gen_refs["controls_section"],
-                    gen_refs["empty_msg"],
-                ]
-            ),
+            outputs=_gen_slider_outputs,
+        ).then(
+            fn=_refresh_blend_model_choices,
+            inputs=None,
+            outputs=gen_refs["blend_model_dds"],
+        )
+
+        # Card click -> select in dropdown, load model, update Generate sliders
+        from distill.ui.tabs.library_tab import _load_model_handler
+
+        def _card_click_select(name: str):
+            """Set dropdown to clicked card name."""
+            if not name:
+                return gr.update()
+            return gr.update(value=name)
+
+        lib_refs["card_selected_name"].change(
+            fn=_card_click_select,
+            inputs=[lib_refs["card_selected_name"]],
+            outputs=[lib_refs["model_dropdown"]],
+        ).then(
+            fn=_load_model_handler,
+            inputs=[lib_refs["model_dropdown"]],
+            outputs=[lib_refs["status_msg"]],
+        ).then(
+            fn=_update_sliders_for_model,
+            inputs=None,
+            outputs=_gen_slider_outputs,
         ).then(
             fn=_refresh_blend_model_choices,
             inputs=None,

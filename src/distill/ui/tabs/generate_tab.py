@@ -181,6 +181,7 @@ def _generate_audio(*args):
     spatial_width = args[MAX_SLIDERS + 2]
     spatial_depth = args[MAX_SLIDERS + 3]
     seed_val = args[MAX_SLIDERS + 4]
+    evolution = args[MAX_SLIDERS + 5]
 
     # Validate model loaded
     if app_state.loaded_model is None or app_state.pipeline is None:
@@ -204,7 +205,7 @@ def _generate_audio(*args):
             gr.update(),
         )
 
-    n_active = analysis.n_active_components
+    n_active = min(analysis.n_active_components, MAX_SLIDERS)
 
     # Build SliderState from slider values (only first N active)
     positions = [int(slider_values[i]) for i in range(n_active)]
@@ -230,6 +231,7 @@ def _generate_audio(*args):
         duration_s=float(duration),
         spatial=spatial_config,
         seed=seed,
+        evolution_amount=float(evolution),
     )
 
     # Check if blend engine has active models
@@ -400,7 +402,7 @@ def _save_preset(preset_name: str, *slider_values):
     if analysis is None:
         return gr.update(), "No model analysis available."
 
-    n_active = analysis.n_active_components
+    n_active = min(analysis.n_active_components, MAX_SLIDERS)
     positions = [int(slider_values[i]) for i in range(n_active)]
 
     app_state.preset_manager.save_preset(
@@ -892,6 +894,15 @@ def build_generate_tab() -> dict:
                 label="Spatial Depth",
                 visible=False,
             )
+        with gr.Row():
+            evolution_slider = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                step=0.05,
+                value=0.5,
+                label="Evolution (latent drift for multi-second audio)",
+                info="0 = static, 1 = maximum variation across chunks",
+            )
 
         # ----- Seed row -----
         with gr.Row():
@@ -1045,7 +1056,7 @@ def build_generate_tab() -> dict:
         outputs=[seed_input],
     )
 
-    # Generate audio (now uses output_mode, spatial_width, spatial_depth)
+    # Generate audio (now uses output_mode, spatial_width, spatial_depth, evolution)
     generate_btn.click(
         fn=_generate_audio,
         inputs=sliders + [
@@ -1054,6 +1065,7 @@ def build_generate_tab() -> dict:
             spatial_width_slider,
             spatial_depth_slider,
             seed_input,
+            evolution_slider,
         ],
         outputs=[audio_output, quality_badge, audio_output,
                  history_gallery, ab_dropdown_a, ab_dropdown_b],
