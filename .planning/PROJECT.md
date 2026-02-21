@@ -2,11 +2,23 @@
 
 ## What This Is
 
-A generative audio application that trains VAE models on small, personal audio datasets (5-500 files) and lets users explore the learned sound space through musically meaningful parameter controls mapped via PCA-based latent space analysis. Features a Gradio web UI and CLI, multi-format export (WAV/MP3/FLAC/OGG), spatial audio (stereo/binaural), multi-model blending, presets, generation history with A/B comparison, and model library management. The musical equivalent of Autolume — but for audio instead of visuals.
+A generative audio application that trains VQ-VAE models (Residual Vector Quantization) on small, personal audio datasets (5-500 files) and lets users explore discrete audio codes through a "sound DNA editor" — encoding existing audio into codebook entries, swapping/blending/editing codes between files, and decoding back. Includes an autoregressive prior for generating new code sequences. Features a Gradio web UI and CLI, multi-format export (WAV/MP3/FLAC/OGG), spatial audio (stereo/binaural), and model library management. The musical equivalent of Autolume — but for audio instead of visuals.
 
 ## Core Value
 
-Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters, generating audio that clearly comes from their own material while discovering new territory within it.
+Controllable exploration — users can reliably navigate between sound worlds using discrete audio codes and generative priors, generating audio that clearly comes from their own material while discovering new territory within it.
+
+## Current Milestone: v1.1 VQ-VAE
+
+**Goal:** Replace the continuous VAE with a Residual Vector Quantization architecture, add an autoregressive prior for generation, and build a code-manipulation UI for exploring discrete audio representations.
+
+**Target features:**
+- RVQ-VAE encoder/decoder with stacked codebooks (coarse-to-fine)
+- Codebook management: EMA updates, dead code resets, k-means init, dataset-scaled sizing
+- Autoregressive prior model for generating new code sequences
+- Code manipulation UI: encode audio → view/edit/swap/blend codes → decode
+- Updated training pipeline for VQ-VAE (replaces continuous VAE entirely)
+- Updated model persistence and library for VQ-VAE format
 
 ## Requirements
 
@@ -31,9 +43,17 @@ Controllable exploration — users can reliably navigate between sound worlds us
 
 ### Active
 
-- [ ] Incrementally add more training audio to an existing model
-- [ ] Feed generated outputs back into training data for iterative refinement
-- [ ] Bundle HRTF SOFA file for binaural mode (currently requires user download)
+- [ ] RVQ-VAE architecture replacing continuous VAE
+- [ ] Autoregressive prior model for code sequence generation
+- [ ] Code manipulation UI (encode, swap, blend, decode)
+- [ ] Updated training loop for VQ-VAE
+- [ ] Updated model persistence for VQ-VAE format
+
+### Deferred
+
+- Incrementally add more training audio to an existing model — deferred to future milestone
+- Feed generated outputs back into training data for iterative refinement — deferred to future milestone
+- Bundle HRTF SOFA file for binaural mode — deferred to future milestone
 
 ### Out of Scope
 
@@ -43,15 +63,18 @@ Controllable exploration — users can reliably navigate between sound worlds us
 - Mobile app — desktop/browser-first
 - DAW plugin (VST/AU) — standalone tool first, plugin integration later
 - Cloud-hosted training service — runs locally on user's hardware
-- OSC/MIDI controller mapping — deferred to v2
-- Multi-channel spatial audio (5.1, 7.1, ambisonic) — stereo/binaural sufficient for v1
+- OSC/MIDI controller mapping — deferred to future
+- Multi-channel spatial audio (5.1, 7.1, ambisonic) — stereo/binaural sufficient
+- Continuous latent space exploration (PCA sliders) — replaced by discrete code manipulation in v1.1
+- Multi-model blending — v1.0 feature, needs redesign for VQ-VAE codes
+- v1.0 model backward compatibility — clean break, VQ-VAE is a new architecture
 
 ## Context
 
 Shipped v1.0 with 17,520 LOC Python across 186 files.
 Tech stack: Python 3.13, PyTorch 2.10.0, TorchAudio, Gradio, Typer, Rich, soundfile, mutagen, sofar.
 Hardware: Apple Silicon (MPS), NVIDIA (CUDA), CPU fallback.
-Architecture: Convolutional VAE operating on mel spectrograms with PCA-based latent space analysis for musically meaningful parameter mapping.
+Architecture: v1.0 used Convolutional VAE on mel spectrograms with PCA-based latent space analysis. v1.1 replaces this with RVQ-VAE (Residual Vector Quantization) for discrete code representations plus an autoregressive prior for generation.
 
 **Inspiration:** Autolume (Metacreation Lab) — a no-code system for training StyleGAN on personal image datasets with interactive latent space exploration. This project applies the same philosophy to audio.
 
@@ -92,6 +115,10 @@ Architecture: Convolutional VAE operating on mel spectrograms with PCA-based lat
 | Atomic write pattern for all JSON indexes | Crash-safe writes with temp file + os.replace + .bak backup | ✓ Good — prevents data corruption |
 | PCA with 2% variance threshold | Conservative filter removes noise dimensions while preserving meaningful ones | ✓ Good — gives 4-8 meaningful sliders per model |
 | sofar library for HRTF/binaural | Standard SOFA format for head-related transfer functions | ⚠️ Revisit — requires user to download SOFA file |
+| Replace continuous VAE with RVQ-VAE | Discrete codes produce sharper reconstructions; eliminates KL-balancing complexity; enables code-level manipulation | — Pending |
+| Autoregressive prior over codes | Needed for generation from VQ-VAE (can't sample from N(0,1) like continuous VAE) | — Pending |
+| Clean break from v1.0 models | VQ-VAE is fundamentally different architecture; backward compat adds complexity for no benefit | — Pending |
+| lucidrains/vector-quantize-pytorch | Drop-in VQ/RVQ layers for PyTorch; well-maintained, widely used | — Pending |
 
 ---
-*Last updated: 2026-02-15 after v1.0 milestone*
+*Last updated: 2026-02-21 after v1.1 milestone start*
