@@ -1,7 +1,7 @@
 # Requirements: Small DataSet Audio
 
 **Defined:** 2026-02-21
-**Core Value:** Controllable exploration — users can reliably navigate between sound worlds using discrete audio codes and generative priors
+**Core Value:** Controllable exploration -- users can reliably navigate between sound worlds using discrete audio codes and generative priors
 
 ## v1.1 Requirements
 
@@ -96,46 +96,46 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VQVAE-01 | — | Pending |
-| VQVAE-02 | — | Pending |
-| VQVAE-03 | — | Pending |
-| VQVAE-04 | — | Pending |
-| VQVAE-05 | — | Pending |
-| VQVAE-06 | — | Pending |
-| VQVAE-07 | — | Pending |
-| GEN-01 | — | Pending |
-| GEN-02 | — | Pending |
-| GEN-03 | — | Pending |
-| GEN-04 | — | Pending |
-| GEN-05 | — | Pending |
-| GEN-06 | — | Pending |
-| CODE-01 | — | Pending |
-| CODE-02 | — | Pending |
-| CODE-03 | — | Pending |
-| CODE-04 | — | Pending |
-| CODE-05 | — | Pending |
-| CODE-06 | — | Pending |
-| CODE-07 | — | Pending |
-| CODE-08 | — | Pending |
-| CODE-09 | — | Pending |
-| PERS-01 | — | Pending |
-| PERS-02 | — | Pending |
-| PERS-03 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| UI-04 | — | Pending |
-| UI-05 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
+| VQVAE-01 | Phase 12 | Pending |
+| VQVAE-02 | Phase 12 | Pending |
+| VQVAE-03 | Phase 12 | Pending |
+| VQVAE-04 | Phase 13 | Pending |
+| VQVAE-05 | Phase 12 | Pending |
+| VQVAE-06 | Phase 12 | Pending |
+| VQVAE-07 | Phase 13 | Pending |
+| GEN-01 | Phase 14 | Pending |
+| GEN-02 | Phase 15 | Pending |
+| GEN-03 | Phase 15 | Pending |
+| GEN-04 | Phase 15 | Pending |
+| GEN-05 | Phase 14 | Pending |
+| GEN-06 | Phase 14 | Pending |
+| CODE-01 | Phase 16 | Pending |
+| CODE-02 | Phase 16 | Pending |
+| CODE-03 | Phase 16 | Pending |
+| CODE-04 | Phase 17 | Pending |
+| CODE-05 | Phase 17 | Pending |
+| CODE-06 | Phase 17 | Pending |
+| CODE-07 | Phase 16 | Pending |
+| CODE-08 | Phase 17 | Pending |
+| CODE-09 | Phase 16 | Pending |
+| PERS-01 | Phase 13 | Pending |
+| PERS-02 | Phase 14 | Pending |
+| PERS-03 | Phase 18 | Pending |
+| UI-01 | Phase 17 | Pending |
+| UI-02 | Phase 18 | Pending |
+| UI-03 | Phase 13 | Pending |
+| UI-04 | Phase 15 | Pending |
+| UI-05 | Phase 18 | Pending |
+| CLI-01 | Phase 13 | Pending |
+| CLI-02 | Phase 14 | Pending |
+| CLI-03 | Phase 18 | Pending |
+| CLI-04 | Phase 15 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 34 total
-- Mapped to phases: 0
-- Unmapped: 34
+- Mapped to phases: 34
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-21*
-*Last updated: 2026-02-21 after initial definition*
+*Last updated: 2026-02-21 after roadmap creation (traceability updated)*

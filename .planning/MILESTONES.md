@@ -22,3 +22,24 @@
 
 ---
 
+## v1.1 VQ-VAE (In Progress)
+
+**Goal:** Replace continuous VAE with RVQ-VAE architecture, add autoregressive prior for generation, build code manipulation UI for exploring discrete audio representations.
+
+**Phases:** 12-18 (7 phases, 34 requirements)
+**Started:** 2026-02-21
+
+**Key deliverables:**
+1. RVQ-VAE encoder/decoder with stacked codebooks and dataset-adaptive sizing
+2. Codebook health monitoring (utilization, perplexity, dead code detection)
+3. Autoregressive prior model for generating new code sequences
+4. Code manipulation UI: encode audio to codes, view/edit/swap/blend, decode back
+5. Updated training pipeline, model persistence (v2 format), and CLI
+6. Post-training diagnostics (usage heatmaps, health indicators)
+
+**Research flags:**
+- Empirical codebook sizing defaults need validation on 5/50/500 file datasets
+- LSTM vs. Transformer prior decision pending for small datasets
+- Gradio code grid editor has no established prior art
+
+---
