@@ -245,6 +245,18 @@ def save_model(
         n_active_components=metadata.n_active_components,
         tags=list(metadata.tags),
     )
+    # Populate vocoder info for catalog if vocoder state is bundled
+    if vocoder_state is not None:
+        from distill.library.catalog import VocoderInfo
+
+        training_meta = vocoder_state.get("training_metadata", {})
+        entry.vocoder = VocoderInfo(
+            type=vocoder_state.get("type", "hifigan_v2"),
+            epochs=training_meta.get("epochs", 0),
+            final_loss=training_meta.get("final_loss", 0.0),
+            training_date=training_meta.get("training_date", ""),
+        )
+
     library = ModelLibrary(models_dir)
     library.add_entry(entry)
 

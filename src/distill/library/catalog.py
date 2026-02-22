@@ -1,11 +1,12 @@
 """Model library catalog with JSON index management.
 
-Provides :class:`ModelEntry` (dataclass for per-model metadata) and
+Provides :class:`VocoderInfo` (vocoder training metadata),
+:class:`ModelEntry` (dataclass for per-model metadata) and
 :class:`ModelLibrary` (JSON-indexed catalog with search, filter, and
 atomic writes).
 
 The JSON index (``model_library.json``) stores lightweight metadata
-for every saved ``.distill`` model so that catalog browsing, searching,
+for every saved ``.distillgan`` model so that catalog browsing, searching,
 and filtering never require loading heavy model files via ``torch.load``.
 
 Design notes:
@@ -31,7 +32,22 @@ logger = logging.getLogger(__name__)
 _INDEX_FILENAME = "model_library.json"
 
 # Current index format version
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
+
+
+# ---------------------------------------------------------------------------
+# VocoderInfo
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VocoderInfo:
+    """Vocoder training metadata for catalog display."""
+
+    type: str  # "hifigan_v2" (future-proofed for other vocoder types)
+    epochs: int
+    final_loss: float
+    training_date: str  # ISO 8601
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +79,7 @@ class ModelEntry:
     has_analysis: bool
     n_active_components: int
     tags: list[str] = field(default_factory=list)
+    vocoder: VocoderInfo | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +149,7 @@ class ModelLibrary:
     Parameters
     ----------
     models_dir : Path
-        Directory containing ``.distill`` model files and the JSON index.
+        Directory containing ``.distillgan`` model files and the JSON index.
     """
 
     def __init__(self, models_dir: Path) -> None:
@@ -161,7 +178,9 @@ class ModelLibrary:
             entries: dict[str, ModelEntry] = {}
             for model_id, entry_dict in models_raw.items():
                 try:
-                    entries[model_id] = ModelEntry(**entry_dict)
+                    vocoder_raw = entry_dict.pop("vocoder", None)
+                    vocoder = VocoderInfo(**vocoder_raw) if vocoder_raw else None
+                    entries[model_id] = ModelEntry(**entry_dict, vocoder=vocoder)
                 except (TypeError, KeyError) as exc:
                     logger.warning(
                         "Skipping corrupt entry %s in index: %s",
@@ -330,8 +349,8 @@ class ModelLibrary:
     def repair_index(self) -> tuple[int, int]:
         """Check consistency between index and files on disk.
 
-        1. Remove entries whose ``.distill`` file is missing.
-        2. Scan for orphan ``.distill`` files not in the index and add
+        1. Remove entries whose ``.distillgan`` file is missing.
+        2. Scan for orphan ``.distillgan`` files not in the index and add
            them by reading metadata via ``torch.load``.
 
         Returns
@@ -345,7 +364,7 @@ class ModelLibrary:
         removed_count = 0
         added_count = 0
 
-        # 1. Remove entries whose .distill file is missing
+        # 1. Remove entries whose .distillgan file is missing
         stale_ids: list[str] = []
         for model_id, entry in self._entries.items():
             model_path = self.models_dir / entry.file_path
@@ -361,15 +380,15 @@ class ModelLibrary:
             del self._entries[model_id]
             removed_count += 1
 
-        # 2. Scan for orphan .distill files not in the index
+        # 2. Scan for orphan .distillgan files not in the index
         indexed_files = {e.file_path for e in self._entries.values()}
-        for sda_path in self.models_dir.glob("*.distill"):
+        for sda_path in self.models_dir.glob("*.distillgan"):
             rel_name = sda_path.name
             if rel_name in indexed_files:
                 continue
 
             logger.warning(
-                "Orphan .distill file not in index: %s -- adding",
+                "Orphan .distillgan file not in index: %s -- adding",
                 rel_name,
             )
             try:
@@ -392,12 +411,13 @@ class ModelLibrary:
                     has_analysis=meta.get("has_analysis", False),
                     n_active_components=meta.get("n_active_components", 0),
                     tags=meta.get("tags", []),
+                    vocoder=None,
                 )
                 self._entries[entry.model_id] = entry
                 added_count += 1
             except Exception as exc:
                 logger.warning(
-                    "Failed to read orphan .distill file %s: %s",
+                    "Failed to read orphan .distillgan file %s: %s",
                     rel_name,
                     exc,
                 )
