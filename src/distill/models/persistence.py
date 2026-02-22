@@ -95,6 +95,10 @@ class LoadedVQModel:
 
     No ``analysis`` field -- VQ-VAE replaces latent analysis with
     codebook health monitoring.
+
+    If the model has a trained prior (``has_prior=True`` in the saved
+    file), the :attr:`prior` field holds the reconstructed
+    :class:`~distill.models.prior.CodePrior` in eval mode.
     """
 
     model: "ConvVQVAE"
@@ -103,6 +107,9 @@ class LoadedVQModel:
     device: "torch.device"
     codebook_health: dict | None
     vqvae_config: dict | None
+    prior: "CodePrior | None" = None
+    prior_config: dict | None = None
+    prior_metadata: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +656,79 @@ def save_model_v2(
 
 
 # ---------------------------------------------------------------------------
+# Prior bundling into existing .sda / .distill files (v1.1 Phase 14)
+# ---------------------------------------------------------------------------
+
+
+def save_prior_to_model(
+    model_path: Path,
+    prior_model: "CodePrior",
+    prior_config: dict,
+    prior_metadata: dict,
+) -> Path:
+    """Bundle a trained prior into an existing v2 VQ-VAE model file.
+
+    Atomically updates the saved ``.distill`` file by writing to a
+    temporary file first, then replacing the original (per RESEARCH.md
+    pitfall 6: atomic write to avoid corruption).
+
+    Parameters
+    ----------
+    model_path : Path
+        Path to the existing ``.distill`` VQ-VAE v2 model file.
+    prior_model : CodePrior
+        Trained :class:`~distill.models.prior.CodePrior` model.
+    prior_config : dict
+        Prior configuration dict (hidden_size, num_layers, num_heads,
+        seq_len, num_quantizers, dropout).
+    prior_metadata : dict
+        Training metadata dict (epochs_trained, final_perplexity,
+        best_perplexity, training_date).
+
+    Returns
+    -------
+    Path
+        The same *model_path* (now updated with prior data).
+
+    Raises
+    ------
+    ValueError
+        If the file is not a valid v2 VQ-VAE model.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    model_path = Path(model_path)
+    saved = torch.load(model_path, map_location="cpu", weights_only=False)
+
+    # Validate format marker
+    if saved.get("format") != MODEL_FORMAT_MARKER:
+        raise ValueError(f"Not a valid .distill model file: {model_path}")
+
+    # Validate version and model type
+    version = saved.get("version", 0)
+    model_type = saved.get("model_type", "")
+    if version < 2 or model_type != "vqvae":
+        raise ValueError(
+            "Not a v2 VQ-VAE model. Prior can only be bundled into "
+            "v2 VQ-VAE model files."
+        )
+
+    # Add / update prior keys
+    saved["has_prior"] = True
+    saved["prior_state_dict"] = prior_model.state_dict()
+    saved["prior_config"] = prior_config
+    saved["prior_metadata"] = prior_metadata
+
+    # Atomic write: write to temp file, then replace
+    temp_path = model_path.with_suffix(".tmp")
+    torch.save(saved, temp_path)
+    os.replace(temp_path, model_path)
+
+    logger.info("Bundled prior into %s", model_path)
+    return model_path
+
+
+# ---------------------------------------------------------------------------
 # VQ-VAE v2 Load (v1.1)
 # ---------------------------------------------------------------------------
 
@@ -740,6 +820,40 @@ def load_model_v2(
     meta_dict = saved.get("metadata", {})
     metadata = ModelMetadata(**meta_dict)
 
+    # ------------------------------------------------------------------
+    # Reconstruct prior if present (Phase 14)
+    # ------------------------------------------------------------------
+    prior = None
+    prior_config_dict = None
+    prior_metadata_dict = None
+
+    if saved.get("has_prior", False):
+        from distill.models.prior import CodePrior  # lazy import
+
+        prior_config_dict = saved["prior_config"]
+        prior_metadata_dict = saved.get("prior_metadata")
+        codebook_size = vq_cfg.get("codebook_size", 256)
+
+        prior = CodePrior(
+            codebook_size=codebook_size,
+            seq_len=prior_config_dict["seq_len"],
+            num_quantizers=prior_config_dict["num_quantizers"],
+            hidden_size=prior_config_dict["hidden_size"],
+            num_layers=prior_config_dict["num_layers"],
+            num_heads=prior_config_dict["num_heads"],
+            dropout=prior_config_dict.get("dropout", 0.1),
+        )
+        prior.load_state_dict(saved["prior_state_dict"])
+        prior = prior.to(torch_device)
+        prior.eval()
+
+        logger.info(
+            "Loaded prior (hidden=%d, layers=%d) from %s",
+            prior_config_dict["hidden_size"],
+            prior_config_dict["num_layers"],
+            model_path,
+        )
+
     logger.info(
         "Loaded VQ-VAE model '%s' (v2) from %s onto %s",
         metadata.name,
@@ -754,4 +868,7 @@ def load_model_v2(
         device=torch_device,
         codebook_health=saved.get("codebook_health_snapshot"),
         vqvae_config=saved.get("vqvae_config"),
+        prior=prior,
+        prior_config=prior_config_dict,
+        prior_metadata=prior_metadata_dict,
     )
