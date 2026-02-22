@@ -3,6 +3,7 @@
 Public API
 ----------
 VocoderBase : Abstract base class for vocoder implementations.
+BigVGANVocoder : BigVGAN-v2 universal vocoder (122M params, 44.1kHz).
 get_vocoder : Factory function to obtain a ready-to-use vocoder.
 """
 
@@ -10,7 +11,16 @@ from __future__ import annotations
 
 from distill.vocoder.base import VocoderBase
 
-__all__ = ["VocoderBase", "get_vocoder"]
+__all__ = ["VocoderBase", "BigVGANVocoder", "get_vocoder"]
+
+
+def __getattr__(name: str):
+    """Lazy import for BigVGANVocoder to avoid loading torch at package import."""
+    if name == "BigVGANVocoder":
+        from distill.vocoder.bigvgan_vocoder import BigVGANVocoder
+
+        return BigVGANVocoder
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_vocoder(
@@ -30,7 +40,16 @@ def get_vocoder(
     VocoderBase
         Ready-to-use vocoder instance on the selected device.
     """
-    raise NotImplementedError(
-        f"Vocoder type '{vocoder_type}' not yet implemented. "
-        "BigVGAN implementation coming in plan 02."
-    )
+    if vocoder_type == "bigvgan":
+        # Lazy import to avoid loading torch at module import time
+        from distill.vocoder.bigvgan_vocoder import BigVGANVocoder
+
+        return BigVGANVocoder(device=device)
+    elif vocoder_type == "hifigan":
+        raise NotImplementedError(
+            "Per-model HiFi-GAN vocoder is planned for Phase 16."
+        )
+    else:
+        raise ValueError(
+            f"Unknown vocoder type: {vocoder_type!r}. Use 'bigvgan' or 'hifigan'."
+        )
