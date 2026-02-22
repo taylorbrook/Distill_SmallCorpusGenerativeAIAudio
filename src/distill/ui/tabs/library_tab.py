@@ -46,10 +46,13 @@ def _get_models(query: str = "") -> list:
 def _models_to_table(models: list) -> list[list]:
     """Convert ModelEntry list to a list-of-lists for gr.Dataframe.
 
-    Columns: Name, Dataset, Files, Epochs, Date, Components
+    Columns: Name, Dataset, Files, Epochs, Date, Components, Vocoder
     """
     rows = []
     for m in models:
+        vocoder_str = ""
+        if hasattr(m, "vocoder") and m.vocoder is not None:
+            vocoder_str = f"HiFi-GAN ({m.vocoder.epochs}ep)"
         rows.append([
             m.name,
             m.dataset_name or "",
@@ -57,6 +60,7 @@ def _models_to_table(models: list) -> list[list]:
             m.training_epochs,
             m.training_date[:10] if m.training_date else "",
             m.n_active_components,
+            vocoder_str,
         ])
     return rows
 
@@ -293,7 +297,7 @@ def _save_model_handler(name: str, description: str, tags_str: str) -> tuple:
 # Tab builder
 # ---------------------------------------------------------------------------
 
-_TABLE_HEADERS = ["Name", "Dataset", "Files", "Epochs", "Date", "Components"]
+_TABLE_HEADERS = ["Name", "Dataset", "Files", "Epochs", "Date", "Components", "Vocoder"]
 
 
 def build_library_tab() -> dict[str, Any]:
@@ -360,7 +364,7 @@ def build_library_tab() -> dict[str, Any]:
         with gr.Column(visible=False) as table_section:
             table_view = gr.Dataframe(
                 headers=_TABLE_HEADERS,
-                datatype=["str", "str", "number", "number", "str", "number"],
+                datatype=["str", "str", "number", "number", "str", "number", "str"],
                 interactive=False,
                 value=[],
             )

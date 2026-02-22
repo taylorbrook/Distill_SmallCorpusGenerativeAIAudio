@@ -704,7 +704,7 @@ def train(
     except Exception:
         logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
 
-    # Save as .distill model to the library
+    # Save as .distillgan model to the library
     saved_model_path = None
     if models_dir is not None:
         try:

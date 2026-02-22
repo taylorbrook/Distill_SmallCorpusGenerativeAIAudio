@@ -1,7 +1,7 @@
 """``distill generate`` command -- generate audio from trained models.
 
 Provides batch audio generation with model resolution (by name, ID, or
-``.distill`` file path), preset support, and configurable output options.
+``.distillgan`` file path), preset support, and configurable output options.
 Supports multi-format export (WAV/MP3/FLAC/OGG), spatial audio
 (mono/stereo/binaural), multi-model blending, and metadata embedding.
 
@@ -40,14 +40,14 @@ def resolve_model(
     """Resolve a model reference to a loaded model.
 
     Resolution order:
-    1. If ``model_ref`` ends in ``.distill`` and the path exists, load directly.
+    1. If ``model_ref`` ends in ``.distillgan`` and the path exists, load directly.
     2. Try UUID lookup via ``ModelLibrary.get()``.
     3. Try name search via ``ModelLibrary.search()``.
 
     Parameters
     ----------
     model_ref : str
-        Model name, ID, or ``.distill`` file path.
+        Model name, ID, or ``.distillgan`` file path.
     models_dir : Path
         Directory containing saved models.
     device : str
@@ -65,8 +65,15 @@ def resolve_model(
     """
     from distill.models.persistence import load_model
 
-    # 1. Direct .distill file path
+    # Reject v1 .distill format with clear error
     if model_ref.endswith(".distill"):
+        raise typer.BadParameter(
+            "This model was saved in v1 format (.distill) which is no longer "
+            "supported. Please retrain your model."
+        )
+
+    # 1. Direct .distillgan file path
+    if model_ref.endswith(".distillgan"):
         sda_path = Path(model_ref)
         if sda_path.exists():
             return load_model(sda_path, device=device)
@@ -145,7 +152,7 @@ def _parse_blend_arg(blend_str: str) -> tuple[str, float]:
 @app.callback(invoke_without_command=True)
 def generate(
     ctx: typer.Context,
-    model: str = typer.Argument(..., help="Model name, ID, or .distill file path"),
+    model: str = typer.Argument(..., help="Model name, ID, or .distillgan file path"),
     duration: float = typer.Option(
         1.0, "--duration", "-d", help="Duration in seconds (max 60)"
     ),

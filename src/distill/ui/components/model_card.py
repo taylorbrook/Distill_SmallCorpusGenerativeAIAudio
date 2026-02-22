@@ -66,6 +66,18 @@ def render_single_card(model: "ModelEntry") -> str:
         )
         tags_str = f'<div style="margin-top: 8px;">{tags_html}</div>'
 
+    vocoder_str = ""
+    if hasattr(model, "vocoder") and model.vocoder is not None:
+        vocoder_str = (
+            f'<p style="margin: 4px 0; font-size: 0.9em;">'
+            f'<span style="background: #d1fae5; color: #065f46; '
+            f'padding: 2px 8px; border-radius: 12px; font-size: 0.85em;">'
+            f"HiFi-GAN</span> "
+            f"{model.vocoder.epochs} epochs &middot; "
+            f"loss {model.vocoder.final_loss:.4f}"
+            f"</p>"
+        )
+
     return f"""\
 <div style="border: 1px solid #ddd; border-radius: 8px; padding: 16px;
             transition: box-shadow 0.2s, border-color 0.2s; cursor: pointer;"
@@ -91,7 +103,7 @@ def render_single_card(model: "ModelEntry") -> str:
     </p>
     <p style="margin: 4px 0; color: #666; font-size: 0.9em;">
         {components} components &middot; {size}
-    </p>{tags_str}
+    </p>{vocoder_str}{tags_str}
 </div>"""
 
 

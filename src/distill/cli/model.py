@@ -127,15 +127,20 @@ def list_models(
     table.add_column("Epochs", justify="right")
     table.add_column("Val Loss", justify="right")
     table.add_column("Saved")
+    table.add_column("Vocoder")
     table.add_column("ID", style="dim")
 
     for entry in entries:
+        vocoder_str = ""
+        if hasattr(entry, "vocoder") and entry.vocoder is not None:
+            vocoder_str = f"HiFi-GAN ({entry.vocoder.epochs}ep)"
         table.add_row(
             entry.name,
             entry.dataset_name,
             str(entry.training_epochs),
             f"{entry.final_val_loss:.4f}",
             entry.save_date[:10] if entry.save_date else "",
+            vocoder_str,
             entry.model_id[:8],
         )
 
@@ -149,7 +154,7 @@ def list_models(
 
 @app.command("info")
 def model_info(
-    model: str = typer.Argument(..., help="Model name, ID, or .distill file path"),
+    model: str = typer.Argument(..., help="Model name, ID, or .distillgan file path"),
     device: str = typer.Option("auto", "--device", help="Compute device"),
     config: Annotated[
         Optional[Path], typer.Option("--config", help="Config file path")
@@ -223,6 +228,17 @@ def model_info(
     table.add_row("Has Analysis", "Yes" if entry.has_analysis else "No")
     table.add_row("Active PCA Components", str(entry.n_active_components))
     table.add_row("Tags", ", ".join(entry.tags) if entry.tags else "(none)")
+    if hasattr(entry, "vocoder") and entry.vocoder is not None:
+        table.add_row(
+            "Vocoder",
+            f"HiFi-GAN ({entry.vocoder.epochs} epochs, loss {entry.vocoder.final_loss:.4f})",
+        )
+        table.add_row(
+            "Vocoder Trained",
+            entry.vocoder.training_date[:10] if entry.vocoder.training_date else "(unknown)",
+        )
+    else:
+        table.add_row("Vocoder", "(none)")
 
     panel = Panel(table, title=f"[bold]{entry.name}[/bold]", expand=False)
     console.print(panel)

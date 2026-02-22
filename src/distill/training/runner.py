@@ -97,7 +97,7 @@ class TrainingRunner:
         callback:
             Optional metrics event subscriber.
         models_dir:
-            Directory to save the .distill model file into.
+            Directory to save the .distillgan model file into.
         dataset_name:
             Name of the dataset (used for model metadata).
         model_name:
@@ -167,7 +167,7 @@ class TrainingRunner:
         callback:
             Optional metrics event subscriber.
         models_dir:
-            Directory to save the .distill model file into.
+            Directory to save the .distillgan model file into.
         dataset_name:
             Name of the dataset (used for model metadata).
         model_name:
