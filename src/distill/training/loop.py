@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from distill.audio.spectrogram import AudioSpectrogram
-    from distill.training.config import TrainingConfig
+    from distill.training.config import LossConfig, TrainingConfig
     from distill.training.metrics import MetricsCallback
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,8 @@ def train_epoch(
     kl_weight: float,
     device: "torch.device",
     gradient_clip_norm: float,
-    free_bits: float = 0.1,
+    loss_config: "LossConfig | None" = None,
+    stft_loss_fn: "torch.nn.Module | None" = None,
     epoch: int = 0,
     callback: "MetricsCallback | None" = None,
     cancel_event: "threading.Event | None" = None,
@@ -74,8 +75,12 @@ def train_epoch(
         Target device for computation.
     gradient_clip_norm:
         Maximum gradient L2 norm for clipping.
-    free_bits:
-        Minimum KL per latent dimension.
+    loss_config:
+        Combined loss configuration. If provided, uses
+        ``compute_combined_loss``; otherwise falls back to ``vae_loss``.
+    stft_loss_fn:
+        Pre-created MultiResolutionSTFTLoss module (required when
+        *loss_config* is provided).
     epoch:
         Current epoch number (for metrics).
     callback:
@@ -86,17 +91,23 @@ def train_epoch(
     Returns
     -------
     dict
-        ``{train_loss, recon_loss, kl_loss}`` averaged over all steps.
+        ``{train_loss, recon_loss, kl_loss, stft_loss, mag_recon_loss,
+        if_recon_loss}`` averaged over all steps.
     """
     import torch  # noqa: WPS433
 
-    from distill.models.losses import vae_loss
+    from distill.models.losses import compute_combined_loss, vae_loss
     from distill.training.metrics import StepMetrics
+
+    use_combined = loss_config is not None
 
     model.train()
     total_loss_sum = 0.0
     recon_loss_sum = 0.0
     kl_loss_sum = 0.0
+    stft_loss_sum = 0.0
+    mag_recon_loss_sum = 0.0
+    if_recon_loss_sum = 0.0
     valid_steps = 0
     total_steps = len(train_loader)
     lr = optimizer.param_groups[0]["lr"]
@@ -116,9 +127,25 @@ def train_epoch(
         recon, mu, logvar = model(mel)
 
         # Compute loss
-        total, recon_loss, kl_loss = vae_loss(
-            recon, mel, mu, logvar, kl_weight=kl_weight, free_bits=free_bits,
-        )
+        if use_combined:
+            loss_dict = compute_combined_loss(
+                recon, mel, mu, logvar, loss_config,
+                kl_weight=kl_weight, _stft_loss_fn=stft_loss_fn,
+            )
+            total = loss_dict["total_loss"]
+            recon_loss_val = loss_dict["recon_loss"]
+            kl_loss_val = loss_dict["kl_loss"]
+            stft_loss_val = loss_dict["stft_loss"]
+            mag_recon_val = loss_dict["mag_recon_loss"]
+            if_recon_val = loss_dict["if_recon_loss"]
+        else:
+            total, recon_loss_val, kl_loss_val = vae_loss(
+                recon, mel, mu, logvar, kl_weight=kl_weight,
+                free_bits=loss_config.kl.free_bits if loss_config else 0.1,
+            )
+            stft_loss_val = torch.zeros(1, device=device)
+            mag_recon_val = torch.zeros(1, device=device)
+            if_recon_val = torch.zeros(1, device=device)
 
         # NaN detection: skip bad gradient updates (MPS stability)
         if total.isnan():
@@ -148,8 +175,11 @@ def train_epoch(
 
         # Accumulate
         total_loss_sum += total.item()
-        recon_loss_sum += recon_loss.item()
-        kl_loss_sum += kl_loss.item()
+        recon_loss_sum += recon_loss_val.item()
+        kl_loss_sum += kl_loss_val.item()
+        stft_loss_sum += stft_loss_val.item()
+        mag_recon_loss_sum += mag_recon_val.item()
+        if_recon_loss_sum += if_recon_val.item()
         valid_steps += 1
 
         step_time = time.time() - step_start
@@ -158,9 +188,9 @@ def train_epoch(
         if step % 10 == 0 or epoch == 0:
             print(
                 f"[TRAIN] Epoch {epoch} step {step + 1}/{total_steps}  "
-                f"loss={total.item():.4f}  recon={recon_loss.item():.4f}  "
-                f"kl={kl_loss.item():.4f}  kl_w={kl_weight:.3f}  "
-                f"step_time={step_time:.2f}s",
+                f"loss={total.item():.4f}  stft={stft_loss_val.item():.4f}  "
+                f"recon={recon_loss_val.item():.4f}  kl={kl_loss_val.item():.4f}  "
+                f"kl_w={kl_weight:.3f}  step_time={step_time:.2f}s",
                 flush=True,
             )
 
@@ -168,9 +198,12 @@ def train_epoch(
         if callback is not None:
             callback(StepMetrics(
                 epoch=epoch, step=step, total_steps=total_steps,
-                train_loss=total.item(), recon_loss=recon_loss.item(),
-                kl_loss=kl_loss.item(), kl_weight=kl_weight,
+                train_loss=total.item(), recon_loss=recon_loss_val.item(),
+                kl_loss=kl_loss_val.item(), kl_weight=kl_weight,
                 learning_rate=lr, step_time_s=step_time,
+                stft_loss=stft_loss_val.item(),
+                mag_recon_loss=mag_recon_val.item(),
+                if_recon_loss=if_recon_val.item(),
             ))
 
     # Average over valid steps
@@ -178,15 +211,24 @@ def train_epoch(
         avg_loss = total_loss_sum / valid_steps
         avg_recon = recon_loss_sum / valid_steps
         avg_kl = kl_loss_sum / valid_steps
+        avg_stft = stft_loss_sum / valid_steps
+        avg_mag_recon = mag_recon_loss_sum / valid_steps
+        avg_if_recon = if_recon_loss_sum / valid_steps
     else:
         avg_loss = float("nan")
         avg_recon = float("nan")
         avg_kl = float("nan")
+        avg_stft = float("nan")
+        avg_mag_recon = float("nan")
+        avg_if_recon = float("nan")
 
     return {
         "train_loss": avg_loss,
         "recon_loss": avg_recon,
         "kl_loss": avg_kl,
+        "stft_loss": avg_stft,
+        "mag_recon_loss": avg_mag_recon,
+        "if_recon_loss": avg_if_recon,
     }
 
 
@@ -200,7 +242,8 @@ def validate_epoch(
     val_loader: "DataLoader",
     kl_weight: float,
     device: "torch.device",
-    free_bits: float = 0.1,
+    loss_config: "LossConfig | None" = None,
+    stft_loss_fn: "torch.nn.Module | None" = None,
 ) -> dict:
     """Run one validation epoch.
 
@@ -215,23 +258,33 @@ def validate_epoch(
         Current KL annealing weight.
     device:
         Target device for computation.
-    free_bits:
-        Minimum KL per latent dimension.
+    loss_config:
+        Combined loss configuration. If provided, uses
+        ``compute_combined_loss``; otherwise falls back to ``vae_loss``.
+    stft_loss_fn:
+        Pre-created MultiResolutionSTFTLoss module (required when
+        *loss_config* is provided).
 
     Returns
     -------
     dict
-        ``{val_loss, val_recon_loss, val_kl_loss, kl_divergence}``.
+        ``{val_loss, val_recon_loss, val_kl_loss, kl_divergence,
+        val_stft_loss, val_mag_recon_loss, val_if_recon_loss}``.
     """
     import torch  # noqa: WPS433
 
-    from distill.models.losses import compute_kl_divergence, vae_loss
+    from distill.models.losses import compute_combined_loss, compute_kl_divergence, vae_loss
+
+    use_combined = loss_config is not None
 
     model.eval()
     total_loss_sum = 0.0
     recon_loss_sum = 0.0
     kl_loss_sum = 0.0
     kl_div_sum = 0.0
+    stft_loss_sum = 0.0
+    mag_recon_loss_sum = 0.0
+    if_recon_loss_sum = 0.0
     num_batches = 0
 
     with torch.no_grad():
@@ -240,17 +293,37 @@ def validate_epoch(
             mel = batch.to(device)
 
             recon, mu, logvar = model(mel)
-            total, recon_loss, kl_loss = vae_loss(
-                recon, mel, mu, logvar, kl_weight=kl_weight, free_bits=free_bits,
-            )
+
+            if use_combined:
+                loss_dict = compute_combined_loss(
+                    recon, mel, mu, logvar, loss_config,
+                    kl_weight=kl_weight, _stft_loss_fn=stft_loss_fn,
+                )
+                total = loss_dict["total_loss"]
+                recon_loss_val = loss_dict["recon_loss"]
+                kl_loss_val = loss_dict["kl_loss"]
+                stft_loss_val = loss_dict["stft_loss"]
+                mag_recon_val = loss_dict["mag_recon_loss"]
+                if_recon_val = loss_dict["if_recon_loss"]
+            else:
+                total, recon_loss_val, kl_loss_val = vae_loss(
+                    recon, mel, mu, logvar, kl_weight=kl_weight,
+                    free_bits=loss_config.kl.free_bits if loss_config else 0.1,
+                )
+                stft_loss_val = torch.zeros(1, device=device)
+                mag_recon_val = torch.zeros(1, device=device)
+                if_recon_val = torch.zeros(1, device=device)
 
             # Raw KL divergence for posterior collapse monitoring
             raw_kl = compute_kl_divergence(mu, logvar)
 
             total_loss_sum += total.item()
-            recon_loss_sum += recon_loss.item()
-            kl_loss_sum += kl_loss.item()
+            recon_loss_sum += recon_loss_val.item()
+            kl_loss_sum += kl_loss_val.item()
             kl_div_sum += raw_kl
+            stft_loss_sum += stft_loss_val.item()
+            mag_recon_loss_sum += mag_recon_val.item()
+            if_recon_loss_sum += if_recon_val.item()
             num_batches += 1
 
     model.train()
@@ -261,6 +334,9 @@ def validate_epoch(
             "val_recon_loss": recon_loss_sum / num_batches,
             "val_kl_loss": kl_loss_sum / num_batches,
             "kl_divergence": kl_div_sum / num_batches,
+            "val_stft_loss": stft_loss_sum / num_batches,
+            "val_mag_recon_loss": mag_recon_loss_sum / num_batches,
+            "val_if_recon_loss": if_recon_loss_sum / num_batches,
         }
 
     return {
@@ -268,6 +344,9 @@ def validate_epoch(
         "val_recon_loss": float("nan"),
         "val_kl_loss": float("nan"),
         "kl_divergence": 0.0,
+        "val_stft_loss": float("nan"),
+        "val_mag_recon_loss": float("nan"),
+        "val_if_recon_loss": float("nan"),
     }
 
 
@@ -319,7 +398,7 @@ def train(
     import torch  # noqa: WPS433
 
     from distill.audio.spectrogram import AudioSpectrogram, SpectrogramConfig
-    from distill.models.losses import get_kl_weight
+    from distill.models.losses import create_stft_loss, get_kl_weight
     from distill.models.vae import ConvVAE
     from distill.training.checkpoint import (
         get_best_checkpoint,
@@ -455,6 +534,22 @@ def train(
     )
 
     # -----------------------------------------------------------------
+    # Create STFT loss module (once, reused every epoch)
+    # -----------------------------------------------------------------
+    stft_loss_fn = create_stft_loss(config.loss, device)
+
+    # Log loss configuration summary
+    print(
+        f"[TRAIN] Loss config: STFT weight={config.loss.stft.weight}, "
+        f"recon weight={config.loss.reconstruction.weight} "
+        f"(mag={config.loss.reconstruction.magnitude_weight}, "
+        f"IF={config.loss.reconstruction.if_weight}), "
+        f"KL max={config.loss.kl.weight_max}, "
+        f"STFT resolutions={config.loss.stft.fft_sizes}",
+        flush=True,
+    )
+
+    # -----------------------------------------------------------------
     # Training loop
     # -----------------------------------------------------------------
     effective_preview_interval = get_effective_preview_interval(config)
@@ -464,10 +559,10 @@ def train(
         epoch_start = time.time()
         print(f"[TRAIN] Starting epoch {epoch + 1}/{config.max_epochs}", flush=True)
 
-        # KL weight (annealing)
+        # KL weight (annealing) -- use nested loss config values
         kl_weight = get_kl_weight(
-            epoch, config.max_epochs, config.kl_warmup_fraction,
-            kl_weight_max=config.kl_weight_max,
+            epoch, config.max_epochs, config.loss.kl.warmup_fraction,
+            kl_weight_max=config.loss.kl.weight_max,
         )
 
         # Train epoch
@@ -478,7 +573,8 @@ def train(
             kl_weight=kl_weight,
             device=device,
             gradient_clip_norm=config.regularization.gradient_clip_norm,
-            free_bits=config.free_bits,
+            loss_config=config.loss,
+            stft_loss_fn=stft_loss_fn,
             epoch=epoch,
             callback=callback,
             cancel_event=cancel_event,
@@ -515,7 +611,8 @@ def train(
             val_loader=val_loader,
             kl_weight=kl_weight,
             device=device,
-            free_bits=config.free_bits,
+            loss_config=config.loss,
+            stft_loss_fn=stft_loss_fn,
         )
 
         # Step scheduler
@@ -551,11 +648,26 @@ def train(
             learning_rate=current_lr,
             eta_seconds=eta,
             elapsed_seconds=elapsed,
+            val_stft_loss=val_results.get("val_stft_loss", 0.0),
+            val_mag_recon_loss=val_results.get("val_mag_recon_loss", 0.0),
+            val_if_recon_loss=val_results.get("val_if_recon_loss", 0.0),
         )
         metrics_history.add_epoch(epoch_metrics)
 
         if callback is not None:
             callback(epoch_metrics)
+
+        # Divergence detection: warn if total loss increases for N consecutive epochs
+        consecutive_increase_threshold = 5
+        if len(metrics_history.epoch_metrics) >= consecutive_increase_threshold:
+            recent = metrics_history.epoch_metrics[-consecutive_increase_threshold:]
+            losses = [m.train_loss for m in recent]
+            if all(losses[i] < losses[i + 1] for i in range(len(losses) - 1)):
+                logger.warning(
+                    "DIVERGENCE WARNING: Total loss has increased for %d consecutive epochs "
+                    "(%.4f -> %.4f). Consider reducing learning rate or adjusting loss weights.",
+                    consecutive_increase_threshold, losses[0], losses[-1],
+                )
 
         # Overfitting warning
         if overfitting_gap > 0.2:
@@ -645,8 +757,8 @@ def train(
     final_train = metrics_history.epoch_metrics[-1].train_loss if metrics_history.epoch_metrics else 0.0
     final_val = metrics_history.epoch_metrics[-1].val_loss if metrics_history.epoch_metrics else 0.0
     final_kl = get_kl_weight(
-        final_epoch, config.max_epochs, config.kl_warmup_fraction,
-        kl_weight_max=config.kl_weight_max,
+        final_epoch, config.max_epochs, config.loss.kl.warmup_fraction,
+        kl_weight_max=config.loss.kl.weight_max,
     )
 
     _save_checkpoint_safe(
