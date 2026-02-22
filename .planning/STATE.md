@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 14 of 18 (Autoregressive Prior)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In Progress
-Last activity: 2026-02-22 -- Completed 14-01-PLAN.md (CodePrior model + adaptive config)
+Last activity: 2026-02-22 -- Completed 14-02-PLAN.md (Prior training loop + memorization detection)
 
-Progress: [==============░░░░░░] 71% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14: 1/3)
+Progress: [===============░░░░░] 73% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14: 2/3)
 
 ## Performance Metrics
 
@@ -39,12 +39,13 @@ Progress: [==============░░░░░░] 71% (v1.0 complete, Phase 12 comple
 | 13 | 02 | 5 min | 2 | 2 |
 | 13 | 03 | 2 min | 1 | 1 |
 | 14 | 01 | 3 min | 2 | 2 |
+| 14 | 02 | 4 min | 2 | 2 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
-- v1.1 Phase 14: In progress (1/3 plans, 3 min so far)
+- v1.1 Phase 14: In progress (2/3 plans, 7 min so far)
 - Trend: Stable
 
 ## Accumulated Context
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - 14-01: Transformer prior (not LSTM) -- nn.TransformerEncoder + explicit causal mask for GPT-style decoder-only
 - 14-01: Level embedding disambiguates RVQ quantizer levels in flattened code sequences
 - 14-01: 3-tier adaptive prior scaling: <=20 files (128h/2L), 21-100 (256h/4L), >100 (512h/6L)
+- 14-02: VQ-VAE frozen and only used for code extraction -- prior trains on pre-extracted tensors
+- 14-02: Memorization thresholds relaxed and adaptive: 2.0/3.0/5.0 by dataset tier (<=20/<=100/>100 files)
+- 14-02: Best checkpoint tracked via deepcopy(state_dict) in memory (prior models are small)
 
 ### Pending Todos
 
@@ -96,5 +100,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 14-01-PLAN.md -- CodePrior model + adaptive config. Phase 14 in progress (1/3 plans).
+Stopped at: Completed 14-02-PLAN.md -- Prior training loop + memorization detection. Phase 14 in progress (2/3 plans).
 Resume file: None

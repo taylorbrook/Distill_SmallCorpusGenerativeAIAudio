@@ -24,7 +24,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 - [ ] **GEN-03**: User can control generation with top-k and nucleus (top-p) sampling
 - [ ] **GEN-04**: Prior generates multi-chunk audio with overlap-add stitching (existing pipeline)
 - [ ] **GEN-05**: Prior model is bundled in the saved model file alongside the VQ-VAE
-- [ ] **GEN-06**: Prior training detects memorization (validation perplexity monitoring)
+- [x] **GEN-06**: Prior training detects memorization (validation perplexity monitoring)
 
 ### Code Manipulation
 
@@ -108,7 +108,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-03 | Phase 15 | Pending |
 | GEN-04 | Phase 15 | Pending |
 | GEN-05 | Phase 14 | Pending |
-| GEN-06 | Phase 14 | Pending |
+| GEN-06 | Phase 14 | Complete |
 | CODE-01 | Phase 16 | Pending |
 | CODE-02 | Phase 16 | Pending |
 | CODE-03 | Phase 16 | Pending |
