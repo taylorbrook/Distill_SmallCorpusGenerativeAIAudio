@@ -5,6 +5,10 @@ Public API re-exports from all training submodules:
 :mod:`preview`, :mod:`loop`, and :mod:`runner`.
 """
 
+# ---------------------------------------------------------------------------
+# v1.0 exports
+# ---------------------------------------------------------------------------
+
 from distill.training.checkpoint import (
     get_best_checkpoint,
     list_checkpoints,
@@ -39,35 +43,64 @@ from distill.training.preview import (
 )
 from distill.training.runner import TrainingRunner
 
+# ---------------------------------------------------------------------------
+# v1.1 exports (VQ-VAE training) -- added in Phase 13
+# ---------------------------------------------------------------------------
+
+from distill.training.checkpoint import (
+    load_vqvae_checkpoint,
+    save_vqvae_checkpoint,
+)
+from distill.training.config import VQVAEConfig, get_adaptive_vqvae_config
+from distill.training.loop import train_vqvae, train_vqvae_epoch, validate_vqvae_epoch
+from distill.training.metrics import VQEpochMetrics, VQMetricsHistory, VQStepMetrics
+from distill.training.preview import generate_vqvae_reconstruction_preview
+
 __all__ = [
-    # config.py
+    # config.py (v1.0)
     "TrainingConfig",
     "OverfittingPreset",
     "RegularizationConfig",
     "get_adaptive_config",
     "get_effective_preview_interval",
+    # config.py (v1.1)
+    "VQVAEConfig",
+    "get_adaptive_vqvae_config",
     # dataset.py
     "AudioTrainingDataset",
     "create_data_loaders",
-    # metrics.py
+    # metrics.py (v1.0)
     "StepMetrics",
     "EpochMetrics",
     "PreviewEvent",
     "TrainingCompleteEvent",
     "MetricsHistory",
     "MetricsCallback",
-    # checkpoint.py
+    # metrics.py (v1.1)
+    "VQStepMetrics",
+    "VQEpochMetrics",
+    "VQMetricsHistory",
+    # checkpoint.py (v1.0)
     "save_checkpoint",
     "load_checkpoint",
     "manage_checkpoints",
     "get_best_checkpoint",
     "list_checkpoints",
-    # preview.py
+    # checkpoint.py (v1.1)
+    "save_vqvae_checkpoint",
+    "load_vqvae_checkpoint",
+    # preview.py (v1.0)
     "generate_preview",
     "generate_reconstruction_preview",
     "list_previews",
-    # loop.py
+    # preview.py (v1.1)
+    "generate_vqvae_reconstruction_preview",
+    # loop.py (v1.0)
     "train",
+    # loop.py (v1.1)
+    "train_vqvae",
+    "train_vqvae_epoch",
+    "validate_vqvae_epoch",
     # runner.py
     "TrainingRunner",
 ]
