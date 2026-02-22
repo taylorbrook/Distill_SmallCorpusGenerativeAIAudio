@@ -48,7 +48,11 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   3. Vocoder inference produces audio on CUDA, MPS (Apple Silicon), and CPU without error
   4. BigVGAN source code is vendored in the repository with a pinned version (not installed via pip)
   5. The mel adapter correctly converts VAE's log1p-normalized mels to BigVGAN's log-clamp format (no muffled or distorted output)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 12-01-PLAN.md — Vendor BigVGAN source code and create vocoder interface
+- [ ] 12-02-PLAN.md — Implement BigVGAN vocoder wrapper and weight manager
+- [ ] 12-03-PLAN.md — Implement mel adapter and verify audio quality
 
 ### Phase 13: Model Persistence v2
 **Goal**: The .distill model format supports optional per-model vocoder state while all existing v1.0 models continue to load without error
@@ -111,7 +115,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. Vocoder Interface & BigVGAN Integration | v1.1 | 0/TBD | Not started | - |
+| 12. Vocoder Interface & BigVGAN Integration | v1.1 | 0/3 | Planned | - |
 | 13. Model Persistence v2 | v1.1 | 0/TBD | Not started | - |
 | 14. Generation Pipeline Integration | v1.1 | 0/TBD | Not started | - |
 | 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
@@ -119,4 +123,4 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after v1.1 milestone roadmap creation*
+*Last updated: 2026-02-21 after Phase 12 planning*
