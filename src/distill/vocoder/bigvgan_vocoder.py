@@ -4,10 +4,9 @@ Wraps the vendored NVIDIA BigVGAN source code, providing automatic
 weight downloading, cross-platform device support, and the standard
 VocoderBase interface for mel-to-waveform conversion.
 
-IMPORTANT: This module accepts mel spectrograms that are ALREADY in
-BigVGAN's expected format (log-clamp, Slaney, 44.1kHz). The MelAdapter
-(Plan 03) handles conversion from VAE format. Direct callers must
-provide correctly formatted mels.
+Accepts VAE-format mel spectrograms [B, 1, 128, T] in log1p format
+and uses MelAdapter to convert them to BigVGAN's expected format
+(log-clamp, Slaney, 44.1kHz) before inference.
 """
 
 from __future__ import annotations
@@ -104,19 +103,21 @@ class BigVGANVocoder(VocoderBase):
         self._model.to(self._device)
         logger.info("BigVGAN model loaded and ready on %s", self._device)
 
+        # MelAdapter is created lazily on first mel_to_waveform call
+        self._mel_adapter = None
+
     def mel_to_waveform(self, mel: torch.Tensor) -> torch.Tensor:
         """Convert mel spectrogram to waveform.
 
-        NOTE: At this stage, this method expects mels in BigVGAN's native
-        format: log(clamp(slaney_mel, 1e-5)), shape [B, 128, T].
-        Plan 03 adds the MelAdapter that converts VAE format automatically.
-
-        After Plan 03: Accepts VAE format [B, 1, 128, T] log1p mels.
+        Accepts VAE-format mel spectrograms [B, 1, 128, T] in log1p format.
+        Internally converts to BigVGAN format via MelAdapter (waveform
+        round-trip: Griffin-Lim -> resample -> BigVGAN mel computation).
 
         Parameters
         ----------
         mel : torch.Tensor
-            Mel spectrogram in BigVGAN format. Shape: [B, 128, T].
+            VAE output mel spectrogram in log1p format.
+            Shape: [B, 1, 128, T]
 
         Returns
         -------
@@ -125,10 +126,22 @@ class BigVGANVocoder(VocoderBase):
         """
         import torch
 
-        mel = mel.to(self._device)
+        # Lazy-initialize MelAdapter on first call to avoid loading
+        # AudioSpectrogram infrastructure until actually needed.
+        if self._mel_adapter is None:
+            from distill.vocoder.mel_adapter import MelAdapter
+
+            self._mel_adapter = MelAdapter()
+            logger.info("MelAdapter initialized (lazy, on first mel_to_waveform call)")
+
+        # Convert VAE mel [B, 1, 128, T] -> BigVGAN mel [B, 128, T']
+        mel_bigvgan = self._mel_adapter.convert(mel)
+
+        # Move to model device and run BigVGAN inference
+        mel_bigvgan = mel_bigvgan.to(self._device)
 
         with torch.inference_mode():
-            wav = self._model(mel)  # [B, 1, T*512]
+            wav = self._model(mel_bigvgan)  # [B, 1, T'*512]
 
         return wav
 
