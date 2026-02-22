@@ -40,6 +40,7 @@ from distill.audio.thumbnails import (
 from distill.audio.spectrogram import (
     SpectrogramConfig,
     AudioSpectrogram,
+    ComplexSpectrogram,
 )
 from distill.audio.filters import (
     apply_anti_alias_filter,
@@ -86,6 +87,7 @@ __all__ = [
     # spectrogram.py
     "SpectrogramConfig",
     "AudioSpectrogram",
+    "ComplexSpectrogram",
     # filters.py
     "apply_anti_alias_filter",
     # hrtf.py

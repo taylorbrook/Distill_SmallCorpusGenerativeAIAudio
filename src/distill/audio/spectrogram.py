@@ -4,6 +4,9 @@ Converts between raw waveforms and normalized log-mel spectrograms.
 All audio entering or leaving the VAE passes through this module,
 ensuring consistent mel parameters (n_fft, n_mels, hop_length, sample_rate).
 
+v2.0 adds :class:`ComplexSpectrogram` which computes 2-channel
+magnitude + instantaneous frequency (IF) spectrograms in mel domain.
+
 Design notes:
 - Lazy-imports torchaudio.transforms inside ``__init__`` (project pattern).
 - ``InverseMelScale`` runs on CPU to avoid ``torch.linalg.lstsq`` issues on MPS.
@@ -12,6 +15,7 @@ Design notes:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -150,3 +154,253 @@ class AudioSpectrogram:
         # torchaudio pads by n_fft // 2 on each side, then applies hop_length
         time_frames = num_samples // c.hop_length + 1
         return (c.n_mels, time_frames)
+
+
+# ======================================================================
+# v2.0 -- 2-Channel Complex Spectrogram (Magnitude + IF)
+# ======================================================================
+
+
+class ComplexSpectrogram:
+    """Convert waveforms to 2-channel magnitude + instantaneous frequency spectrograms.
+
+    Channel 0 is a log-mel magnitude spectrogram (same as v1.0).
+    Channel 1 is instantaneous frequency (IF) projected into mel domain
+    and normalised to ``[-1, 1]``.  IF values in low-amplitude bins are
+    masked to zero because phase is meaningless noise there.
+
+    Parameters
+    ----------
+    config : ComplexSpectrogramConfig
+        Configuration for STFT parameters and IF masking.  Imported from
+        :mod:`distill.training.config`.  This is the **single source of
+        truth** for STFT parameters in v2.0 code paths.
+    """
+
+    def __init__(self, config: "ComplexSpectrogramConfig") -> None:
+        import torch  # noqa: WPS433 -- lazy import
+        from torchaudio.transforms import MelScale, MelSpectrogram
+
+        self.config = config
+        self.if_masking_threshold = config.if_masking_threshold
+
+        self.mel_transform = MelSpectrogram(
+            sample_rate=48_000,  # project default
+            n_fft=config.n_fft,
+            hop_length=config.hop_length,
+            n_mels=config.n_mels,
+            power=2.0,
+        )
+
+        self.mel_scale = MelScale(
+            n_mels=config.n_mels,
+            sample_rate=48_000,
+            n_stft=config.n_fft // 2 + 1,
+        )
+
+        # Pre-compute per-mel-bin weight sums for proper weighted averaging.
+        # MelScale.fb is [n_stft, n_mels]; sum across frequency axis gives
+        # total weight per mel bin.  Used to normalise IF mel projection so
+        # that the result is a true energy-weighted average (stays in [-1,1]).
+        fb_sum = self.mel_scale.fb.sum(dim=0)  # [n_mels]
+        fb_sum = fb_sum.clamp(min=1e-10)  # avoid division by zero
+        self._mel_fb_sum = fb_sum  # [n_mels]
+
+        # Pre-create a hann window for STFT to avoid spectral leakage warning
+        self._stft_window = torch.hann_window(config.n_fft)
+
+        self._torch = torch
+        self._pi = math.pi
+
+    # ------------------------------------------------------------------
+    # Forward: waveform -> 2-channel mel (magnitude + IF)
+    # ------------------------------------------------------------------
+
+    def waveform_to_complex_mel(self, waveform: "torch.Tensor") -> "torch.Tensor":
+        """Convert mono waveform to 2-channel magnitude + IF spectrogram.
+
+        Parameters
+        ----------
+        waveform : torch.Tensor
+            Shape ``[B, 1, samples]`` -- batch of mono waveforms.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``[B, 2, n_mels, time]`` where channel 0 is log-mel
+            magnitude and channel 1 is instantaneous frequency in
+            ``[-1, 1]`` range, both in mel domain.
+        """
+        torch = self._torch
+        pi = self._pi
+
+        # Squeeze channel dim: [B, 1, samples] -> [B, samples]
+        wav = waveform.squeeze(1)
+
+        # -- Step 1: Mel magnitude (log1p normalised) ----------------------
+        mel_power = self.mel_transform(wav)  # [B, n_mels, time]
+        mel_mag = torch.log1p(mel_power)     # log(1 + x), non-negative
+
+        # -- Step 2: STFT -> complex -> phase ------------------------------
+        window = self._stft_window.to(wav.device)
+        stft_complex = torch.stft(
+            wav,
+            n_fft=self.config.n_fft,
+            hop_length=self.config.hop_length,
+            window=window,
+            return_complex=True,
+        )  # [B, n_fft//2+1, time_stft]
+        phase = torch.angle(stft_complex)  # [B, n_fft//2+1, time_stft]
+
+        # -- Step 3: Instantaneous frequency (phase difference) ------------
+        # Prepend zero for first frame so output length matches
+        phase_diff = torch.diff(phase, dim=-1)
+        zero_pad = torch.zeros_like(phase[:, :, :1])
+        phase_diff = torch.cat([zero_pad, phase_diff], dim=-1)
+
+        # Unwrap to [-pi, pi]
+        if_linear = torch.remainder(phase_diff + pi, 2.0 * pi) - pi
+        # Normalise to [-1, 1]
+        if_linear = if_linear / pi
+
+        # -- Step 4: Project IF to mel scale -------------------------------
+        # MelScale applies the filterbank matrix (weighted sum).  Divide by
+        # the per-mel-bin weight sums to get a proper weighted average so
+        # that IF values stay in [-1, 1].
+        if_mel = self.mel_scale(if_linear)  # [B, n_mels, time_stft]
+        fb_sum = self._mel_fb_sum.to(if_mel.device)
+        if_mel = if_mel / fb_sum.unsqueeze(0).unsqueeze(-1)  # [B, n_mels, time]
+
+        # -- Step 5: IF masking (zero IF in low-energy bins) ---------------
+        # mel_power is the pre-log1p mel power spectrogram
+        mask = mel_power < self.if_masking_threshold
+        if_mel = if_mel.masked_fill(mask, 0.0)
+
+        # -- Step 6: Align time dimensions and stack -----------------------
+        # MelSpectrogram and torch.stft may produce slightly different time
+        # lengths due to padding differences.  Trim to the shorter one.
+        time_len = min(mel_mag.shape[-1], if_mel.shape[-1])
+        mel_mag = mel_mag[..., :time_len]
+        if_mel = if_mel[..., :time_len]
+
+        # Stack: [B, 2, n_mels, time]
+        return torch.stack([mel_mag, if_mel], dim=1)
+
+    # ------------------------------------------------------------------
+    # Dataset statistics
+    # ------------------------------------------------------------------
+
+    def compute_dataset_statistics(
+        self, spectrograms: list["torch.Tensor"],
+    ) -> dict[str, float]:
+        """Compute per-channel mean and std across a dataset.
+
+        Parameters
+        ----------
+        spectrograms : list[torch.Tensor]
+            Unbatched 2-channel spectrograms, each ``[2, n_mels, time]``.
+
+        Returns
+        -------
+        dict
+            Keys: ``mag_mean``, ``mag_std``, ``if_mean``, ``if_std``.
+        """
+        torch = self._torch
+
+        all_mag = torch.cat([s[0].flatten() for s in spectrograms])
+        all_if = torch.cat([s[1].flatten() for s in spectrograms])
+
+        mag_mean = all_mag.mean().item()
+        mag_std = all_mag.std().item()
+        if_mean = all_if.mean().item()
+        if_std = all_if.std().item()
+
+        # Guard against near-zero std (e.g. silent audio)
+        if mag_std < 1e-8:
+            mag_std = 1.0
+        if if_std < 1e-8:
+            if_std = 1.0
+
+        return {
+            "mag_mean": mag_mean,
+            "mag_std": mag_std,
+            "if_mean": if_mean,
+            "if_std": if_std,
+        }
+
+    # ------------------------------------------------------------------
+    # Normalisation / Denormalisation
+    # ------------------------------------------------------------------
+
+    def normalize(
+        self, spectrogram: "torch.Tensor", stats: dict[str, float],
+    ) -> "torch.Tensor":
+        """Normalize a 2-channel spectrogram to zero mean and unit variance.
+
+        Parameters
+        ----------
+        spectrogram : torch.Tensor
+            Shape ``[B, 2, n_mels, time]`` or ``[2, n_mels, time]``.
+        stats : dict
+            Output of :meth:`compute_dataset_statistics`.
+
+        Returns
+        -------
+        torch.Tensor
+            Normalised spectrogram, same shape as input.
+        """
+        torch = self._torch
+        has_batch = spectrogram.dim() == 4
+
+        if has_batch:
+            mag = (spectrogram[:, 0] - stats["mag_mean"]) / stats["mag_std"]
+            ifr = (spectrogram[:, 1] - stats["if_mean"]) / stats["if_std"]
+            return torch.stack([mag, ifr], dim=1)
+        else:
+            mag = (spectrogram[0] - stats["mag_mean"]) / stats["mag_std"]
+            ifr = (spectrogram[1] - stats["if_mean"]) / stats["if_std"]
+            return torch.stack([mag, ifr], dim=0)
+
+    def denormalize(
+        self, spectrogram: "torch.Tensor", stats: dict[str, float],
+    ) -> "torch.Tensor":
+        """Reverse normalisation applied by :meth:`normalize`.
+
+        Parameters
+        ----------
+        spectrogram : torch.Tensor
+            Normalised tensor, ``[B, 2, n_mels, time]`` or ``[2, n_mels, time]``.
+        stats : dict
+            Same statistics dict used for normalisation.
+
+        Returns
+        -------
+        torch.Tensor
+            Denormalised spectrogram, same shape as input.
+        """
+        torch = self._torch
+        has_batch = spectrogram.dim() == 4
+
+        if has_batch:
+            mag = spectrogram[:, 0] * stats["mag_std"] + stats["mag_mean"]
+            ifr = spectrogram[:, 1] * stats["if_std"] + stats["if_mean"]
+            return torch.stack([mag, ifr], dim=1)
+        else:
+            mag = spectrogram[0] * stats["mag_std"] + stats["mag_mean"]
+            ifr = spectrogram[1] * stats["if_std"] + stats["if_mean"]
+            return torch.stack([mag, ifr], dim=0)
+
+    # ------------------------------------------------------------------
+    # Device management
+    # ------------------------------------------------------------------
+
+    def to(self, device: "torch.device") -> "ComplexSpectrogram":
+        """Move transforms to the given device.
+
+        Returns ``self`` for chaining.
+        """
+        self.mel_transform = self.mel_transform.to(device)
+        self.mel_scale = self.mel_scale.to(device)
+        self._mel_fb_sum = self._mel_fb_sum.to(device)
+        self._stft_window = self._stft_window.to(device)
+        return self
