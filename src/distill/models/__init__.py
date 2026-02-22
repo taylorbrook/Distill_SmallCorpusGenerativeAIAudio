@@ -24,6 +24,17 @@ from distill.models.persistence import (
     save_model,
     save_model_from_checkpoint,
 )
+
+# ---------------------------------------------------------------------------
+# v1.1 persistence exports (VQ-VAE v2 format) -- added in Phase 13
+# ---------------------------------------------------------------------------
+
+from distill.models.persistence import (
+    SAVED_MODEL_VERSION_V2,
+    LoadedVQModel,
+    load_model_v2,
+    save_model_v2,
+)
 from distill.models.vae import ConvDecoder, ConvEncoder, ConvVAE
 
 # ---------------------------------------------------------------------------
@@ -52,6 +63,11 @@ __all__ = [
     "save_model_from_checkpoint",
     "MODEL_FILE_EXTENSION",
     "SAVED_MODEL_VERSION",
+    # persistence.py (v1.1 -- v2 format)
+    "SAVED_MODEL_VERSION_V2",
+    "LoadedVQModel",
+    "save_model_v2",
+    "load_model_v2",
     # vqvae.py (v1.1)
     "ConvVQVAE",
     "VQEncoder",

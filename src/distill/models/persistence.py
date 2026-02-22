@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SAVED_MODEL_VERSION = 1
+SAVED_MODEL_VERSION_V2 = 2
 MODEL_FORMAT_MARKER = "distill_model"
 MODEL_FILE_EXTENSION = ".distill"
 
@@ -82,6 +83,26 @@ class LoadedModel:
     analysis: "AnalysisResult | None"
     metadata: ModelMetadata
     device: "torch.device"
+
+
+@dataclass
+class LoadedVQModel:
+    """Complete loaded VQ-VAE model ready for inference.
+
+    Parallel to :class:`LoadedModel` but for VQ-VAE models (v2 format).
+    Contains the reconstructed model, spectrogram converter, metadata,
+    codebook health snapshot, and VQ-VAE configuration.
+
+    No ``analysis`` field -- VQ-VAE replaces latent analysis with
+    codebook health monitoring.
+    """
+
+    model: "ConvVQVAE"
+    spectrogram: "AudioSpectrogram"
+    metadata: ModelMetadata
+    device: "torch.device"
+    codebook_health: dict | None
+    vqvae_config: dict | None
 
 
 # ---------------------------------------------------------------------------
@@ -502,4 +523,235 @@ def save_model_from_checkpoint(
         metadata=metadata,
         models_dir=models_dir,
         analysis=analysis,
+    )
+
+
+# ---------------------------------------------------------------------------
+# VQ-VAE v2 Save (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def save_model_v2(
+    model: "ConvVQVAE",
+    spectrogram_config: dict,
+    vqvae_config: dict,
+    training_config: dict,
+    metadata: ModelMetadata,
+    models_dir: Path,
+    codebook_health: dict | None = None,
+    loss_curve_history: dict | None = None,
+) -> Path:
+    """Save a trained VQ-VAE model as a v2 ``.distill`` file.
+
+    Creates a version 2 ``.distill`` file with VQ-specific metadata
+    including codebook health snapshot and loss curve history.  Updates
+    the :class:`~distill.library.catalog.ModelLibrary` index.
+
+    Parameters
+    ----------
+    model : ConvVQVAE
+        Trained VQ-VAE model (weights extracted via ``state_dict()``).
+    spectrogram_config : dict
+        Spectrogram configuration as a plain dict.
+    vqvae_config : dict
+        VQ-VAE configuration as a plain dict (codebook_dim, codebook_size,
+        num_quantizers, etc.).
+    training_config : dict
+        Full training configuration as a plain dict.
+    metadata : ModelMetadata
+        User-facing metadata.  ``model_id`` and ``save_date`` are
+        auto-generated if empty.
+    models_dir : Path
+        Directory to save the ``.distill`` file into.
+    codebook_health : dict | None
+        Per-level codebook health snapshot from the final validation pass.
+    loss_curve_history : dict | None
+        Epoch-level loss curves (train_losses, val_losses, recon_losses,
+        commit_losses).
+
+    Returns
+    -------
+    Path
+        Path to the saved ``.distill`` file.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    from distill.library.catalog import ModelEntry, ModelLibrary
+
+    # Auto-generate model_id if empty
+    if not metadata.model_id:
+        metadata.model_id = str(uuid.uuid4())
+
+    # Auto-fill save_date if empty
+    if not metadata.save_date:
+        metadata.save_date = datetime.now(timezone.utc).isoformat()
+
+    # Build v2 saved model dict
+    saved = {
+        "format": MODEL_FORMAT_MARKER,
+        "version": SAVED_MODEL_VERSION_V2,
+        "model_type": "vqvae",
+        "model_state_dict": model.state_dict(),
+        "vqvae_config": vqvae_config,
+        "spectrogram_config": spectrogram_config,
+        "training_config": training_config,
+        "codebook_health_snapshot": codebook_health,
+        "loss_curve_history": loss_curve_history,
+        "metadata": asdict(metadata),
+    }
+
+    # Sanitize filename from model name
+    safe_name = _sanitize_filename(metadata.name)
+    file_name = f"{safe_name}{MODEL_FILE_EXTENSION}"
+    model_path = Path(models_dir) / file_name
+
+    # Handle duplicate filenames with counter suffix
+    counter = 1
+    while model_path.exists():
+        file_name = f"{safe_name}_{counter}{MODEL_FILE_EXTENSION}"
+        model_path = Path(models_dir) / file_name
+        counter += 1
+
+    # Save the file
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(saved, model_path)
+
+    # Create catalog entry and update library index
+    entry = ModelEntry(
+        model_id=metadata.model_id,
+        name=metadata.name,
+        description=metadata.description,
+        file_path=model_path.name,
+        file_size_bytes=os.path.getsize(model_path),
+        dataset_name=metadata.dataset_name,
+        dataset_file_count=metadata.dataset_file_count,
+        dataset_total_duration_s=metadata.dataset_total_duration_s,
+        training_date=metadata.training_date,
+        save_date=metadata.save_date,
+        training_epochs=metadata.training_epochs,
+        final_train_loss=metadata.final_train_loss,
+        final_val_loss=metadata.final_val_loss,
+        has_analysis=False,  # VQ-VAE uses codebook health, not analysis
+        n_active_components=0,
+        tags=list(metadata.tags),
+    )
+    library = ModelLibrary(models_dir)
+    library.add_entry(entry)
+
+    logger.info(
+        "Saved VQ-VAE model '%s' (%s) v2 to %s",
+        metadata.name,
+        metadata.model_id,
+        model_path,
+    )
+    return model_path
+
+
+# ---------------------------------------------------------------------------
+# VQ-VAE v2 Load (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def load_model_v2(
+    model_path: Path,
+    device: str = "cpu",
+) -> LoadedVQModel:
+    """Load a v2 ``.distill`` VQ-VAE model for inference.
+
+    Reconstructs the ``ConvVQVAE`` from saved configuration, loads weights,
+    and returns a :class:`LoadedVQModel` with codebook health and config.
+
+    Parameters
+    ----------
+    model_path : Path
+        Path to the ``.distill`` file.
+    device : str
+        Device to load the model onto (default ``"cpu"``).
+
+    Returns
+    -------
+    LoadedVQModel
+        Complete VQ-VAE model ready for inference.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a valid v2 VQ-VAE model.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    from distill.audio.spectrogram import AudioSpectrogram, SpectrogramConfig
+    from distill.models.vqvae import ConvVQVAE
+
+    model_path = Path(model_path)
+    saved = torch.load(model_path, map_location=device, weights_only=False)
+
+    # Validate format marker
+    if saved.get("format") != MODEL_FORMAT_MARKER:
+        raise ValueError(f"Not a valid .distill model file: {model_path}")
+
+    # Validate version and model type
+    version = saved.get("version", 0)
+    model_type = saved.get("model_type", "")
+
+    if version < 2 or model_type != "vqvae":
+        raise ValueError(
+            "Not a v2 VQ-VAE model. Use load_model() for v1 models."
+        )
+
+    # Reconstruct SpectrogramConfig and AudioSpectrogram
+    spec_dict = saved["spectrogram_config"]
+    spec_config = SpectrogramConfig(**spec_dict)
+    spectrogram = AudioSpectrogram(spec_config)
+
+    # Reconstruct ConvVQVAE from vqvae_config
+    vq_cfg = saved["vqvae_config"]
+    model = ConvVQVAE(
+        codebook_dim=vq_cfg.get("codebook_dim", 128),
+        codebook_size=vq_cfg.get("codebook_size", 256),
+        num_quantizers=vq_cfg.get("num_quantizers", 3),
+        decay=vq_cfg.get("decay", 0.95),
+        commitment_weight=vq_cfg.get("commitment_weight", 0.25),
+        threshold_ema_dead_code=vq_cfg.get("threshold_ema_dead_code", 2),
+        dropout=vq_cfg.get("dropout", 0.2),
+    )
+
+    # Initialize dimensions by running a dummy forward pass
+    # ConvVQVAE uses Conv2d (no lazy init needed for spatial layers),
+    # but ResidualVQ internal state needs initialization
+    n_mels = spec_config.n_mels
+    time_frames = spec_config.sample_rate // spec_config.hop_length + 1
+    dummy_input = torch.zeros(1, 1, n_mels, time_frames)
+    with torch.no_grad():
+        model.eval()
+        model(dummy_input)
+
+    # Load weights
+    model.load_state_dict(saved["model_state_dict"])
+    torch_device = torch.device(device)
+    model = model.to(torch_device)
+    model.eval()
+
+    # Move spectrogram mel transform to device
+    spectrogram.to(torch_device)
+
+    # Reconstruct ModelMetadata from saved dict
+    meta_dict = saved.get("metadata", {})
+    metadata = ModelMetadata(**meta_dict)
+
+    logger.info(
+        "Loaded VQ-VAE model '%s' (v2) from %s onto %s",
+        metadata.name,
+        model_path,
+        device,
+    )
+
+    return LoadedVQModel(
+        model=model,
+        spectrogram=spectrogram,
+        metadata=metadata,
+        device=torch_device,
+        codebook_health=saved.get("codebook_health_snapshot"),
+        vqvae_config=saved.get("vqvae_config"),
     )
