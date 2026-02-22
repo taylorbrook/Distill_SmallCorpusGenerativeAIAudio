@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using discrete audio codes and generative priors
-**Current focus:** Phase 13 - VQ-VAE Training Pipeline
+**Current focus:** Phase 14 - Autoregressive Prior
 
 ## Current Position
 
-Phase: 13 of 18 (VQ-VAE Training Pipeline)
-Plan: 3 of 3 in current phase (all complete)
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 13-02-PLAN.md (VQ-VAE training UI controls + codebook health)
+Phase: 14 of 18 (Autoregressive Prior)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-02-22 -- Completed 14-01-PLAN.md (CodePrior model + adaptive config)
 
-Progress: [==============░░░░░░] 69% (v1.0 complete, Phase 12 complete, Phase 13 complete)
+Progress: [==============░░░░░░] 71% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14: 1/3)
 
 ## Performance Metrics
 
@@ -38,11 +38,13 @@ Progress: [==============░░░░░░] 69% (v1.0 complete, Phase 12 comple
 | 13 | 01 | 7 min | 2 | 8 |
 | 13 | 02 | 5 min | 2 | 2 |
 | 13 | 03 | 2 min | 1 | 1 |
+| 14 | 01 | 3 min | 2 | 2 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
+- v1.1 Phase 14: In progress (1/3 plans, 3 min so far)
 - Trend: Stable
 
 ## Accumulated Context
@@ -77,6 +79,9 @@ Recent decisions affecting current work:
 - 13-02: Duck-type metric detection (hasattr val_commit_loss) in loss chart to avoid circular imports
 - 13-02: Per-level codebook health as markdown table in stats panel (utilization%, perplexity, dead codes)
 - [Phase 13]: Remove --preset flag entirely (v1.0 KL presets irrelevant for VQ-VAE)
+- 14-01: Transformer prior (not LSTM) -- nn.TransformerEncoder + explicit causal mask for GPT-style decoder-only
+- 14-01: Level embedding disambiguates RVQ quantizer levels in flattened code sequences
+- 14-01: 3-tier adaptive prior scaling: <=20 files (128h/2L), 21-100 (256h/4L), >100 (512h/6L)
 
 ### Pending Todos
 
@@ -84,12 +89,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 14: LSTM vs. Transformer prior -- STACK.md and ARCHITECTURE.md disagree; must resolve before implementation
+- Phase 14: RESOLVED -- Transformer prior chosen (nn.TransformerEncoder + causal mask, GPT-style decoder-only)
 - Phase 12: Empirical codebook sizing defaults need validation on actual 5/50/500 file datasets
 - Phase 16: Gradio code grid editor has no established prior art; needs early prototyping
 
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 13-02-PLAN.md -- VQ-VAE training UI controls + codebook health display. Phase 13 fully complete (all 3 plans).
+Stopped at: Completed 14-01-PLAN.md -- CodePrior model + adaptive config. Phase 14 in progress (1/3 plans).
 Resume file: None
