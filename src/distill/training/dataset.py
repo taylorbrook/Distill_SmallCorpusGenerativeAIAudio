@@ -9,6 +9,11 @@ the training loop on GPU for efficiency.
 not the *chunk* level, to prevent data leakage (chunks from the same
 file appearing in both train and validation sets).
 
+v2.0 adds :class:`CachedSpectrogramDataset` which loads pre-cached
+2-channel (magnitude + IF) spectrograms from disk, and
+:func:`create_complex_data_loaders` which creates DataLoaders from
+the cached spectrogram files.
+
 Heavy dependencies (torch, torchaudio, audio.io) are imported lazily
 inside method/function bodies, matching the project-wide pattern.
 """
@@ -262,6 +267,122 @@ def create_data_loaders(
     )
     val_loader = DataLoader(
         val_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=pin_memory,
+    )
+
+    return train_loader, val_loader
+
+
+# ---------------------------------------------------------------------------
+# v2.0 -- Cached 2-Channel Spectrogram Dataset
+# ---------------------------------------------------------------------------
+
+
+class CachedSpectrogramDataset:
+    """PyTorch-compatible Dataset that loads cached 2-channel spectrograms.
+
+    Each item is a pre-computed, normalized ``[2, n_mels, time]`` tensor
+    loaded from a ``.pt`` file.  No on-the-fly spectrogram computation
+    or augmentation is needed (both are pre-baked in the cache).
+
+    Parameters
+    ----------
+    pt_files:
+        Sorted list of ``.pt`` file paths to load.
+    """
+
+    def __init__(self, pt_files: list[Path]) -> None:
+        self.pt_files = list(pt_files)
+
+    def __len__(self) -> int:
+        """Number of cached spectrogram tensors."""
+        return len(self.pt_files)
+
+    def __getitem__(self, idx: int) -> "torch.Tensor":
+        """Load and return a single spectrogram as ``[2, n_mels, time]`` tensor.
+
+        Parameters
+        ----------
+        idx:
+            Index in ``[0, len(self))``.
+
+        Returns
+        -------
+        torch.Tensor
+            Float32 tensor with shape ``[2, n_mels, time]``.
+        """
+        import torch  # noqa: WPS433
+
+        return torch.load(self.pt_files[idx], weights_only=True)
+
+
+def create_complex_data_loaders(
+    cache_dir: Path,
+    config: "TrainingConfig",
+    val_fraction: float | None = None,
+) -> "tuple[DataLoader, DataLoader]":
+    """Create train/val DataLoaders from cached 2-channel spectrograms.
+
+    Splits at the spectrogram level (not file level) since files are
+    already mixed across chunks and augmented variants in the cache.
+
+    Uses ``_SPLIT_SEED`` for reproducible splits.
+
+    Parameters
+    ----------
+    cache_dir:
+        Directory containing ``.pt`` files from preprocessing.
+    config:
+        Training configuration (``val_fraction``, ``batch_size``,
+        ``num_workers``, ``device``).
+    val_fraction:
+        Override validation fraction.  If ``None``, uses
+        ``config.val_fraction``.
+
+    Returns
+    -------
+    tuple[DataLoader, DataLoader]
+        ``(train_loader, val_loader)`` pair.
+    """
+    from torch.utils.data import DataLoader  # noqa: WPS433
+
+    pt_files = sorted(cache_dir.glob("*.pt"))
+    if not pt_files:
+        raise FileNotFoundError(f"No .pt files in cache directory: {cache_dir}")
+
+    # Reproducible shuffle and split
+    frac = val_fraction if val_fraction is not None else config.val_fraction
+    rng = random.Random(_SPLIT_SEED)
+    indices = list(range(len(pt_files)))
+    rng.shuffle(indices)
+
+    val_count = max(1, int(len(indices) * frac))
+    val_indices = indices[:val_count]
+    train_indices = indices[val_count:]
+
+    # Ensure at least 1 in each split
+    if not train_indices and val_indices:
+        train_indices = [val_indices.pop()]
+    if not val_indices and train_indices:
+        val_indices = [train_indices.pop()]
+
+    train_files = [pt_files[i] for i in sorted(train_indices)]
+    val_files = [pt_files[i] for i in sorted(val_indices)]
+
+    pin_memory = config.device not in ("cpu", "auto")
+
+    train_loader = DataLoader(
+        CachedSpectrogramDataset(train_files),
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+        pin_memory=pin_memory,
+    )
+    val_loader = DataLoader(
+        CachedSpectrogramDataset(val_files),
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=config.num_workers,

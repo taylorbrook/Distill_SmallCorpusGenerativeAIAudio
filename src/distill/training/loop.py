@@ -57,6 +57,7 @@ def train_epoch(
     epoch: int = 0,
     callback: "MetricsCallback | None" = None,
     cancel_event: "threading.Event | None" = None,
+    use_cached_spectrograms: bool = False,
 ) -> dict:
     """Run one training epoch.
 
@@ -65,11 +66,13 @@ def train_epoch(
     model:
         The VAE model (must be in train mode).
     train_loader:
-        DataLoader yielding waveform batches ``[B, 1, samples]``.
+        DataLoader yielding waveform batches ``[B, 1, samples]``
+        or cached spectrogram batches ``[B, 2, n_mels, time]``.
     optimizer:
         Optimiser (AdamW).
     spectrogram:
-        Spectrogram converter for waveform-to-mel.
+        Spectrogram converter for waveform-to-mel (unused when
+        *use_cached_spectrograms* is True).
     kl_weight:
         Current KL annealing weight.
     device:
@@ -84,6 +87,9 @@ def train_epoch(
         Optional metrics event subscriber.
     cancel_event:
         If set, returns early with partial results.
+    use_cached_spectrograms:
+        If True, batches are pre-computed ``[B, 2, n_mels, time]``
+        spectrograms (v2.0 path).  Skips waveform-to-mel conversion.
 
     Returns
     -------
@@ -111,11 +117,14 @@ def train_epoch(
 
         step_start = time.time()
 
-        # Move waveform batch to device
+        # Move batch to device
         batch = batch.to(device)
 
-        # Convert to mel spectrogram
-        mel = spectrogram.waveform_to_mel(batch)
+        # Convert to spectrogram (or use cached)
+        if use_cached_spectrograms:
+            mel = batch  # Already [B, 2, n_mels, time]
+        else:
+            mel = spectrogram.waveform_to_mel(batch)
 
         # Forward pass
         recon, mu, logvar = model(mel)
@@ -207,6 +216,7 @@ def validate_epoch(
     kl_weight: float,
     device: "torch.device",
     free_bits: float = 0.1,
+    use_cached_spectrograms: bool = False,
 ) -> dict:
     """Run one validation epoch.
 
@@ -215,15 +225,20 @@ def validate_epoch(
     model:
         The VAE model (switched to eval mode internally).
     val_loader:
-        DataLoader yielding waveform batches ``[B, 1, samples]``.
+        DataLoader yielding waveform batches ``[B, 1, samples]``
+        or cached spectrogram batches ``[B, 2, n_mels, time]``.
     spectrogram:
-        Spectrogram converter for waveform-to-mel.
+        Spectrogram converter for waveform-to-mel (unused when
+        *use_cached_spectrograms* is True).
     kl_weight:
         Current KL annealing weight.
     device:
         Target device for computation.
     free_bits:
         Minimum KL per latent dimension.
+    use_cached_spectrograms:
+        If True, batches are pre-computed ``[B, 2, n_mels, time]``
+        spectrograms (v2.0 path).  Skips waveform-to-mel conversion.
 
     Returns
     -------
@@ -244,7 +259,10 @@ def validate_epoch(
     with torch.no_grad():
         for batch in val_loader:
             batch = batch.to(device)
-            mel = spectrogram.waveform_to_mel(batch)
+            if use_cached_spectrograms:
+                mel = batch  # Already [B, 2, n_mels, time]
+            else:
+                mel = spectrogram.waveform_to_mel(batch)
 
             recon, mu, logvar = model(mel)
             total, recon_loss, kl_loss = vae_loss(
@@ -422,33 +440,70 @@ def train(
             )
 
     # -----------------------------------------------------------------
-    # Create data loaders
+    # Create data loaders (v1.0 waveform path or v2.0 cached path)
     # -----------------------------------------------------------------
-    augmentation_pipeline = None
-    if config.regularization.augmentation_expansion > 0:
-        try:
-            from distill.audio.augmentation import (
-                AugmentationConfig,
-                AugmentationPipeline,
-            )
-            aug_config = AugmentationConfig(
-                expansion_ratio=config.regularization.augmentation_expansion,
-            )
-            # Disable PitchShift -- it runs on CPU during data loading
-            # (even with CUDA training) and is unusably slow at 48kHz
-            # (minutes per chunk via STFT).
-            aug_config.pitch_shift_probability = 0.0
-            print("[TRAIN] PitchShift disabled (too slow for real-time data loading)", flush=True)
-            print(f"[TRAIN] Creating augmentation pipeline...", flush=True)
-            augmentation_pipeline = AugmentationPipeline(config=aug_config)
-            print(f"[TRAIN] Augmentation pipeline ready", flush=True)
-        except Exception as exc:
-            print(f"[TRAIN] Augmentation failed: {exc}", flush=True)
-            logger.warning("Failed to create augmentation pipeline", exc_info=True)
+    use_cached_spectrograms = False
 
-    train_loader, val_loader = create_data_loaders(
-        file_paths, config, augmentation_pipeline,
-    )
+    if config.complex_spectrogram.enabled:
+        # v2.0 path: preprocess audio into cached 2-channel spectrograms
+        from distill.audio.augmentation import AugmentationConfig
+        from distill.audio.preprocessing import preprocess_complex_spectrograms
+        from distill.training.dataset import create_complex_data_loaders
+
+        dataset_dir = _get_dataset_dir(file_paths)
+
+        # Build augmentation config if expansion > 0
+        aug_cfg = None
+        if config.regularization.augmentation_expansion > 0:
+            aug_cfg = AugmentationConfig(
+                expansion_ratio=config.regularization.augmentation_expansion,
+                pitch_shift_probability=0.0,  # Too slow at 48kHz
+            )
+
+        print("[TRAIN] Preprocessing 2-channel spectrograms...", flush=True)
+        cache_dir, norm_stats = preprocess_complex_spectrograms(
+            files=file_paths,
+            dataset_dir=dataset_dir,
+            complex_spectrogram_config=config.complex_spectrogram,
+            augmentation_config=aug_cfg,
+            augmentation_expansion=config.regularization.augmentation_expansion,
+            chunk_samples=int(config.chunk_duration_s * 48_000),
+            progress_callback=_print_progress,
+        )
+
+        train_loader, val_loader = create_complex_data_loaders(
+            cache_dir=cache_dir,
+            config=config,
+        )
+        use_cached_spectrograms = True
+        # Phase 13 will update ConvVAE to accept in_channels=2
+    else:
+        # v1.0 path: waveform loading with on-the-fly mel conversion
+        augmentation_pipeline = None
+        if config.regularization.augmentation_expansion > 0:
+            try:
+                from distill.audio.augmentation import (
+                    AugmentationConfig,
+                    AugmentationPipeline,
+                )
+                aug_config = AugmentationConfig(
+                    expansion_ratio=config.regularization.augmentation_expansion,
+                )
+                # Disable PitchShift -- it runs on CPU during data loading
+                # (even with CUDA training) and is unusably slow at 48kHz
+                # (minutes per chunk via STFT).
+                aug_config.pitch_shift_probability = 0.0
+                print("[TRAIN] PitchShift disabled (too slow for real-time data loading)", flush=True)
+                print("[TRAIN] Creating augmentation pipeline...", flush=True)
+                augmentation_pipeline = AugmentationPipeline(config=aug_config)
+                print("[TRAIN] Augmentation pipeline ready", flush=True)
+            except Exception as exc:
+                print(f"[TRAIN] Augmentation failed: {exc}", flush=True)
+                logger.warning("Failed to create augmentation pipeline", exc_info=True)
+
+        train_loader, val_loader = create_data_loaders(
+            file_paths, config, augmentation_pipeline,
+        )
 
     train_chunks = len(train_loader.dataset)
     val_chunks = len(val_loader.dataset)
@@ -488,6 +543,7 @@ def train(
             epoch=epoch,
             callback=callback,
             cancel_event=cancel_event,
+            use_cached_spectrograms=use_cached_spectrograms,
         )
 
         # Check cancellation after train epoch
@@ -523,6 +579,7 @@ def train(
             kl_weight=kl_weight,
             device=device,
             free_bits=config.free_bits,
+            use_cached_spectrograms=use_cached_spectrograms,
         )
 
         # Step scheduler
@@ -660,49 +717,53 @@ def train(
 
     # Run latent space analysis
     analysis_result = None
-    try:
-        from distill.controls.analyzer import LatentSpaceAnalyzer
-        from distill.controls.serialization import analysis_to_dict
-        from distill.training.dataset import AudioTrainingDataset
-        from torch.utils.data import DataLoader as TorchDataLoader
+    if config.complex_spectrogram.enabled:
+        logger.info("Skipping latent space analysis (2-channel mode) -- handled in Phase 16")
+        # Latent space analysis with 2-channel data handled in Phase 16
+    else:
+        try:
+            from distill.controls.analyzer import LatentSpaceAnalyzer
+            from distill.controls.serialization import analysis_to_dict
+            from distill.training.dataset import AudioTrainingDataset
+            from torch.utils.data import DataLoader as TorchDataLoader
 
-        logger.info("Running latent space analysis...")
-        analyzer = LatentSpaceAnalyzer()
+            logger.info("Running latent space analysis...")
+            analyzer = LatentSpaceAnalyzer()
 
-        # Use ALL training files (not split) for maximum PCA coverage
-        analysis_dataset = AudioTrainingDataset(
-            file_paths=file_paths,
-            chunk_samples=int(1.0 * 48_000),
-            augmentation_pipeline=None,
-        )
-        analysis_loader = TorchDataLoader(
-            analysis_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=0,
-        )
+            # Use ALL training files (not split) for maximum PCA coverage
+            analysis_dataset = AudioTrainingDataset(
+                file_paths=file_paths,
+                chunk_samples=int(1.0 * 48_000),
+                augmentation_pipeline=None,
+            )
+            analysis_loader = TorchDataLoader(
+                analysis_dataset,
+                batch_size=config.batch_size,
+                shuffle=False,
+                num_workers=0,
+            )
 
-        analysis_result = analyzer.analyze(
-            model=model,
-            dataloader=analysis_loader,
-            spectrogram=spectrogram,
-            device=device,
-        )
-        logger.info(
-            "Analysis complete: %d active components, %.1f%% variance explained",
-            analysis_result.n_active_components,
-            sum(analysis_result.explained_variance_ratio) * 100,
-        )
+            analysis_result = analyzer.analyze(
+                model=model,
+                dataloader=analysis_loader,
+                spectrogram=spectrogram,
+                device=device,
+            )
+            logger.info(
+                "Analysis complete: %d active components, %.1f%% variance explained",
+                analysis_result.n_active_components,
+                sum(analysis_result.explained_variance_ratio) * 100,
+            )
 
-        # Re-save the final checkpoint WITH analysis included
-        analysis_dict = analysis_to_dict(analysis_result)
-        _save_checkpoint_safe(
-            checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
-            final_train, final_val, final_kl, config, spec_config, metrics_history,
-            latent_analysis=analysis_dict,
-        )
-    except Exception:
-        logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
+            # Re-save the final checkpoint WITH analysis included
+            analysis_dict = analysis_to_dict(analysis_result)
+            _save_checkpoint_safe(
+                checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
+                final_train, final_val, final_kl, config, spec_config, metrics_history,
+                latent_analysis=analysis_dict,
+            )
+        except Exception:
+            logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
 
     # Save as .distill model to the library
     saved_model_path = None
@@ -767,6 +828,31 @@ def train(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _get_dataset_dir(file_paths: list[Path]) -> Path:
+    """Find the common parent directory of all file paths.
+
+    Returns the shared root used as the dataset directory for caching.
+    """
+    if not file_paths:
+        raise ValueError("No file paths provided")
+    if len(file_paths) == 1:
+        return file_paths[0].parent
+
+    # Find common parent by iterating over the path parts
+    common = file_paths[0].parent
+    for fp in file_paths[1:]:
+        parent = fp.parent
+        # Walk up until we find a common ancestor
+        while common != parent and common not in parent.parents:
+            common = common.parent
+    return common
+
+
+def _print_progress(message: str, current: int, total: int) -> None:
+    """Print preprocessing progress."""
+    print(f"[PREPROCESS] {message}: {current}/{total}", flush=True)
 
 
 def _save_checkpoint_safe(

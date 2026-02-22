@@ -22,7 +22,9 @@ from distill.training.config import (
 )
 from distill.training.dataset import (
     AudioTrainingDataset,
+    CachedSpectrogramDataset,
     create_data_loaders,
+    create_complex_data_loaders,
 )
 from distill.training.loop import train
 from distill.training.metrics import (
@@ -50,7 +52,9 @@ __all__ = [
     "get_effective_preview_interval",
     # dataset.py
     "AudioTrainingDataset",
+    "CachedSpectrogramDataset",
     "create_data_loaders",
+    "create_complex_data_loaders",
     # metrics.py
     "StepMetrics",
     "EpochMetrics",
