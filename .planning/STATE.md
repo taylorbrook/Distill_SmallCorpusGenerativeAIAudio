@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 13 of 16 (2-Channel VAE Architecture)
-Plan: 1 of 2 in current phase
-Status: In Progress
-Last activity: 2026-02-22 -- Completed 13-01-PLAN.md
+Phase: 13 of 16 (2-Channel VAE Architecture) -- COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase Complete
+Last activity: 2026-02-22 -- Completed 13-02-PLAN.md
 
-Progress: [█████████████░░░░░░░] 65% (v2.0)
+Progress: [██████████████░░░░░░] 70% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [█████████████░░░░░░░] 65% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 3 completed
+**v2.0 Plans:** 4 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -33,6 +33,7 @@ Progress: [█████████████░░░░░░░] 65% (v2
 - 12-01: 6min (2 tasks, 4 files)
 - 12-02: 5min (2 tasks, 5 files)
 - 13-01: 3min (2 tasks, 2 files)
+- 13-02: 4min (2 tasks, 3 files)
 
 *Updated after each plan completion*
 
@@ -56,6 +57,9 @@ Recent decisions affecting current work:
 - [13-01]: 5th encoder layer uses 1024 channels (not 512) to exceed >10M param target (~17.3M)
 - [13-01]: Split-apply activation: Softplus for magnitude ch, Tanh for IF ch
 - [13-01]: Pad-to-32 strategy for 5 stride-2 layers
+- [13-02]: flatten_dim uses 1024 channels matching 5th encoder layer (not 512 as planned)
+- [13-02]: Preview generation wrapped in try/except for 2-channel graceful degradation
+- [13-02]: v1.0 waveform training path removed, ComplexSpectrogramConfig.enabled removed
 
 ### Pending Todos
 
@@ -68,5 +72,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 13-01-PLAN.md -- VAE architecture rewritten for 2-channel, ready for 13-02 (config/training/v1.0 cleanup)
+Stopped at: Completed 13-02-PLAN.md -- Phase 13 complete: training loop v2.0-only, persistence updated, v1.0 code removed
 Resume file: None
