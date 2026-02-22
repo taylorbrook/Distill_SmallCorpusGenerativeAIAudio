@@ -55,14 +55,17 @@ Plans:
 - [x] 12-03-PLAN.md — Implement mel adapter and verify audio quality
 
 ### Phase 13: Model Persistence v2
-**Goal**: The .distill model format supports optional per-model vocoder state while all existing v1.0 models continue to load without error
+**Goal**: The new .distillgan model format replaces .distill entirely, supports optional per-model vocoder state bundling, and v1 models are cleanly rejected with a retrain message
 **Depends on**: Phase 12
 **Requirements**: PERS-01, PERS-02, PERS-03
 **Success Criteria** (what must be TRUE):
-  1. A .distill model file saved with vocoder state can be loaded and the vocoder state is restored
-  2. Every existing v1.0 .sda model file loads without error and works with BigVGAN via the adapter path
-  3. The model catalog (library) shows whether each model has a trained per-model vocoder
-**Plans**: TBD
+  1. A .distillgan model file saved with vocoder state can be loaded and the vocoder state is restored
+  2. Attempting to load a v1 .distill file raises a clear error telling the user to retrain
+  3. The model catalog (library) shows vocoder training stats (epochs, loss) when a model has a trained per-model vocoder
+**Plans**: 2 plans
+Plans:
+- [ ] 13-01-PLAN.md — Update core persistence layer: constants, save/load with vocoder support, v1 rejection
+- [ ] 13-02-PLAN.md — Sweep catalog, CLI, UI, and training references to .distillgan with vocoder display
 
 ### Phase 14: Generation Pipeline Integration
 **Goal**: Every generation path in the application (single chunk, crossfade, latent interpolation, preview, reconstruction) uses the neural vocoder and produces correct 48kHz output
@@ -116,11 +119,11 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. Vocoder Interface & BigVGAN Integration | v1.1 | Complete    | 2026-02-22 | 2026-02-22 |
-| 13. Model Persistence v2 | v1.1 | 0/TBD | Not started | - |
+| 13. Model Persistence v2 | v1.1 | 0/2 | Not started | - |
 | 14. Generation Pipeline Integration | v1.1 | 0/TBD | Not started | - |
 | 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
 | 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after Phase 12 planning*
+*Last updated: 2026-02-21 after Phase 13 planning*
