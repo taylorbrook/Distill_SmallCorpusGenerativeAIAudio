@@ -1,14 +1,15 @@
 """Model persistence -- save, load, delete, and convert trained models.
 
-Provides the complete API for persisting trained VAE models as ``.distill``
+Provides the complete API for persisting trained VAE models as ``.distillgan``
 files with rich metadata, loading them for immediate generation (with
 slider controls restored), deleting models, and converting training
 checkpoints to saved models.
 
 The saved model format bundles ``model_state_dict``, ``spectrogram_config``,
-``latent_analysis`` (optional), ``training_config``, and user-facing
-``ModelMetadata`` into a single ``torch.save`` dict.  This is intentionally
-distinct from training checkpoints (no optimizer/scheduler state).
+``latent_analysis`` (optional), ``training_config``, optional
+``vocoder_state``, and user-facing ``ModelMetadata`` into a single
+``torch.save`` dict.  This is intentionally distinct from training
+checkpoints (no optimizer/scheduler state).
 
 Design notes:
 - ``from __future__ import annotations`` for modern type hints.
@@ -35,8 +36,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SAVED_MODEL_VERSION = 1
-MODEL_FORMAT_MARKER = "distill_model"
-MODEL_FILE_EXTENSION = ".distill"
+MODEL_FORMAT_MARKER = "distillgan_model"
+MODEL_FILE_EXTENSION = ".distillgan"
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ class LoadedModel:
     analysis: "AnalysisResult | None"
     metadata: ModelMetadata
     device: "torch.device"
+    vocoder_state: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +139,11 @@ def save_model(
     metadata: ModelMetadata,
     models_dir: Path,
     analysis: "AnalysisResult | None" = None,
+    vocoder_state: dict | None = None,
 ) -> Path:
     """Save a trained model with metadata to the model library.
 
-    Creates a ``.distill`` file in *models_dir* and updates the
+    Creates a ``.distillgan`` file in *models_dir* and updates the
     :class:`~distill.library.catalog.ModelLibrary` index.
 
     Parameters
@@ -156,15 +159,18 @@ def save_model(
         User-facing metadata.  ``model_id`` and ``save_date`` are
         auto-generated if empty.
     models_dir : Path
-        Directory to save the ``.distill`` file into.
+        Directory to save the ``.distillgan`` file into.
     analysis : AnalysisResult | None
         Latent space analysis (slider mappings).  ``None`` if not
         yet analyzed.
+    vocoder_state : dict | None
+        Optional per-model vocoder state (state_dict, config, and
+        training metadata).  Omitted from the file when ``None``.
 
     Returns
     -------
     Path
-        Path to the saved ``.distill`` file.
+        Path to the saved ``.distillgan`` file.
     """
     import torch  # noqa: WPS433 -- lazy import
 
@@ -198,6 +204,10 @@ def save_model(
         "training_config": training_config,
         "metadata": asdict(metadata),
     }
+
+    # Optionally bundle per-model vocoder state (omit key when absent)
+    if vocoder_state is not None:
+        saved["vocoder_state"] = vocoder_state
 
     # Sanitize filename from model name
     safe_name = _sanitize_filename(metadata.name)
@@ -256,7 +266,7 @@ def load_model(
     model_path: Path,
     device: str = "cpu",
 ) -> LoadedModel:
-    """Load a saved ``.distill`` model for immediate generation.
+    """Load a saved ``.distillgan`` model for immediate generation.
 
     Reconstructs the full model pipeline: ``ConvVAE`` with weights,
     ``AudioSpectrogram`` from saved config, ``AnalysisResult`` from
@@ -268,7 +278,7 @@ def load_model(
     Parameters
     ----------
     model_path : Path
-        Path to the ``.distill`` file.
+        Path to the ``.distillgan`` file.
     device : str
         Device to load the model onto (default ``"cpu"``).
 
@@ -280,8 +290,8 @@ def load_model(
     Raises
     ------
     ValueError
-        If the file is not a valid ``.distill`` model or has an
-        unsupported version.
+        If the file is not a valid ``.distillgan`` model, has an
+        unsupported version, or uses the legacy v1 format.
     """
     import torch  # noqa: WPS433 -- lazy import
 
@@ -295,9 +305,15 @@ def load_model(
     model_path = Path(model_path)
     saved = torch.load(model_path, map_location=device, weights_only=False)
 
-    # Validate format marker and version
-    if saved.get("format") != MODEL_FORMAT_MARKER:
-        raise ValueError(f"Not a valid .distill model file: {model_path}")
+    # Reject legacy v1 format before checking current format
+    fmt = saved.get("format", "")
+    if fmt == "distill_model":
+        raise ValueError(
+            "This model was saved in v1 format which is no longer supported. "
+            "Please retrain your model."
+        )
+    if fmt != MODEL_FORMAT_MARKER:
+        raise ValueError(f"Not a valid .distillgan model file: {model_path}")
     version = saved.get("version", 0)
     if version > SAVED_MODEL_VERSION:
         raise ValueError(
@@ -362,12 +378,16 @@ def load_model(
         device,
     )
 
+    # Extract optional vocoder state (None when not bundled)
+    vocoder_state = saved.get("vocoder_state")
+
     return LoadedModel(
         model=model,
         spectrogram=spectrogram,
         analysis=analysis,
         metadata=metadata,
         device=torch_device,
+        vocoder_state=vocoder_state,
     )
 
 
@@ -384,7 +404,7 @@ def delete_model(model_id: str, models_dir: Path) -> bool:
     model_id : str
         The model's unique ID.
     models_dir : Path
-        Directory containing ``.distill`` files and the library index.
+        Directory containing ``.distillgan`` files and the library index.
 
     Returns
     -------
@@ -400,7 +420,7 @@ def delete_model(model_id: str, models_dir: Path) -> bool:
     if entry is None:
         return False
 
-    # Delete the .distill file
+    # Delete the .distillgan file
     model_path = models_dir / entry.file_path
     if model_path.exists():
         model_path.unlink()
@@ -429,7 +449,7 @@ def save_model_from_checkpoint(
     """Convert a training checkpoint to a saved model.
 
     Loads the checkpoint, extracts model weights and config,
-    strips optimizer/scheduler state, and saves as a ``.distill`` file
+    strips optimizer/scheduler state, and saves as a ``.distillgan`` file
     via :func:`save_model`.
 
     Parameters
@@ -439,12 +459,12 @@ def save_model_from_checkpoint(
     metadata : ModelMetadata
         User-facing metadata for the saved model.
     models_dir : Path
-        Directory to save the ``.distill`` file into.
+        Directory to save the ``.distillgan`` file into.
 
     Returns
     -------
     Path
-        Path to the saved ``.distill`` file.
+        Path to the saved ``.distillgan`` file.
     """
     import torch  # noqa: WPS433 -- lazy import
 
