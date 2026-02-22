@@ -1,19 +1,26 @@
-"""Convolutional Variational Autoencoder for mel spectrograms.
+"""Convolutional Variational Autoencoder for 2-channel spectrograms (v2.0).
 
-Architecture: 4-layer convolutional encoder/decoder with stride-2 downsampling,
-mapping mel spectrograms to a 64-dimensional latent space.  Pad-then-crop
-strategy ensures exact shape match between input and output regardless of
-time dimension length.
+Architecture: 5-layer convolutional encoder/decoder with stride-2 downsampling,
+mapping 2-channel (magnitude + instantaneous frequency) spectrograms to a
+128-dimensional latent space (configurable).  Pad-then-crop strategy ensures
+exact shape match between input and output regardless of time dimension length.
+
+v2.0 architecture -- clean break from v1.0 single-channel models.
 
 Design notes:
-- The encoder pads the time dimension to a multiple of 16 (4 stride-2 layers).
+- Input/output: ``[B, 2, n_mels, time]`` where channel 0 is magnitude and
+  channel 1 is instantaneous frequency (IF).
+- The encoder pads both spatial dimensions to multiples of 32 (5 stride-2
+  layers = 32x spatial reduction).
+- Decoder uses split per-channel activation: Softplus for magnitude (>= 0)
+  and Tanh for IF (bounded [-1, 1]).
 - ``flatten_dim`` is computed lazily on the first forward pass to support
   variable mel shapes without hard-coding spatial dimensions.
 - float32 throughout -- no float16 on MPS (numerical precision issues).
 - Apply gradient clipping (``max_norm=1.0``) externally in the training loop
   to prevent MPS-specific NaN gradients.
 
-Total parameters: ~3.1M (varies slightly with mel time dimension).
+Total parameters: ~12M+ (varies slightly with mel time dimension).
 """
 
 from __future__ import annotations
@@ -29,26 +36,22 @@ import torch.nn.functional as F
 
 
 class ConvEncoder(nn.Module):
-    """4-layer convolutional encoder mapping mel spectrograms to latent space.
+    """5-layer convolutional encoder mapping 2-channel spectrograms to latent space.
 
-    Input:  ``[B, 1, n_mels, time]``
+    Input:  ``[B, 2, n_mels, time]``
     Output: ``(mu, logvar)`` each ``[B, latent_dim]``
 
-    The time dimension is padded to a multiple of 16 before convolutions,
+    The spatial dimensions are padded to multiples of 32 before convolutions,
     and the padded shape is stored in ``_padded_shape`` for the decoder.
     """
 
-    def __init__(self, latent_dim: int = 64, dropout: float = 0.2) -> None:
+    def __init__(self, latent_dim: int = 128, dropout: float = 0.2) -> None:
         super().__init__()
         self.latent_dim = latent_dim
 
-        # 4 conv blocks: 1 -> 32 -> 64 -> 128 -> 256
+        # 5 conv blocks: 2 -> 64 -> 128 -> 256 -> 512 -> 1024
         self.convs = nn.Sequential(
-            nn.Conv2d(1, 32, 3, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(dropout),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            nn.Conv2d(2, 64, 3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.Dropout2d(dropout),
@@ -58,6 +61,14 @@ class ConvEncoder(nn.Module):
             nn.Dropout2d(dropout),
             nn.Conv2d(128, 256, 3, stride=2, padding=1),
             nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(dropout),
+            nn.Conv2d(256, 512, 3, stride=2, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(dropout),
+            nn.Conv2d(512, 1024, 3, stride=2, padding=1),
+            nn.BatchNorm2d(1024),
             nn.ReLU(inplace=True),
             nn.Dropout2d(dropout),
         )
@@ -78,22 +89,22 @@ class ConvEncoder(nn.Module):
         self.fc_logvar = nn.Linear(flatten_dim, self.latent_dim).to(device)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Encode mel spectrogram to ``(mu, logvar)``.
+        """Encode 2-channel spectrogram to ``(mu, logvar)``.
 
         Parameters
         ----------
         x : torch.Tensor
-            Shape ``[B, 1, n_mels, time]``.
+            Shape ``[B, 2, n_mels, time]``.
 
         Returns
         -------
         tuple[torch.Tensor, torch.Tensor]
             ``(mu, logvar)`` each ``[B, latent_dim]``.
         """
-        # Pad time dimension to multiple of 16
+        # Pad spatial dimensions to multiples of 32
         _, _, h, w = x.shape
-        pad_h = (16 - h % 16) % 16
-        pad_w = (16 - w % 16) % 16
+        pad_h = (32 - h % 32) % 32
+        pad_w = (32 - w % 32) % 32
         if pad_h > 0 or pad_w > 0:
             x = F.pad(x, (0, pad_w, 0, pad_h))
         self._padded_shape = (x.shape[2], x.shape[3])
@@ -118,13 +129,17 @@ class ConvEncoder(nn.Module):
 
 
 class ConvDecoder(nn.Module):
-    """4-layer transposed convolutional decoder mapping latent vectors to mel spectrograms.
+    """5-layer transposed convolutional decoder mapping latent vectors to 2-channel spectrograms.
 
     Input:  ``z`` of shape ``[B, latent_dim]`` and ``target_shape`` tuple
-    Output: ``[B, 1, n_mels, time]`` (cropped to original shape)
+    Output: ``[B, 2, n_mels, time]`` (cropped to original shape)
+
+    Decoder applies split per-channel activation after the deconv stack:
+    - Channel 0 (magnitude): Softplus (non-negative, unbounded above)
+    - Channel 1 (IF): Tanh (bounded [-1, 1])
     """
 
-    def __init__(self, latent_dim: int = 64, dropout: float = 0.2) -> None:
+    def __init__(self, latent_dim: int = 128, dropout: float = 0.2) -> None:
         super().__init__()
         self.latent_dim = latent_dim
 
@@ -133,8 +148,18 @@ class ConvDecoder(nn.Module):
         self._flatten_dim: int | None = None
         self.fc: nn.Linear | None = None
 
-        # 4 deconv blocks: 256 -> 128 -> 64 -> 32 -> 1
+        # 5 deconv blocks: 1024 -> 512 -> 256 -> 128 -> 64 -> 2
+        # Last block has NO activation in the Sequential -- activations
+        # are applied per-channel after the deconv stack.
         self.deconvs = nn.Sequential(
+            nn.ConvTranspose2d(1024, 512, 3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(dropout),
+            nn.ConvTranspose2d(512, 256, 3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(dropout),
             nn.ConvTranspose2d(256, 128, 3, stride=2, padding=1, output_padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
@@ -143,19 +168,18 @@ class ConvDecoder(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.Dropout2d(dropout),
-            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(dropout),
-            nn.ConvTranspose2d(32, 1, 3, stride=2, padding=1, output_padding=1),
-            nn.Softplus(),  # output >= 0, unbounded above -- matches log1p mel range
+            nn.ConvTranspose2d(64, 2, 3, stride=2, padding=1, output_padding=1),
         )
+
+        # Per-channel activations applied after deconv stack
+        self._act_mag = nn.Softplus()
+        self._act_if = nn.Tanh()
 
     def _init_linear(self, spatial_shape: tuple[int, int]) -> None:
         """Initialise linear projection once spatial shape is known."""
         self._spatial_shape = spatial_shape
         sh, sw = spatial_shape
-        self._flatten_dim = 256 * sh * sw
+        self._flatten_dim = 1024 * sh * sw
         device = next(self.deconvs.parameters()).device
         self.fc = nn.Linear(self.latent_dim, self._flatten_dim).to(device)
 
@@ -164,20 +188,20 @@ class ConvDecoder(nn.Module):
         z: torch.Tensor,
         target_shape: tuple[int, int] | None = None,
     ) -> torch.Tensor:
-        """Decode latent vector to mel spectrogram.
+        """Decode latent vector to 2-channel spectrogram.
 
         Parameters
         ----------
         z : torch.Tensor
             Shape ``[B, latent_dim]``.
         target_shape : tuple[int, int] | None
-            ``(n_mels, time)`` of the original (unpadded) mel spectrogram.
+            ``(n_mels, time)`` of the original (unpadded) spectrogram.
             Used to crop the output.  If ``None``, returns full padded output.
 
         Returns
         -------
         torch.Tensor
-            Shape ``[B, 1, n_mels, time]``.
+            Shape ``[B, 2, n_mels, time]``.
         """
         if self.fc is None:
             raise RuntimeError(
@@ -187,8 +211,13 @@ class ConvDecoder(nn.Module):
         assert self._spatial_shape is not None
 
         sh, sw = self._spatial_shape
-        h = self.fc(z).view(-1, 256, sh, sw)
-        recon = self.deconvs(h)
+        h = self.fc(z).view(-1, 1024, sh, sw)
+        raw = self.deconvs(h)
+
+        # Split per-channel activation
+        mag = self._act_mag(raw[:, 0:1, :, :])   # non-negative
+        ifr = self._act_if(raw[:, 1:2, :, :])    # bounded [-1, 1]
+        recon = torch.cat([mag, ifr], dim=1)
 
         # Crop to original shape (undo padding)
         if target_shape is not None:
@@ -207,21 +236,25 @@ _DEFAULT_MEL_SHAPE = (128, 94)
 
 
 class ConvVAE(nn.Module):
-    """Convolutional Variational Autoencoder for audio mel spectrograms.
+    """Convolutional Variational Autoencoder for 2-channel audio spectrograms (v2.0).
 
-    Encodes mel spectrograms to a low-dimensional latent space and
-    decodes back.  Supports training (forward), encoding, decoding,
-    and generation (sample) modes.
+    Encodes 2-channel spectrograms (magnitude + instantaneous frequency) to a
+    low-dimensional latent space and decodes back with per-channel activations.
+    Supports training (forward), encoding, decoding, and generation (sample)
+    modes.
+
+    This is a clean break from v1.0 single-channel models.  Input is always
+    ``[B, 2, n_mels, time]`` -- 2 channels are hard-coded, not configurable.
 
     Parameters
     ----------
     latent_dim : int
-        Dimensionality of the latent space (default 64).
+        Dimensionality of the latent space (default 128).
     dropout : float
         Dropout probability for regularisation (default 0.2).
     """
 
-    def __init__(self, latent_dim: int = 64, dropout: float = 0.2) -> None:
+    def __init__(self, latent_dim: int = 128, dropout: float = 0.2) -> None:
         super().__init__()
         self._latent_dim = latent_dim
         self.encoder = ConvEncoder(latent_dim=latent_dim, dropout=dropout)
@@ -233,12 +266,12 @@ class ConvVAE(nn.Module):
         return self._latent_dim
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Encode mel spectrogram to latent parameters.
+        """Encode 2-channel spectrogram to latent parameters.
 
         Parameters
         ----------
         x : torch.Tensor
-            Shape ``[B, 1, n_mels, time]``.
+            Shape ``[B, 2, n_mels, time]``.
 
         Returns
         -------
@@ -274,7 +307,7 @@ class ConvVAE(nn.Module):
         z: torch.Tensor,
         target_shape: tuple[int, int] | None = None,
     ) -> torch.Tensor:
-        """Decode latent vector to mel spectrogram.
+        """Decode latent vector to 2-channel spectrogram.
 
         Parameters
         ----------
@@ -287,7 +320,7 @@ class ConvVAE(nn.Module):
         Returns
         -------
         torch.Tensor
-            Shape ``[B, 1, n_mels, time]``.
+            Shape ``[B, 2, n_mels, time]``.
         """
         return self.decoder(z, target_shape=target_shape)
 
@@ -299,7 +332,7 @@ class ConvVAE(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Shape ``[B, 1, n_mels, time]``.
+            Shape ``[B, 2, n_mels, time]``.
 
         Returns
         -------
@@ -317,8 +350,8 @@ class ConvVAE(nn.Module):
             # the padded shape stored by the encoder during encode()
             assert self.encoder._padded_shape is not None
             padded_h, padded_w = self.encoder._padded_shape
-            # 4 stride-2 layers: spatial dims / 16
-            spatial = (padded_h // 16, padded_w // 16)
+            # 5 stride-2 layers: spatial dims / 32
+            spatial = (padded_h // 32, padded_w // 32)
             self.decoder._init_linear(spatial)
 
         recon = self.decode(z, target_shape=original_shape)
@@ -329,7 +362,7 @@ class ConvVAE(nn.Module):
         num_samples: int,
         device: torch.device,
     ) -> torch.Tensor:
-        """Generate mel spectrograms from random latent vectors.
+        """Generate 2-channel spectrograms from random latent vectors.
 
         Parameters
         ----------
@@ -341,20 +374,20 @@ class ConvVAE(nn.Module):
         Returns
         -------
         torch.Tensor
-            Shape ``[num_samples, 1, n_mels, time]`` using default 1-second shape.
+            Shape ``[num_samples, 2, n_mels, time]`` using default 1-second shape.
         """
         z = torch.randn(num_samples, self._latent_dim, device=device)
 
         # Ensure decoder is initialised -- use default mel shape
         if self.decoder.fc is None:
             n_mels, time_frames = _DEFAULT_MEL_SHAPE
-            # Pad to multiple of 16
-            pad_h = (16 - n_mels % 16) % 16
-            pad_w = (16 - time_frames % 16) % 16
+            # Pad to multiple of 32
+            pad_h = (32 - n_mels % 32) % 32
+            pad_w = (32 - time_frames % 32) % 32
             padded_h = n_mels + pad_h
             padded_w = time_frames + pad_w
-            # After 4 stride-2 layers: spatial dims / 16
-            spatial = (padded_h // 16, padded_w // 16)
+            # After 5 stride-2 layers: spatial dims / 32
+            spatial = (padded_h // 32, padded_w // 32)
             self.decoder._init_linear(spatial)
 
         return self.decode(z, target_shape=_DEFAULT_MEL_SHAPE)
