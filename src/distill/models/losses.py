@@ -9,8 +9,10 @@ mechanisms to prevent posterior collapse:
    dimension encodes some information.
 
 Design notes:
-- Reconstruction loss uses MSE on log-mel spectrograms (already normalised
-  by ``log1p``).
+- Reconstruction loss uses MSE on spectrogram tensors (v2.0: 2-channel
+  magnitude + IF).  MSE with ``reduction="mean"`` averages over all
+  elements including the channel dimension, so no code change is needed
+  for 2-channel input.
 - KL is summed over latent dimensions and averaged over the batch.
 - ``compute_kl_divergence`` provides raw KL for monitoring posterior collapse
   independent of free bits or annealing.
@@ -35,9 +37,9 @@ def vae_loss(
     Parameters
     ----------
     recon : torch.Tensor
-        Reconstructed mel spectrogram ``[B, 1, n_mels, time]``.
+        Reconstructed spectrogram ``[B, C, n_mels, time]`` (C=2 for v2.0).
     target : torch.Tensor
-        Original mel spectrogram ``[B, 1, n_mels, time]``.
+        Original spectrogram ``[B, C, n_mels, time]`` (C=2 for v2.0).
     mu : torch.Tensor
         Latent mean ``[B, latent_dim]``.
     logvar : torch.Tensor
