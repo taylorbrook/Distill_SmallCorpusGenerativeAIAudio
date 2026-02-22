@@ -203,6 +203,14 @@ from distill.cli.model import app as model_app
 app.add_typer(model_app, name="model", help="Manage saved models")
 
 # ---------------------------------------------------------------------------
+# v1.1 Prior training CLI -- added in Phase 14
+# ---------------------------------------------------------------------------
+
+from distill.cli.train_prior import app as train_prior_app
+
+app.add_typer(train_prior_app, name="train-prior", help="Train autoregressive prior on a VQ-VAE model")
+
+# ---------------------------------------------------------------------------
 # Entry point callable
 # ---------------------------------------------------------------------------
 
