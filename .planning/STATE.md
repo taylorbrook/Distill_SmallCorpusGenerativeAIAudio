@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 12 of 16 (Vocoder Interface & BigVGAN Integration)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-21 — v1.1 roadmap created (Phases 12-16)
+Plan: 1 of 3 in current phase
+Status: Executing
+Last activity: 2026-02-22 — Completed 12-01 (vendor BigVGAN + vocoder interface)
 
-Progress: ░░░░░░░░░░░░░░░░░░░░ 0% (v1.1)
+Progress: █░░░░░░░░░░░░░░░░░░░ 4% (v1.1)
 
 ## Performance Metrics
 
@@ -34,6 +34,7 @@ Progress: ░░░░░░░░░░░░░░░░░░░░ 0% (v1.1)
 - Trend: Consistent
 
 *Updated after each plan completion*
+| Phase 12 P01 | 2min | 2 tasks | 75 files |
 
 ## Accumulated Context
 
@@ -47,6 +48,8 @@ Recent decisions affecting current work:
 - [v1.1 Milestone]: MelAdapter converts log1p->log(clamp) at vocoder boundary; VAE pipeline unchanged
 - [v1.1 Milestone]: Griffin-Lim fully removed (not kept as fallback) — removal in Phase 16 after BigVGAN proven
 - [v1.1 Milestone]: librosa (new dep) for Slaney-normalized mel filterbanks matching BigVGAN training data
+- [Phase 12]: VENDOR_PIN.txt with commit hash for BigVGAN version pinning (no git submodule)
+- [Phase 12]: librosa added as full dependency (Slaney filterbank); numba/llvmlite transitive deps accepted
 
 ### Pending Todos
 
@@ -60,6 +63,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-21
-Stopped at: Phase 12 context gathered — ready to plan
-Resume file: .planning/phases/12-vocoder-interface-bigvgan-integration/12-CONTEXT.md
+Last session: 2026-02-22
+Stopped at: Completed 12-01-PLAN.md
+Resume file: .planning/phases/12-vocoder-interface-bigvgan-integration/12-01-SUMMARY.md

@@ -14,7 +14,7 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 - [ ] **VOC-03**: BigVGAN model downloads automatically on first use with progress indication
 - [ ] **VOC-04**: Vocoder inference runs on CUDA, MPS (Apple Silicon), and CPU
 - [ ] **VOC-05**: Vocoder auto-selects best available: per-model HiFi-GAN > BigVGAN universal
-- [ ] **VOC-06**: BigVGAN source code vendored with version pinning (not pip-installed)
+- [x] **VOC-06**: BigVGAN source code vendored with version pinning (not pip-installed)
 
 ### Generation Pipeline
 
@@ -88,7 +88,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VOC-03 | Phase 12 | Pending |
 | VOC-04 | Phase 12 | Pending |
 | VOC-05 | Phase 16 | Pending |
-| VOC-06 | Phase 12 | Pending |
+| VOC-06 | Phase 12 | Complete |
 | GEN-01 | Phase 14 | Pending |
 | GEN-02 | Phase 14 | Pending |
 | GEN-03 | Phase 14 | Pending |
