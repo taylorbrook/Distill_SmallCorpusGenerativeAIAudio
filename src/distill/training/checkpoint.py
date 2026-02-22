@@ -128,7 +128,175 @@ def save_checkpoint(
 
 
 # ---------------------------------------------------------------------------
-# Load
+# VQ-VAE Checkpoint Save (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def save_vqvae_checkpoint(
+    path: Path,
+    model: "torch.nn.Module",
+    optimizer: "torch.optim.Optimizer",
+    scheduler: "torch.optim.lr_scheduler.LRScheduler",
+    epoch: int,
+    step: int,
+    train_loss: float,
+    val_loss: float,
+    commitment_weight: float,
+    training_config: dict,
+    spectrogram_config: dict,
+    metrics_history_dict: dict,
+    codebook_health: dict | None = None,
+) -> Path:
+    """Save a VQ-VAE training checkpoint with VQ-specific metadata.
+
+    Parallel to :func:`save_checkpoint` but stores ``commitment_weight``
+    and ``codebook_health`` instead of ``kl_weight`` and
+    ``latent_analysis``.
+
+    Parameters
+    ----------
+    path : Path
+        Destination file path.
+    model : torch.nn.Module
+        The VQ-VAE model.
+    optimizer : torch.optim.Optimizer
+        Optimiser to save state from.
+    scheduler : torch.optim.lr_scheduler.LRScheduler
+        Learning-rate scheduler to save state from.
+    epoch : int
+        Current epoch number.
+    step : int
+        Current global step count.
+    train_loss : float
+        Training loss at this checkpoint.
+    val_loss : float
+        Validation loss at this checkpoint.
+    commitment_weight : float
+        Current commitment weight.
+    training_config : dict
+        VQ-VAE training configuration as a plain dict.
+    spectrogram_config : dict
+        Spectrogram configuration as a plain dict.
+    metrics_history_dict : dict
+        Full VQ metrics history from ``VQMetricsHistory.to_dict()``.
+    codebook_health : dict | None
+        Per-level codebook health snapshot from validation.
+
+    Returns
+    -------
+    Path
+        The path written.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    checkpoint = {
+        "version": CHECKPOINT_VERSION,
+        "model_type": "vqvae",
+        "epoch": epoch,
+        "step": step,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "commitment_weight": commitment_weight,
+        "training_config": training_config,
+        "spectrogram_config": spectrogram_config,
+        "metrics_history": metrics_history_dict,
+        "codebook_health": codebook_health,
+    }
+
+    torch.save(checkpoint, path)
+
+    # Write lightweight JSON sidecar for fast scanning
+    meta_path = path.with_suffix(".pt" + _META_SUFFIX)
+    meta = {
+        "epoch": epoch,
+        "train_loss": float(train_loss),
+        "val_loss": float(val_loss),
+    }
+    try:
+        meta_path.write_text(json.dumps(meta, indent=2))
+    except OSError:
+        logger.warning("Failed to write VQ-VAE checkpoint sidecar: %s", meta_path)
+
+    logger.info("Saved VQ-VAE checkpoint: %s (epoch %d, val_loss=%.4f)", path.name, epoch, val_loss)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# VQ-VAE Checkpoint Load (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def load_vqvae_checkpoint(
+    path: Path,
+    model: "torch.nn.Module",
+    optimizer: "torch.optim.Optimizer | None" = None,
+    scheduler: "torch.optim.lr_scheduler.LRScheduler | None" = None,
+    device: str = "cpu",
+) -> dict:
+    """Load a VQ-VAE checkpoint and restore model state.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the ``.pt`` checkpoint file.
+    model : torch.nn.Module
+        VQ-VAE model to restore weights into.
+    optimizer : torch.optim.Optimizer | None
+        If provided, restores optimizer state.
+    scheduler : torch.optim.lr_scheduler.LRScheduler | None
+        If provided, restores scheduler state.
+    device : str
+        Device to map tensors to (default ``"cpu"``).
+
+    Returns
+    -------
+    dict
+        The full checkpoint dict.  Caller reads ``epoch``, ``step``,
+        ``commitment_weight``, ``metrics_history``, ``codebook_health``,
+        ``training_config``, etc.
+
+    Raises
+    ------
+    ValueError
+        If the checkpoint is not a VQ-VAE checkpoint.
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    path = Path(path)
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+    # Verify this is a VQ-VAE checkpoint
+    if checkpoint.get("model_type") != "vqvae":
+        raise ValueError(
+            f"Not a VQ-VAE checkpoint (model_type={checkpoint.get('model_type')}). "
+            "Use load_checkpoint() for v1.0 VAE checkpoints."
+        )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    if optimizer is not None and "optimizer_state_dict" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    if scheduler is not None and "scheduler_state_dict" in checkpoint:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    logger.info(
+        "Loaded VQ-VAE checkpoint: %s (epoch %d, val_loss=%.4f)",
+        path.name,
+        checkpoint.get("epoch", -1),
+        checkpoint.get("val_loss", float("inf")),
+    )
+    return checkpoint
+
+
+# ---------------------------------------------------------------------------
+# Load (v1.0)
 # ---------------------------------------------------------------------------
 
 

@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import torch
 
-    from distill.training.config import TrainingConfig
+    from distill.training.config import TrainingConfig, VQVAEConfig
     from distill.training.metrics import MetricsCallback
 
 logger = logging.getLogger(__name__)
@@ -228,9 +228,102 @@ class TrainingRunner:
         """The result dict from the most recent successful run, or ``None``."""
         return self._result
 
+    def start_vqvae(
+        self,
+        config: "VQVAEConfig",
+        file_paths: list[Path],
+        output_dir: Path,
+        device: "torch.device",
+        callback: "MetricsCallback | None" = None,
+        models_dir: "Path | None" = None,
+        dataset_name: str = "",
+        model_name: str = "",
+    ) -> None:
+        """Start VQ-VAE training in a background thread.
+
+        Mirrors :meth:`start` but accepts :class:`VQVAEConfig` and calls
+        :func:`train_vqvae` instead of :func:`train`.
+
+        Parameters
+        ----------
+        config:
+            VQ-VAE training configuration.
+        file_paths:
+            Paths to audio files.
+        output_dir:
+            Root output directory.
+        device:
+            Target device.
+        callback:
+            Optional metrics event subscriber.
+        models_dir:
+            Directory to save the .distill model file into.
+        dataset_name:
+            Name of the dataset (used for model metadata).
+        model_name:
+            User-specified model name (used for saved model name).
+
+        Raises
+        ------
+        RuntimeError
+            If training is already running.
+        """
+        if self._is_running:
+            raise RuntimeError("Training is already running. Cancel first.")
+
+        self._cancel_event.clear()
+        self._last_error = None
+        self._result = None
+        self._is_running = True
+
+        self._thread = threading.Thread(
+            target=self._run_vqvae_training,
+            args=(config, file_paths, output_dir, device, callback,
+                  models_dir, dataset_name, model_name),
+            daemon=True,
+            name="vqvae-training-runner",
+        )
+        self._thread.start()
+
     # -----------------------------------------------------------------
     # Internal
     # -----------------------------------------------------------------
+
+    def _run_vqvae_training(
+        self,
+        config: "VQVAEConfig",
+        file_paths: list[Path],
+        output_dir: Path,
+        device: "torch.device",
+        callback: "MetricsCallback | None",
+        models_dir: "Path | None" = None,
+        dataset_name: str = "",
+        model_name: str = "",
+    ) -> None:
+        """Thread target: run VQ-VAE training loop with error handling."""
+        from distill.training.loop import train_vqvae
+
+        try:
+            result = train_vqvae(
+                config=config,
+                file_paths=file_paths,
+                output_dir=output_dir,
+                device=device,
+                callback=callback,
+                cancel_event=self._cancel_event,
+                models_dir=models_dir,
+                dataset_name=dataset_name,
+                model_name=model_name,
+            )
+            self._result = result
+        except Exception as exc:
+            self._last_error = exc
+            logger.error(
+                "VQ-VAE training failed: %s\n%s",
+                exc, traceback.format_exc(),
+            )
+        finally:
+            self._is_running = False
 
     def _run_training(
         self,

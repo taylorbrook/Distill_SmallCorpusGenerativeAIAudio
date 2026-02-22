@@ -250,6 +250,123 @@ def list_previews(preview_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# VQ-VAE reconstruction previews (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def generate_vqvae_reconstruction_preview(
+    model: "torch.nn.Module",
+    spectrogram: "AudioSpectrogram",
+    sample_batch: "torch.Tensor",
+    output_dir: Path,
+    epoch: int,
+    device: "torch.device",
+    sample_rate: int = 48_000,
+) -> list[Path]:
+    """Generate original vs. reconstruction WAV pairs for VQ-VAE quality monitoring.
+
+    Takes a batch of waveform tensors, converts to mel internally, encodes
+    through the VQ-VAE (encode-quantize-decode), then saves both original
+    and reconstruction as WAV files.  Only the first ``min(2, batch_size)``
+    items are saved to limit disk usage.
+
+    Unlike :func:`generate_reconstruction_preview` which takes mel
+    spectrograms directly, this function accepts waveform batches
+    ``[B, 1, samples]`` from the DataLoader and handles mel conversion.
+
+    The VQ-VAE forward pass returns ``(recon, indices, commit_loss)``
+    instead of the VAE's ``(recon, mu, logvar)``.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The VQ-VAE model (must have ``forward`` returning
+        ``(recon, indices, commit_loss)``).
+    spectrogram : AudioSpectrogram
+        Spectrogram converter for waveform-to-mel and mel-to-waveform.
+    sample_batch : torch.Tensor
+        Batch of waveform tensors ``[B, 1, samples]`` from the DataLoader.
+    output_dir : Path
+        Directory to save WAV files (created if needed).
+    epoch : int
+        Current epoch number (used in filename).
+    device : torch.device
+        Device the model is on.
+    sample_rate : int
+        Output sample rate in Hz (default 48000).
+
+    Returns
+    -------
+    list[Path]
+        Paths to all successfully saved WAV files (originals + reconstructions).
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    was_training = model.training
+    model.eval()
+    saved_paths: list[Path] = []
+
+    n_items = min(2, sample_batch.shape[0])
+
+    try:
+        with torch.no_grad():
+            # Move waveform to device and convert to mel
+            waveform_batch = sample_batch[:n_items].to(device)
+            mel_batch = spectrogram.waveform_to_mel(waveform_batch)
+
+            # VQ-VAE forward pass: returns (recon, indices, commit_loss)
+            recon, _indices, _commit_loss = model(mel_batch)
+
+            # Convert both to waveform on CPU
+            orig_waveforms = spectrogram.mel_to_waveform(mel_batch.cpu())
+            recon_waveforms = spectrogram.mel_to_waveform(recon.cpu())
+
+            for i in range(n_items):
+                # Original
+                try:
+                    orig_path = output_dir / f"recon_epoch{epoch:04d}_orig_{i:02d}.wav"
+                    _save_wav(orig_waveforms[i, 0], orig_path, sample_rate)
+                    saved_paths.append(orig_path)
+                except Exception:
+                    logger.warning(
+                        "Failed to save VQ-VAE original %d for epoch %d",
+                        i, epoch, exc_info=True,
+                    )
+
+                # Reconstruction
+                try:
+                    recon_path = output_dir / f"recon_epoch{epoch:04d}_recon_{i:02d}.wav"
+                    _save_wav(recon_waveforms[i, 0], recon_path, sample_rate)
+                    saved_paths.append(recon_path)
+                except Exception:
+                    logger.warning(
+                        "Failed to save VQ-VAE reconstruction %d for epoch %d",
+                        i, epoch, exc_info=True,
+                    )
+    except Exception:
+        logger.warning(
+            "Failed to generate VQ-VAE reconstruction previews for epoch %d",
+            epoch, exc_info=True,
+        )
+    finally:
+        if was_training:
+            model.train()
+
+    if saved_paths:
+        logger.info("Saved %d VQ-VAE reconstruction preview(s) for epoch %d", len(saved_paths), epoch)
+
+    return saved_paths
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _save_wav(
     audio_tensor: "torch.Tensor",
     path: Path,
