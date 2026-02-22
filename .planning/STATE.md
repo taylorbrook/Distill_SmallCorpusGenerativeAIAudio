@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using discrete audio codes and generative priors
-**Current focus:** Phase 12 - RVQ-VAE Core Architecture
+**Current focus:** Phase 13 - VQ-VAE Training Pipeline
 
 ## Current Position
 
-Phase: 12 of 18 (RVQ-VAE Core Architecture) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 12-02-PLAN.md (vqvae_loss + public API exports)
+Phase: 13 of 18 (VQ-VAE Training Pipeline)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-02-22 -- Completed 13-01-PLAN.md (VQ-VAE training loop + v2 persistence)
 
-Progress: [============░░░░░░░░] 62% (v1.0 complete, Phase 12 complete)
+Progress: [============░░░░░░░░] 64% (v1.0 complete, Phase 12 complete, Phase 13 plan 1/3)
 
 ## Performance Metrics
 
@@ -35,13 +35,16 @@ Progress: [============░░░░░░░░] 62% (v1.0 complete, Phase 12 co
 |-------|------|----------|-------|-------|
 | 12 | 01 | 4 min | 2 | 4 |
 | 12 | 02 | 2 min | 2 | 2 |
+| 13 | 01 | 7 min | 2 | 8 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
+- v1.1 Phase 13: In progress (1/3 plans, 7 min so far)
 - Trend: Stable
 
 *Updated after each plan completion*
+| Phase 13 P01 | 7min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -63,6 +66,11 @@ Recent decisions affecting current work:
 - 12-02: No KL divergence in vqvae_loss -- commitment loss replaces KL per VQ-VAE design
 - 12-02: Multi-scale spectral loss at 3 resolutions (full, 2x, 4x) averaged equally
 - 12-02: v1.0/v1.1 section comments in __init__.py for Phase 13 migration cleanup
+- 13-01: Parallel VQ training functions alongside v1.0 (no modifications to existing train/validate/save)
+- 13-01: Codebook health computed every 10 steps during training, full validation set at epoch end
+- 13-01: Skip codebook health at step 0 epoch 0 (k-means not initialized)
+- 13-01: Low utilization warnings only after epoch 0 to avoid false positives
+- 13-01: v2 .distill format with model_type="vqvae" and version=2
 
 ### Pending Todos
 
@@ -77,5 +85,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 12-02-PLAN.md -- Phase 12 complete (vqvae_loss + public API)
+Stopped at: Completed 13-01-PLAN.md -- VQ-VAE training loop + v2 persistence
 Resume file: None

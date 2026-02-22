@@ -12,10 +12,10 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 - [x] **VQVAE-01**: User can train an RVQ-VAE model on a small audio dataset (5-500 files) using stacked residual codebooks
 - [x] **VQVAE-02**: Codebook size automatically scales based on dataset size (64 for 5-20 files, 128 for 20-100, 256 for 100-500)
 - [x] **VQVAE-03**: Training uses EMA codebook updates with k-means initialization and dead code reset
-- [ ] **VQVAE-04**: Per-level codebook utilization, perplexity, and dead code count are displayed during training
+- [x] **VQVAE-04**: Per-level codebook utilization, perplexity, and dead code count are displayed during training
 - [x] **VQVAE-05**: Training uses commitment loss (single weight parameter) instead of KL divergence
 - [x] **VQVAE-06**: User can configure number of RVQ levels (2-4) and codebook dimension
-- [ ] **VQVAE-07**: Training detects and warns when codebook utilization drops below 30%
+- [x] **VQVAE-07**: Training detects and warns when codebook utilization drops below 30%
 
 ### Generation & Prior
 
@@ -40,7 +40,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 
 ### Model Persistence
 
-- [ ] **PERS-01**: VQ-VAE models save as v2 format with codebook state and VQ-specific metadata
+- [x] **PERS-01**: VQ-VAE models save as v2 format with codebook state and VQ-specific metadata
 - [ ] **PERS-02**: Prior model state is bundled in the same model file
 - [ ] **PERS-03**: Model library (save/load/delete/search) works with v2 format
 
@@ -99,10 +99,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VQVAE-01 | Phase 12 | Complete |
 | VQVAE-02 | Phase 12 | Complete |
 | VQVAE-03 | Phase 12 | Complete |
-| VQVAE-04 | Phase 13 | Pending |
+| VQVAE-04 | Phase 13 | Complete |
 | VQVAE-05 | Phase 12 | Complete |
 | VQVAE-06 | Phase 12 | Complete |
-| VQVAE-07 | Phase 13 | Pending |
+| VQVAE-07 | Phase 13 | Complete |
 | GEN-01 | Phase 14 | Pending |
 | GEN-02 | Phase 15 | Pending |
 | GEN-03 | Phase 15 | Pending |
@@ -118,7 +118,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CODE-07 | Phase 16 | Pending |
 | CODE-08 | Phase 17 | Pending |
 | CODE-09 | Phase 16 | Pending |
-| PERS-01 | Phase 13 | Pending |
+| PERS-01 | Phase 13 | Complete |
 | PERS-02 | Phase 14 | Pending |
 | PERS-03 | Phase 18 | Pending |
 | UI-01 | Phase 17 | Pending |
