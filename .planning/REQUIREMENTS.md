@@ -26,7 +26,7 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 ### Model Persistence
 
 - [x] **PERS-01**: Model format v2 stores optional per-model HiFi-GAN vocoder state
-- [ ] **PERS-02**: Existing v1.0 .sda files load without error (backward compatible)
+- [~] **PERS-02**: ~~Existing v1.0 .sda files load without error~~ — Dropped: v1 .distill files are rejected with clear "retrain your model" message (user decision, see 13-CONTEXT.md)
 - [x] **PERS-03**: Model catalog indicates whether a model has a trained per-model vocoder
 
 ### User Interface
@@ -94,7 +94,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-03 | Phase 14 | Pending |
 | GEN-04 | Phase 16 | Pending |
 | PERS-01 | Phase 13 | Complete |
-| PERS-02 | Phase 13 | Pending |
+| PERS-02 | Phase 13 | Dropped |
 | PERS-03 | Phase 13 | Complete |
 | UI-01 | Phase 15 | Pending |
 | UI-02 | Phase 15 | Pending |
