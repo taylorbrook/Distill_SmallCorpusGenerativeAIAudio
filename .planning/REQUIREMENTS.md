@@ -13,7 +13,7 @@ Requirements for complex spectrogram milestone. Each maps to roadmap phases.
 - [x] **DATA-02**: System normalizes magnitude and IF channels independently (zero mean, unit variance)
 - [x] **DATA-03**: System computes IF in mel domain to preserve existing mel-scale pipeline
 - [x] **DATA-04**: System masks IF values in low-amplitude regions where phase is meaningless noise
-- [ ] **DATA-05**: System preprocesses and caches 2-channel spectrograms for training
+- [x] **DATA-05**: System preprocesses and caches 2-channel spectrograms for training
 
 ### Model Architecture
 
@@ -77,7 +77,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-02 | Phase 12 | Complete |
 | DATA-03 | Phase 12 | Complete |
 | DATA-04 | Phase 12 | Complete |
-| DATA-05 | Phase 12 | Pending |
+| DATA-05 | Phase 12 | Complete |
 | ARCH-01 | Phase 13 | Pending |
 | ARCH-02 | Phase 13 | Pending |
 | ARCH-03 | Phase 13 | Pending |

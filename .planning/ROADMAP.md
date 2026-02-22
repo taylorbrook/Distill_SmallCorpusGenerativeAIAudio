@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Milestone Goal:** Replace magnitude-only mel spectrogram pipeline with 2-channel magnitude + instantaneous frequency representation, eliminating Griffin-Lim reconstruction entirely via exact ISTFT.
 
-- [ ] **Phase 12: 2-Channel Data Pipeline** - Compute magnitude + IF spectrograms with normalization, IF masking, and caching
+- [x] **Phase 12: 2-Channel Data Pipeline** - Compute magnitude + IF spectrograms with normalization, IF masking, and caching (completed 2026-02-22)
 - [ ] **Phase 13: 2-Channel VAE Architecture** - Adapt encoder/decoder for 2-channel input/output with appropriate activations and 128-dim latent space
 - [ ] **Phase 14: Multi-Resolution Loss** - Add auraloss multi-resolution STFT loss with magnitude-weighted IF loss and configurable balancing
 - [ ] **Phase 15: ISTFT Reconstruction** - Reconstruct phase from IF via cumulative sum and produce waveforms via ISTFT, removing Griffin-Lim
@@ -114,7 +114,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. 2-Channel Data Pipeline | 1/2 | In Progress|  | - |
+| 12. 2-Channel Data Pipeline | 2/2 | Complete   | 2026-02-22 | - |
 | 13. 2-Channel VAE Architecture | v2.0 | 0/? | Not started | - |
 | 14. Multi-Resolution Loss | v2.0 | 0/? | Not started | - |
 | 15. ISTFT Reconstruction | v2.0 | 0/? | Not started | - |
