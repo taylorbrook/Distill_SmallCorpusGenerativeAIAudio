@@ -32,6 +32,8 @@ from distill.audio.preprocessing import (
     preprocess_dataset,
     load_cached_dataset,
     clear_cache,
+    load_cache_manifest,
+    preprocess_complex_spectrograms,
 )
 from distill.audio.thumbnails import (
     generate_waveform_thumbnail,
@@ -81,6 +83,8 @@ __all__ = [
     "preprocess_dataset",
     "load_cached_dataset",
     "clear_cache",
+    "load_cache_manifest",
+    "preprocess_complex_spectrograms",
     # thumbnails.py
     "generate_waveform_thumbnail",
     "generate_dataset_thumbnails",
