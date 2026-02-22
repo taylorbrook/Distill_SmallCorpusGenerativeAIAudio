@@ -150,7 +150,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. RVQ-VAE Core Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
-| 14. Autoregressive Prior | 3/3 | Complete   | 2026-02-22 | - |
+| 14. Autoregressive Prior | 3/3 | Complete    | 2026-02-22 | - |
 | 15. Generation Pipeline | v1.1 | 0/0 | Not started | - |
 | 16. Encode/Decode + Code Visualization | v1.1 | 0/0 | Not started | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
