@@ -411,7 +411,7 @@ def build_train_tab() -> dict:
                         h = latest.codebook_health[level_key]
                         util_pct = h.get("utilization", 0) * 100
                         perplexity = h.get("perplexity", 0)
-                        dead_codes = h.get("dead_code_count", 0)
+                        dead_codes = h.get("dead_codes", 0)
                         stats += (
                             f"| {level_key} | {util_pct:.0f}% | "
                             f"{perplexity:.1f} | {dead_codes} |\n"
