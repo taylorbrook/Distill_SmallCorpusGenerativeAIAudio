@@ -64,7 +64,11 @@ Plans:
   3. Training warns the user when codebook utilization drops below 30% on any level
   4. Trained model saves as v2 format (.sda file) containing codebook state and VQ-specific metadata, and loads back identically
   5. User can train from CLI with `--codebook-size`, `--rvq-levels`, and `--commitment-weight` flags
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 13-01-PLAN.md -- VQ-VAE training loop, VQ metrics dataclasses, codebook health monitoring, v2 model persistence
+- [ ] 13-02-PLAN.md -- Gradio train tab VQ-VAE controls, codebook health display, loss chart with commitment loss
+- [ ] 13-03-PLAN.md -- CLI VQ-VAE training flags, per-level health output, end-of-training summary
 
 ### Phase 14: Autoregressive Prior
 **Goal**: An autoregressive prior model can be trained on frozen VQ-VAE code sequences, with memorization detection, and bundled into the saved model file
