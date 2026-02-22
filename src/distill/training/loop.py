@@ -49,7 +49,6 @@ def train_epoch(
     model: "torch.nn.Module",
     train_loader: "DataLoader",
     optimizer: "torch.optim.Optimizer",
-    spectrogram: "AudioSpectrogram",
     kl_weight: float,
     device: "torch.device",
     gradient_clip_norm: float,
@@ -57,7 +56,6 @@ def train_epoch(
     epoch: int = 0,
     callback: "MetricsCallback | None" = None,
     cancel_event: "threading.Event | None" = None,
-    use_cached_spectrograms: bool = False,
 ) -> dict:
     """Run one training epoch.
 
@@ -66,13 +64,10 @@ def train_epoch(
     model:
         The VAE model (must be in train mode).
     train_loader:
-        DataLoader yielding waveform batches ``[B, 1, samples]``
-        or cached spectrogram batches ``[B, 2, n_mels, time]``.
+        DataLoader yielding cached spectrogram batches
+        ``[B, 2, n_mels, time]``.
     optimizer:
         Optimiser (AdamW).
-    spectrogram:
-        Spectrogram converter for waveform-to-mel (unused when
-        *use_cached_spectrograms* is True).
     kl_weight:
         Current KL annealing weight.
     device:
@@ -87,9 +82,6 @@ def train_epoch(
         Optional metrics event subscriber.
     cancel_event:
         If set, returns early with partial results.
-    use_cached_spectrograms:
-        If True, batches are pre-computed ``[B, 2, n_mels, time]``
-        spectrograms (v2.0 path).  Skips waveform-to-mel conversion.
 
     Returns
     -------
@@ -117,14 +109,8 @@ def train_epoch(
 
         step_start = time.time()
 
-        # Move batch to device
-        batch = batch.to(device)
-
-        # Convert to spectrogram (or use cached)
-        if use_cached_spectrograms:
-            mel = batch  # Already [B, 2, n_mels, time]
-        else:
-            mel = spectrogram.waveform_to_mel(batch)
+        # Batch is a pre-computed 2-channel spectrogram [B, 2, n_mels, time]
+        mel = batch.to(device)
 
         # Forward pass
         recon, mu, logvar = model(mel)
@@ -212,11 +198,9 @@ def train_epoch(
 def validate_epoch(
     model: "torch.nn.Module",
     val_loader: "DataLoader",
-    spectrogram: "AudioSpectrogram",
     kl_weight: float,
     device: "torch.device",
     free_bits: float = 0.1,
-    use_cached_spectrograms: bool = False,
 ) -> dict:
     """Run one validation epoch.
 
@@ -225,20 +209,14 @@ def validate_epoch(
     model:
         The VAE model (switched to eval mode internally).
     val_loader:
-        DataLoader yielding waveform batches ``[B, 1, samples]``
-        or cached spectrogram batches ``[B, 2, n_mels, time]``.
-    spectrogram:
-        Spectrogram converter for waveform-to-mel (unused when
-        *use_cached_spectrograms* is True).
+        DataLoader yielding cached spectrogram batches
+        ``[B, 2, n_mels, time]``.
     kl_weight:
         Current KL annealing weight.
     device:
         Target device for computation.
     free_bits:
         Minimum KL per latent dimension.
-    use_cached_spectrograms:
-        If True, batches are pre-computed ``[B, 2, n_mels, time]``
-        spectrograms (v2.0 path).  Skips waveform-to-mel conversion.
 
     Returns
     -------
@@ -258,11 +236,8 @@ def validate_epoch(
 
     with torch.no_grad():
         for batch in val_loader:
-            batch = batch.to(device)
-            if use_cached_spectrograms:
-                mel = batch  # Already [B, 2, n_mels, time]
-            else:
-                mel = spectrogram.waveform_to_mel(batch)
+            # Batch is a pre-computed 2-channel spectrogram [B, 2, n_mels, time]
+            mel = batch.to(device)
 
             recon, mu, logvar = model(mel)
             total, recon_loss, kl_loss = vae_loss(
@@ -352,8 +327,10 @@ def train(
         manage_checkpoints,
         save_checkpoint,
     )
+    from distill.audio.augmentation import AugmentationConfig
+    from distill.audio.preprocessing import preprocess_complex_spectrograms
     from distill.training.config import get_effective_preview_interval
-    from distill.training.dataset import create_data_loaders
+    from distill.training.dataset import create_complex_data_loaders
     from distill.training.metrics import (
         EpochMetrics,
         MetricsHistory,
@@ -440,70 +417,33 @@ def train(
             )
 
     # -----------------------------------------------------------------
-    # Create data loaders (v1.0 waveform path or v2.0 cached path)
+    # Create data loaders (v2.0 cached 2-channel spectrograms)
     # -----------------------------------------------------------------
-    use_cached_spectrograms = False
+    dataset_dir = _get_dataset_dir(file_paths)
 
-    if config.complex_spectrogram.enabled:
-        # v2.0 path: preprocess audio into cached 2-channel spectrograms
-        from distill.audio.augmentation import AugmentationConfig
-        from distill.audio.preprocessing import preprocess_complex_spectrograms
-        from distill.training.dataset import create_complex_data_loaders
-
-        dataset_dir = _get_dataset_dir(file_paths)
-
-        # Build augmentation config if expansion > 0
-        aug_cfg = None
-        if config.regularization.augmentation_expansion > 0:
-            aug_cfg = AugmentationConfig(
-                expansion_ratio=config.regularization.augmentation_expansion,
-                pitch_shift_probability=0.0,  # Too slow at 48kHz
-            )
-
-        print("[TRAIN] Preprocessing 2-channel spectrograms...", flush=True)
-        cache_dir, norm_stats = preprocess_complex_spectrograms(
-            files=file_paths,
-            dataset_dir=dataset_dir,
-            complex_spectrogram_config=config.complex_spectrogram,
-            augmentation_config=aug_cfg,
-            augmentation_expansion=config.regularization.augmentation_expansion,
-            chunk_samples=int(config.chunk_duration_s * 48_000),
-            progress_callback=_print_progress,
+    # Build augmentation config if expansion > 0
+    aug_cfg = None
+    if config.regularization.augmentation_expansion > 0:
+        aug_cfg = AugmentationConfig(
+            expansion_ratio=config.regularization.augmentation_expansion,
+            pitch_shift_probability=0.0,  # Too slow at 48kHz
         )
 
-        train_loader, val_loader = create_complex_data_loaders(
-            cache_dir=cache_dir,
-            config=config,
-        )
-        use_cached_spectrograms = True
-        # Phase 13 will update ConvVAE to accept in_channels=2
-    else:
-        # v1.0 path: waveform loading with on-the-fly mel conversion
-        augmentation_pipeline = None
-        if config.regularization.augmentation_expansion > 0:
-            try:
-                from distill.audio.augmentation import (
-                    AugmentationConfig,
-                    AugmentationPipeline,
-                )
-                aug_config = AugmentationConfig(
-                    expansion_ratio=config.regularization.augmentation_expansion,
-                )
-                # Disable PitchShift -- it runs on CPU during data loading
-                # (even with CUDA training) and is unusably slow at 48kHz
-                # (minutes per chunk via STFT).
-                aug_config.pitch_shift_probability = 0.0
-                print("[TRAIN] PitchShift disabled (too slow for real-time data loading)", flush=True)
-                print("[TRAIN] Creating augmentation pipeline...", flush=True)
-                augmentation_pipeline = AugmentationPipeline(config=aug_config)
-                print("[TRAIN] Augmentation pipeline ready", flush=True)
-            except Exception as exc:
-                print(f"[TRAIN] Augmentation failed: {exc}", flush=True)
-                logger.warning("Failed to create augmentation pipeline", exc_info=True)
+    print("[TRAIN] Preprocessing 2-channel spectrograms...", flush=True)
+    cache_dir, norm_stats = preprocess_complex_spectrograms(
+        files=file_paths,
+        dataset_dir=dataset_dir,
+        complex_spectrogram_config=config.complex_spectrogram,
+        augmentation_config=aug_cfg,
+        augmentation_expansion=config.regularization.augmentation_expansion,
+        chunk_samples=int(config.chunk_duration_s * 48_000),
+        progress_callback=_print_progress,
+    )
 
-        train_loader, val_loader = create_data_loaders(
-            file_paths, config, augmentation_pipeline,
-        )
+    train_loader, val_loader = create_complex_data_loaders(
+        cache_dir=cache_dir,
+        config=config,
+    )
 
     train_chunks = len(train_loader.dataset)
     val_chunks = len(val_loader.dataset)
@@ -535,7 +475,6 @@ def train(
             model=model,
             train_loader=train_loader,
             optimizer=optimizer,
-            spectrogram=spectrogram,
             kl_weight=kl_weight,
             device=device,
             gradient_clip_norm=config.regularization.gradient_clip_norm,
@@ -543,7 +482,6 @@ def train(
             epoch=epoch,
             callback=callback,
             cancel_event=cancel_event,
-            use_cached_spectrograms=use_cached_spectrograms,
         )
 
         # Check cancellation after train epoch
@@ -575,11 +513,9 @@ def train(
         val_results = validate_epoch(
             model=model,
             val_loader=val_loader,
-            spectrogram=spectrogram,
             kl_weight=kl_weight,
             device=device,
             free_bits=config.free_bits,
-            use_cached_spectrograms=use_cached_spectrograms,
         )
 
         # Step scheduler
@@ -639,6 +575,9 @@ def train(
             )
 
         # Preview generation
+        # NOTE: Preview generation uses GriffinLim (v1.0 single-channel)
+        # which is not compatible with 2-channel models.  Phase 15 will
+        # replace this with ISTFT-based preview.  For now, gracefully skip.
         if effective_preview_interval > 0 and epoch > 0 and epoch % effective_preview_interval == 0:
             try:
                 preview_paths = generate_preview(
@@ -656,7 +595,11 @@ def train(
                             sample_rate=spec_config.sample_rate,
                         ))
             except Exception:
-                logger.warning("Preview generation failed at epoch %d", epoch, exc_info=True)
+                logger.warning(
+                    "Preview generation not yet supported for 2-channel models "
+                    "(requires Phase 15 ISTFT) -- skipping epoch %d preview",
+                    epoch, exc_info=True,
+                )
 
         # Checkpoint saving
         if config.checkpoint_interval > 0 and epoch > 0 and epoch % config.checkpoint_interval == 0:
@@ -715,55 +658,9 @@ def train(
     except Exception:
         logger.warning("Final checkpoint management failed", exc_info=True)
 
-    # Run latent space analysis
+    # Latent space analysis: skipped for 2-channel models (handled in Phase 16)
     analysis_result = None
-    if config.complex_spectrogram.enabled:
-        logger.info("Skipping latent space analysis (2-channel mode) -- handled in Phase 16")
-        # Latent space analysis with 2-channel data handled in Phase 16
-    else:
-        try:
-            from distill.controls.analyzer import LatentSpaceAnalyzer
-            from distill.controls.serialization import analysis_to_dict
-            from distill.training.dataset import AudioTrainingDataset
-            from torch.utils.data import DataLoader as TorchDataLoader
-
-            logger.info("Running latent space analysis...")
-            analyzer = LatentSpaceAnalyzer()
-
-            # Use ALL training files (not split) for maximum PCA coverage
-            analysis_dataset = AudioTrainingDataset(
-                file_paths=file_paths,
-                chunk_samples=int(1.0 * 48_000),
-                augmentation_pipeline=None,
-            )
-            analysis_loader = TorchDataLoader(
-                analysis_dataset,
-                batch_size=config.batch_size,
-                shuffle=False,
-                num_workers=0,
-            )
-
-            analysis_result = analyzer.analyze(
-                model=model,
-                dataloader=analysis_loader,
-                spectrogram=spectrogram,
-                device=device,
-            )
-            logger.info(
-                "Analysis complete: %d active components, %.1f%% variance explained",
-                analysis_result.n_active_components,
-                sum(analysis_result.explained_variance_ratio) * 100,
-            )
-
-            # Re-save the final checkpoint WITH analysis included
-            analysis_dict = analysis_to_dict(analysis_result)
-            _save_checkpoint_safe(
-                checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
-                final_train, final_val, final_kl, config, spec_config, metrics_history,
-                latent_analysis=analysis_dict,
-            )
-        except Exception:
-            logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
+    logger.info("Skipping latent space analysis (2-channel mode) -- handled in Phase 16")
 
     # Save as .distill model to the library
     saved_model_path = None

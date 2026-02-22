@@ -116,11 +116,11 @@ class RegularizationConfig:
 class ComplexSpectrogramConfig:
     """Configuration for 2-channel magnitude + IF spectrogram computation.
 
+    Always active in v2.0 -- there is no toggle.  The ``enabled`` field
+    was removed since 2-channel mode is the only supported path.
+
     Attributes
     ----------
-    enabled:
-        If True, use 2-channel complex spectrograms instead of 1-channel
-        magnitude-only mel spectrograms. Default True for v2.0.
     if_masking_threshold:
         Power threshold below which IF values are masked to zero.
         Phase information in low-energy bins is meaningless noise.
@@ -133,7 +133,6 @@ class ComplexSpectrogramConfig:
         Number of mel frequency bins. Default 128 (v1.0 default).
     """
 
-    enabled: bool = True
     if_masking_threshold: float = 1e-5
     n_fft: int = 2048
     hop_length: int = 512
