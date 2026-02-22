@@ -24,10 +24,10 @@ Requirements for complex spectrogram milestone. Each maps to roadmap phases.
 
 ### Loss Function
 
-- [ ] **LOSS-01**: Training uses multi-resolution STFT loss (auraloss) at multiple window sizes
-- [ ] **LOSS-02**: Training uses per-channel reconstruction loss (magnitude + IF)
-- [ ] **LOSS-03**: IF channel loss is weighted by magnitude to focus on perceptually relevant regions
-- [ ] **LOSS-04**: Loss terms are balanced with configurable weights
+- [x] **LOSS-01**: Training uses multi-resolution STFT loss (auraloss) at multiple window sizes
+- [x] **LOSS-02**: Training uses per-channel reconstruction loss (magnitude + IF)
+- [x] **LOSS-03**: IF channel loss is weighted by magnitude to focus on perceptually relevant regions
+- [x] **LOSS-04**: Loss terms are balanced with configurable weights
 
 ### Reconstruction
 
@@ -82,10 +82,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ARCH-02 | Phase 13 | Complete |
 | ARCH-03 | Phase 13 | Complete |
 | ARCH-04 | Phase 13 | Complete |
-| LOSS-01 | Phase 14 | Pending |
-| LOSS-02 | Phase 14 | Pending |
-| LOSS-03 | Phase 14 | Pending |
-| LOSS-04 | Phase 14 | Pending |
+| LOSS-01 | Phase 14 | Complete |
+| LOSS-02 | Phase 14 | Complete |
+| LOSS-03 | Phase 14 | Complete |
+| LOSS-04 | Phase 14 | Complete |
 | RECON-01 | Phase 15 | Pending |
 | RECON-02 | Phase 15 | Pending |
 | RECON-03 | Phase 15 | Pending |

@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 13 - 2-Channel VAE Architecture (v2.0 Complex Spectrogram)
+**Current focus:** Phase 14 - Multi-Resolution Loss (v2.0 Complex Spectrogram)
 
 ## Current Position
 
-Phase: 13 of 16 (2-Channel VAE Architecture) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 13-02-PLAN.md
+Phase: 14 of 16 (Multi-Resolution Loss)
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-02-22 -- Completed 14-01-PLAN.md
 
-Progress: [██████████████░░░░░░] 70% (v2.0)
+Progress: [███████████████░░░░░] 75% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [██████████████░░░░░░] 70% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 4 completed
+**v2.0 Plans:** 5 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -34,6 +34,7 @@ Progress: [██████████████░░░░░░] 70% (v2
 - 12-02: 5min (2 tasks, 5 files)
 - 13-01: 3min (2 tasks, 2 files)
 - 13-02: 4min (2 tasks, 3 files)
+- 14-01: 4min (2 tasks, 3 files)
 
 *Updated after each plan completion*
 
@@ -60,6 +61,10 @@ Recent decisions affecting current work:
 - [13-02]: flatten_dim uses 1024 channels matching 5th encoder layer (not 512 as planned)
 - [13-02]: Preview generation wrapped in try/except for 2-channel graceful degradation
 - [13-02]: v1.0 waveform training path removed, ComplexSpectrogramConfig.enabled removed
+- [14-01]: STFT loss weight 1.0 vs reconstruction 0.1 (spectral quality precedence)
+- [14-01]: STFT loss on flattened magnitude channel only (IF is derivative, not spectral content)
+- [14-01]: Magnitude-weighted IF loss normalizes weights so mean ~= 1
+- [14-01]: Nested dataclass config for LossConfig with dot-notation access
 
 ### Pending Todos
 
@@ -72,5 +77,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 13-02-PLAN.md -- Phase 13 complete: training loop v2.0-only, persistence updated, v1.0 code removed
+Stopped at: Completed 14-01-PLAN.md -- LossConfig dataclass + compute_combined_loss with multi-resolution STFT, magnitude-weighted IF, and KL
 Resume file: None
