@@ -32,7 +32,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 - [x] **Phase 12: RVQ-VAE Core Architecture** - Build the ConvVQVAE model with residual vector quantization, codebook management, and commitment loss (completed 2026-02-22)
 - [x] **Phase 13: VQ-VAE Training Pipeline** - Wire VQ-VAE into training loop with codebook health monitoring, model persistence, and training UI/CLI (completed 2026-02-22)
-- [ ] **Phase 14: Autoregressive Prior** - Build and train the autoregressive prior model on frozen VQ-VAE code sequences
+- [x] **Phase 14: Autoregressive Prior** - Build and train the autoregressive prior model on frozen VQ-VAE code sequences (completed 2026-02-22)
 - [ ] **Phase 15: Generation Pipeline** - Wire prior-based generation with sampling controls, multi-chunk stitching, and generate UI/CLI
 - [ ] **Phase 16: Encode/Decode + Code Visualization** - Encode audio to codes, decode back, visualize as timeline grid, preview codebook entries
 - [ ] **Phase 17: Code Editing** - Interactive code manipulation: cell editing, region swapping, embedding blending, undo/redo
@@ -79,7 +79,7 @@ Plans:
   2. Training detects and warns when validation perplexity drops below a memorization threshold
   3. Prior model state is bundled into the same .sda model file alongside the VQ-VAE weights
   4. User can train the prior from CLI by pointing at a trained VQ-VAE model file
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 14-01-PLAN.md -- CodePrior transformer model, PriorConfig with adaptive sizing, code extraction pipeline
 - [ ] 14-02-PLAN.md -- Prior training loop with cross-entropy loss, memorization detection, best-checkpoint tracking
@@ -150,7 +150,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. RVQ-VAE Core Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
-| 14. Autoregressive Prior | 2/3 | In Progress|  | - |
+| 14. Autoregressive Prior | 3/3 | Complete   | 2026-02-22 | - |
 | 15. Generation Pipeline | v1.1 | 0/0 | Not started | - |
 | 16. Encode/Decode + Code Visualization | v1.1 | 0/0 | Not started | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |

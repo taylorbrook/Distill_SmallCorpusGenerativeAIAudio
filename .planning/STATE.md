@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 14 of 18 (Autoregressive Prior)
-Plan: 2 of 3 in current phase
-Status: In Progress
-Last activity: 2026-02-22 -- Completed 14-02-PLAN.md (Prior training loop + memorization detection)
+Plan: 3 of 3 in current phase
+Status: Phase Complete
+Last activity: 2026-02-22 -- Completed 14-03-PLAN.md (Prior persistence + CLI command)
 
-Progress: [===============░░░░░] 73% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14: 2/3)
+Progress: [================░░░░] 78% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete)
 
 ## Performance Metrics
 
@@ -40,12 +40,13 @@ Progress: [===============░░░░░] 73% (v1.0 complete, Phase 12 complete
 | 13 | 03 | 2 min | 1 | 1 |
 | 14 | 01 | 3 min | 2 | 2 |
 | 14 | 02 | 4 min | 2 | 2 |
+| 14 | 03 | 4 min | 3 | 5 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
-- v1.1 Phase 14: In progress (2/3 plans, 7 min so far)
+- v1.1 Phase 14: Complete (3/3 plans, 11 min total)
 - Trend: Stable
 
 ## Accumulated Context
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - 14-02: VQ-VAE frozen and only used for code extraction -- prior trains on pre-extracted tensors
 - 14-02: Memorization thresholds relaxed and adaptive: 2.0/3.0/5.0 by dataset tier (<=20/<=100/>100 files)
 - 14-02: Best checkpoint tracked via deepcopy(state_dict) in memory (prior models are small)
+- 14-03: Atomic write (temp file + os.replace) for prior bundling into .distill files
+- 14-03: Lazy CodePrior import in load_model_v2 to keep fast import time for non-prior loads
+- 14-03: CLI train-prior mirrors train.py patterns (Rich, SIGINT, auto/override suffixes, JSON output)
 
 ### Pending Todos
 
@@ -100,5 +104,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 14-02-PLAN.md -- Prior training loop + memorization detection. Phase 14 in progress (2/3 plans).
+Stopped at: Completed 14-03-PLAN.md -- Prior persistence + CLI. Phase 14 complete (3/3 plans).
 Resume file: None

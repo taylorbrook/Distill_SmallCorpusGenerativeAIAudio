@@ -23,7 +23,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 - [ ] **GEN-02**: User can generate new audio from the trained prior with temperature control
 - [ ] **GEN-03**: User can control generation with top-k and nucleus (top-p) sampling
 - [ ] **GEN-04**: Prior generates multi-chunk audio with overlap-add stitching (existing pipeline)
-- [ ] **GEN-05**: Prior model is bundled in the saved model file alongside the VQ-VAE
+- [x] **GEN-05**: Prior model is bundled in the saved model file alongside the VQ-VAE
 - [x] **GEN-06**: Prior training detects memorization (validation perplexity monitoring)
 
 ### Code Manipulation
@@ -41,7 +41,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 ### Model Persistence
 
 - [x] **PERS-01**: VQ-VAE models save as v2 format with codebook state and VQ-specific metadata
-- [ ] **PERS-02**: Prior model state is bundled in the same model file
+- [x] **PERS-02**: Prior model state is bundled in the same model file
 - [ ] **PERS-03**: Model library (save/load/delete/search) works with v2 format
 
 ### User Interface
@@ -55,7 +55,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 ### Command Line
 
 - [x] **CLI-01**: CLI supports VQ-VAE training with configurable codebook parameters
-- [ ] **CLI-02**: CLI supports prior training on a trained VQ-VAE model
+- [x] **CLI-02**: CLI supports prior training on a trained VQ-VAE model
 - [ ] **CLI-03**: CLI supports encode/decode operations for code manipulation
 - [ ] **CLI-04**: CLI supports generation from trained prior with sampling controls
 
@@ -107,7 +107,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-02 | Phase 15 | Pending |
 | GEN-03 | Phase 15 | Pending |
 | GEN-04 | Phase 15 | Pending |
-| GEN-05 | Phase 14 | Pending |
+| GEN-05 | Phase 14 | Complete |
 | GEN-06 | Phase 14 | Complete |
 | CODE-01 | Phase 16 | Pending |
 | CODE-02 | Phase 16 | Pending |
@@ -119,7 +119,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CODE-08 | Phase 17 | Pending |
 | CODE-09 | Phase 16 | Pending |
 | PERS-01 | Phase 13 | Complete |
-| PERS-02 | Phase 14 | Pending |
+| PERS-02 | Phase 14 | Complete |
 | PERS-03 | Phase 18 | Pending |
 | UI-01 | Phase 17 | Pending |
 | UI-02 | Phase 18 | Pending |
@@ -127,7 +127,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-04 | Phase 15 | Pending |
 | UI-05 | Phase 18 | Pending |
 | CLI-01 | Phase 13 | Complete |
-| CLI-02 | Phase 14 | Pending |
+| CLI-02 | Phase 14 | Complete |
 | CLI-03 | Phase 18 | Pending |
 | CLI-04 | Phase 15 | Pending |
 
