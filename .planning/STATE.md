@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 13 of 16 (Model Persistence v2)
-Plan: 1 of 2 in current phase -- COMPLETE
-Status: Executing Phase 13
-Last activity: 2026-02-22 — Completed 13-01-PLAN.md (persistence layer .distillgan format)
+Plan: 2 of 2 in current phase -- COMPLETE
+Status: Phase 13 COMPLETE
+Last activity: 2026-02-22 — Completed 13-02-PLAN.md (catalog, CLI, UI sweep for .distillgan)
 
-Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1) [1/2 Phase 13 plans complete]
+Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1) [2/2 Phase 13 plans complete]
 
 ## Performance Metrics
 
@@ -38,6 +38,7 @@ Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1
 | Phase 12 P02 | 5min | 2 tasks | 3 files |
 | Phase 12 P03 | 3min | 2 tasks | 3 files |
 | Phase 13 P01 | 2min | 2 tasks | 2 files |
+| Phase 13 P02 | 4min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -57,6 +58,8 @@ Recent decisions affecting current work:
 - [Phase 12]: Waveform round-trip (Griffin-Lim) for mel conversion -- simpler than transfer matrix, guaranteed correct BigVGAN mels
 - [Phase 12]: Griffin-Lim quality loss accepted as stopgap -- Phase 16 per-model HiFi-GAN eliminates both BigVGAN OOD and mel conversion issues
 - [Phase 13]: Omit vocoder_state key from saved dict when None (not null marker) -- cleaner serialization
+- [Phase 13]: hasattr guard for optional vocoder field in display layers for backward compat
+- [Phase 13]: VocoderInfo populated from vocoder_state training_metadata dict in save_model
 
 ### Pending Todos
 
@@ -71,5 +74,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 13-01-PLAN.md
-Resume file: 13-02-PLAN.md next
+Stopped at: Completed 13-02-PLAN.md (Phase 13 complete)
+Resume file: Phase 14 next
