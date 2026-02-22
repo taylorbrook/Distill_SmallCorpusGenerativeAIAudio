@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 14 of 16 (Multi-Resolution Loss)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-02-22 -- Completed 14-01-PLAN.md
+Plan: 2 of 2 in current phase (COMPLETE)
+Status: Phase Complete
+Last activity: 2026-02-22 -- Completed 14-02-PLAN.md
 
-Progress: [███████████████░░░░░] 75% (v2.0)
+Progress: [████████████████░░░░] 80% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [███████████████░░░░░] 75% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 5 completed
+**v2.0 Plans:** 6 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -35,6 +35,7 @@ Progress: [███████████████░░░░░] 75% (v2
 - 13-01: 3min (2 tasks, 2 files)
 - 13-02: 4min (2 tasks, 3 files)
 - 14-01: 4min (2 tasks, 3 files)
+- 14-02: 4min (2 tasks, 4 files)
 
 *Updated after each plan completion*
 
@@ -65,6 +66,9 @@ Recent decisions affecting current work:
 - [14-01]: STFT loss on flattened magnitude channel only (IF is derivative, not spectral content)
 - [14-01]: Magnitude-weighted IF loss normalizes weights so mean ~= 1
 - [14-01]: Nested dataclass config for LossConfig with dot-notation access
+- [14-02]: KL annealing uses config.loss.kl.warmup_fraction and weight_max (nested config takes precedence)
+- [14-02]: Divergence detection threshold: 5 consecutive epochs of increasing loss
+- [14-02]: Combined loss fallback: loss_config=None triggers legacy vae_loss path
 
 ### Pending Todos
 
@@ -77,5 +81,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 14-01-PLAN.md -- LossConfig dataclass + compute_combined_loss with multi-resolution STFT, magnitude-weighted IF, and KL
+Stopped at: Completed 14-02-PLAN.md -- Training loop wired to compute_combined_loss with per-component logging and divergence detection
 Resume file: None
