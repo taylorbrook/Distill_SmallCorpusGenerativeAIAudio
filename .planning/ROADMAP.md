@@ -61,7 +61,10 @@ Plans:
   2. The VAE decoder produces 2-channel output where magnitude channel is non-negative and IF channel is unbounded
   3. The default latent dimension is 128 (configurable), and a round-trip encode-decode of a 2-channel input produces a 2-channel output of matching shape
   4. Model instantiation with in_channels=2 and latent_dim=128 succeeds on all supported devices (CPU, CUDA, MPS)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 13-01-PLAN.md — Core VAE architecture rewrite (5-layer encoder/decoder, 2-channel I/O, split activation, 128-dim latent)
+- [ ] 13-02-PLAN.md — Training integration and v1.0 cleanup (wire new architecture, remove v1.0 code paths)
 
 ### Phase 14: Multi-Resolution Loss
 **Goal**: Training uses perceptually grounded loss combining multi-resolution STFT loss with per-channel reconstruction loss weighted by magnitude
@@ -115,11 +118,11 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. 2-Channel Data Pipeline | 2/2 | Complete    | 2026-02-22 | - |
-| 13. 2-Channel VAE Architecture | v2.0 | 0/? | Not started | - |
+| 13. 2-Channel VAE Architecture | v2.0 | 0/2 | Not started | - |
 | 14. Multi-Resolution Loss | v2.0 | 0/? | Not started | - |
 | 15. ISTFT Reconstruction | v2.0 | 0/? | Not started | - |
 | 16. Full Pipeline Integration | v2.0 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after Phase 12 planning (2 plans)*
+*Last updated: 2026-02-21 after Phase 13 planning (2 plans)*
