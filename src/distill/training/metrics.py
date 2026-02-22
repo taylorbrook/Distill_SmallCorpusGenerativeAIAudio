@@ -251,7 +251,108 @@ class VQEpochMetrics:
 
 
 # ---------------------------------------------------------------------------
-# Callback Type (accepts both v1.0 and v1.1 events)
+# v1.1 Prior metrics
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PriorStepMetrics:
+    """Emitted every training step for autoregressive prior training.
+
+    Attributes
+    ----------
+    epoch:
+        Current epoch (0-indexed).
+    step:
+        Current step within the epoch.
+    total_steps:
+        Total steps in the epoch.
+    train_loss:
+        Cross-entropy loss for this step.
+    learning_rate:
+        Current optimizer learning rate.
+    step_time_s:
+        Wall-clock time for this step in seconds.
+    """
+
+    epoch: int
+    step: int
+    total_steps: int
+    train_loss: float
+    learning_rate: float
+    step_time_s: float
+
+
+@dataclass
+class PriorEpochMetrics:
+    """Emitted every epoch after validation for prior training.
+
+    Attributes
+    ----------
+    epoch:
+        Current epoch (0-indexed).
+    total_epochs:
+        Total planned epochs.
+    train_loss:
+        Average training cross-entropy loss.
+    val_loss:
+        Average validation cross-entropy loss.
+    val_perplexity:
+        ``exp(val_loss)`` -- primary quality metric for prior.
+    best_perplexity:
+        Best validation perplexity seen so far.
+    is_memorizing:
+        Whether memorization was detected this epoch.
+    memorization_message:
+        Warning message if memorizing, empty string otherwise.
+    epoch_time_s:
+        Wall-clock epoch time in seconds.
+    learning_rate:
+        Current optimizer learning rate.
+    """
+
+    epoch: int
+    total_epochs: int
+    train_loss: float
+    val_loss: float
+    val_perplexity: float
+    best_perplexity: float
+    is_memorizing: bool
+    memorization_message: str
+    epoch_time_s: float
+    learning_rate: float
+
+
+@dataclass
+class PriorTrainingCompleteEvent:
+    """Emitted when prior training finishes.
+
+    Attributes
+    ----------
+    final_train_loss:
+        Training cross-entropy loss at the final epoch.
+    final_val_loss:
+        Validation cross-entropy loss at the final epoch.
+    final_perplexity:
+        ``exp(final_val_loss)`` at the final epoch.
+    best_perplexity:
+        Lowest validation perplexity observed during training.
+    epochs_trained:
+        Number of epochs completed.
+    was_memorizing:
+        Whether memorization was detected at any point.
+    """
+
+    final_train_loss: float
+    final_val_loss: float
+    final_perplexity: float
+    best_perplexity: float
+    epochs_trained: int
+    was_memorizing: bool
+
+
+# ---------------------------------------------------------------------------
+# Callback Type (accepts v1.0, v1.1, and prior events)
 # ---------------------------------------------------------------------------
 
 MetricsCallback = Callable[
@@ -261,6 +362,9 @@ MetricsCallback = Callable[
             EpochMetrics,
             VQStepMetrics,
             VQEpochMetrics,
+            PriorStepMetrics,
+            PriorEpochMetrics,
+            PriorTrainingCompleteEvent,
             PreviewEvent,
             TrainingCompleteEvent,
         ]
@@ -269,8 +373,8 @@ MetricsCallback = Callable[
 ]
 """Type alias for metrics event subscribers.
 
-A callback receives one of the event types (v1.0 or v1.1) and processes
-it (e.g., update UI, write log, etc.).
+A callback receives one of the event types (v1.0, v1.1, or prior) and
+processes it (e.g., update UI, write log, etc.).
 """
 
 
