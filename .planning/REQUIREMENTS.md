@@ -13,7 +13,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 - [x] **VQVAE-02**: Codebook size automatically scales based on dataset size (64 for 5-20 files, 128 for 20-100, 256 for 100-500)
 - [x] **VQVAE-03**: Training uses EMA codebook updates with k-means initialization and dead code reset
 - [ ] **VQVAE-04**: Per-level codebook utilization, perplexity, and dead code count are displayed during training
-- [ ] **VQVAE-05**: Training uses commitment loss (single weight parameter) instead of KL divergence
+- [x] **VQVAE-05**: Training uses commitment loss (single weight parameter) instead of KL divergence
 - [x] **VQVAE-06**: User can configure number of RVQ levels (2-4) and codebook dimension
 - [ ] **VQVAE-07**: Training detects and warns when codebook utilization drops below 30%
 
@@ -100,7 +100,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VQVAE-02 | Phase 12 | Complete |
 | VQVAE-03 | Phase 12 | Complete |
 | VQVAE-04 | Phase 13 | Pending |
-| VQVAE-05 | Phase 12 | Pending |
+| VQVAE-05 | Phase 12 | Complete |
 | VQVAE-06 | Phase 12 | Complete |
 | VQVAE-07 | Phase 13 | Pending |
 | GEN-01 | Phase 14 | Pending |

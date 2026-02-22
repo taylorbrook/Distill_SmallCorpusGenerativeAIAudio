@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Milestone Goal:** Replace continuous VAE with RVQ-VAE, add autoregressive prior for generation, build code manipulation UI for exploring discrete audio representations.
 
-- [ ] **Phase 12: RVQ-VAE Core Architecture** - Build the ConvVQVAE model with residual vector quantization, codebook management, and commitment loss
+- [x] **Phase 12: RVQ-VAE Core Architecture** - Build the ConvVQVAE model with residual vector quantization, codebook management, and commitment loss (completed 2026-02-22)
 - [ ] **Phase 13: VQ-VAE Training Pipeline** - Wire VQ-VAE into training loop with codebook health monitoring, model persistence, and training UI/CLI
 - [ ] **Phase 14: Autoregressive Prior** - Build and train the autoregressive prior model on frozen VQ-VAE code sequences
 - [ ] **Phase 15: Generation Pipeline** - Wire prior-based generation with sampling controls, multi-chunk stitching, and generate UI/CLI
@@ -49,7 +49,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   2. Codebook size automatically scales based on dataset size (64 for 5-20 files, 128 for 20-100, 256 for 100-500) without user intervention
   3. Codebooks initialize via k-means on first batch, update via EMA, and automatically reset dead codes during training
   4. Training uses commitment loss (single weight parameter) with no KL divergence, free bits, or annealing logic
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 12-01-PLAN.md -- Install vector-quantize-pytorch, create VQVAEConfig with adaptive sizing, build ConvVQVAE model architecture
 - [ ] 12-02-PLAN.md -- Create vqvae_loss with multi-scale spectral loss, wire VQ-VAE exports through models __init__.py
@@ -140,7 +140,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. RVQ-VAE Core Architecture | 1/2 | In Progress|  | - |
+| 12. RVQ-VAE Core Architecture | 2/2 | Complete   | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | v1.1 | 0/0 | Not started | - |
 | 14. Autoregressive Prior | v1.1 | 0/0 | Not started | - |
 | 15. Generation Pipeline | v1.1 | 0/0 | Not started | - |
