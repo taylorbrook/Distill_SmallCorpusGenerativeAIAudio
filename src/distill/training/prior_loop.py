@@ -669,9 +669,15 @@ def train_prior(
 
     from datetime import datetime, timezone
 
+    prior_config_dict = _asdict(prior_config)
+    # Include seq_len and num_quantizers so persistence can reconstruct
+    # the CodePrior model from the saved config alone.
+    prior_config_dict["seq_len"] = flat_seq_len
+    prior_config_dict["num_quantizers"] = num_quantizers
+
     return {
         "prior_model": prior_model,
-        "prior_config": _asdict(prior_config),
+        "prior_config": prior_config_dict,
         "prior_metadata": {
             "epochs_trained": epochs_trained,
             "final_perplexity": final_perplexity,
