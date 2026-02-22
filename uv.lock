@@ -117,6 +117,20 @@ wheels = [
 ]
 
 [[package]]
+name = "auraloss"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/55/2a3bbafa3e947b972c81f852c6c31cc359a21848908f2aabd35b34b532e9/auraloss-0.4.0.tar.gz", hash = "sha256:86eb3bce81aaf579d9e2df59b0cae7ab8de793902c344af72f255d53c3d5c954", size = 17640, upload-time = "2023-04-21T09:21:46.686Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/ab/8df927d3f0951cf67ca5973d89b35bcbda1777a4c78bf90a853d02d91285/auraloss-0.4.0-py3-none-any.whl", hash = "sha256:7ca1cfff0d04db9c1269038a1c527fc38bc4756dd33bfff115889a3461d97d37", size = 16743, upload-time = "2023-04-21T09:21:44.905Z" },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
@@ -625,6 +639,7 @@ name = "distill"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "auraloss" },
     { name = "gradio" },
     { name = "lameenc" },
     { name = "matplotlib" },
@@ -653,6 +668,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "auraloss", specifier = ">=0.4.0" },
     { name = "gradio", specifier = ">=5.0,<7.0" },
     { name = "lameenc", specifier = ">=1.7" },
     { name = "matplotlib", specifier = ">=3.9" },

@@ -140,6 +140,89 @@ class ComplexSpectrogramConfig:
 
 
 # ---------------------------------------------------------------------------
+# Loss Config
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class STFTLossConfig:
+    """Multi-resolution STFT loss settings (auraloss).
+
+    Attributes
+    ----------
+    weight:
+        Weight for STFT loss term in the total combined loss.
+    fft_sizes:
+        FFT window sizes for each resolution.
+    hop_sizes:
+        Hop sizes for each resolution.
+    win_lengths:
+        Window lengths for each resolution.
+    """
+
+    weight: float = 1.0
+    fft_sizes: tuple[int, ...] = (512, 1024, 2048)
+    hop_sizes: tuple[int, ...] = (128, 256, 512)
+    win_lengths: tuple[int, ...] = (512, 1024, 2048)
+
+
+@dataclass
+class ReconLossConfig:
+    """Per-channel reconstruction loss settings (L1).
+
+    Attributes
+    ----------
+    weight:
+        Weight for total reconstruction loss in the combined loss.
+    magnitude_weight:
+        Relative weight for the magnitude channel.
+    if_weight:
+        Relative weight for the IF channel (magnitude-weighted).
+    """
+
+    weight: float = 0.1
+    magnitude_weight: float = 1.0
+    if_weight: float = 0.5
+
+
+@dataclass
+class KLLossConfig:
+    """KL divergence loss settings.
+
+    Attributes
+    ----------
+    weight_max:
+        Maximum KL weight (beta) after annealing.
+    warmup_fraction:
+        Fraction of total epochs for KL annealing ramp.
+    free_bits:
+        Minimum KL per latent dimension (prevents posterior collapse).
+    """
+
+    weight_max: float = 0.01
+    warmup_fraction: float = 0.3
+    free_bits: float = 0.1
+
+
+@dataclass
+class LossConfig:
+    """Configuration for combined multi-resolution loss.
+
+    Uses nested sub-dataclasses for grouped config access:
+      config.loss.stft.weight
+      config.loss.reconstruction.magnitude_weight
+      config.loss.kl.weight_max
+
+    Default weights favor STFT loss (1.0) over reconstruction (0.1),
+    per user decision that spectral quality takes precedence.
+    """
+
+    stft: STFTLossConfig = field(default_factory=STFTLossConfig)
+    reconstruction: ReconLossConfig = field(default_factory=ReconLossConfig)
+    kl: KLLossConfig = field(default_factory=KLLossConfig)
+
+
+# ---------------------------------------------------------------------------
 # Training Config
 # ---------------------------------------------------------------------------
 
@@ -163,8 +246,13 @@ class TrainingConfig:
         Initial learning rate for AdamW optimizer.
     kl_warmup_fraction:
         Fraction of total epochs over which KL weight ramps from 0 to kl_weight_max.
+        Superseded by ``loss.kl.warmup_fraction`` when using combined loss.
+    kl_weight_max:
+        Maximum KL weight (beta) after annealing.
+        Superseded by ``loss.kl.weight_max`` when using combined loss.
     free_bits:
         Minimum KL per latent dimension (prevents posterior collapse).
+        Superseded by ``loss.kl.free_bits`` when using combined loss.
     val_fraction:
         Fraction of files held out for validation (overridden by
         ``get_adaptive_config`` based on dataset size).
@@ -185,6 +273,9 @@ class TrainingConfig:
     device:
         Target device: ``"auto"`` resolves via Phase 1 hardware detection,
         or explicit ``"cpu"`` / ``"cuda"`` / ``"mps"``.
+    loss:
+        Combined multi-resolution loss configuration with nested
+        sub-configs for STFT, reconstruction, and KL components.
     num_workers:
         DataLoader worker processes.  0 = main process (safest cross-platform).
     """
@@ -207,6 +298,7 @@ class TrainingConfig:
     complex_spectrogram: ComplexSpectrogramConfig = field(
         default_factory=ComplexSpectrogramConfig
     )
+    loss: LossConfig = field(default_factory=LossConfig)
     device: str = "auto"
     num_workers: int = 0
 
