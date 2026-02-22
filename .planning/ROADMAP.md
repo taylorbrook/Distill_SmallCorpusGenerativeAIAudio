@@ -79,7 +79,11 @@ Plans:
   2. Training detects and warns when validation perplexity drops below a memorization threshold
   3. Prior model state is bundled into the same .sda model file alongside the VQ-VAE weights
   4. User can train the prior from CLI by pointing at a trained VQ-VAE model file
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 14-01-PLAN.md -- CodePrior transformer model, PriorConfig with adaptive sizing, code extraction pipeline
+- [ ] 14-02-PLAN.md -- Prior training loop with cross-entropy loss, memorization detection, best-checkpoint tracking
+- [ ] 14-03-PLAN.md -- Persistence bundling (prior into .sda), CLI train-prior command, public API exports
 
 ### Phase 15: Generation Pipeline
 **Goal**: Users can generate new audio from a trained prior with temperature, top-k, and top-p controls, producing multi-chunk output through the existing pipeline
@@ -146,7 +150,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. RVQ-VAE Core Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
-| 14. Autoregressive Prior | v1.1 | 0/0 | Not started | - |
+| 14. Autoregressive Prior | v1.1 | 0/3 | Planned | - |
 | 15. Generation Pipeline | v1.1 | 0/0 | Not started | - |
 | 16. Encode/Decode + Code Visualization | v1.1 | 0/0 | Not started | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
