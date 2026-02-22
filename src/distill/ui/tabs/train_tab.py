@@ -1,4 +1,4 @@
-"""Train tab: configuration, live loss chart, previews, and cancel/resume.
+"""Train tab: VQ-VAE configuration, live loss chart, previews, and cancel.
 
 Surfaces the :class:`TrainingRunner` (Phase 3) with a Timer-polled
 dashboard.  Training runs in a daemon thread; the Timer reads the
@@ -8,8 +8,10 @@ to the loss chart, stats panel, and preview audio slots.
 Key design points:
 - ``gr.Timer(active=False)`` -- activated only when training starts.
 - 20 pre-created ``gr.Audio`` slots (hidden) revealed as previews arrive.
-- Preset dropdown auto-populates epochs/LR/advanced from
-  ``get_adaptive_config`` + ``OverfittingPreset`` mapping.
+- VQ-VAE controls: RVQ Levels slider, Commitment Weight input,
+  auto-determined Codebook Size display.
+- Per-level codebook health (utilization, perplexity, dead codes) shown
+  during training in the stats panel.
 - Empty state guidance when no dataset is loaded.
 """
 
@@ -20,16 +22,15 @@ from pathlib import Path
 
 import gradio as gr
 
-from distill.training.checkpoint import get_best_checkpoint, list_checkpoints
 from distill.training.config import (
-    OverfittingPreset,
-    TrainingConfig,
-    get_adaptive_config,
+    VQVAEConfig,
+    get_adaptive_vqvae_config,
 )
 from distill.training.metrics import (
     EpochMetrics,
     PreviewEvent,
     TrainingCompleteEvent,
+    VQEpochMetrics,
 )
 from distill.training.runner import TrainingRunner
 from distill.ui.components.guided_nav import get_empty_state_message
@@ -41,38 +42,6 @@ logger = logging.getLogger(__name__)
 # Number of pre-created audio preview slots
 _MAX_PREVIEW_SLOTS = 20
 
-# Preset name -> OverfittingPreset enum mapping
-_PRESET_MAP: dict[str, OverfittingPreset] = {
-    "Conservative": OverfittingPreset.CONSERVATIVE,
-    "Balanced": OverfittingPreset.BALANCED,
-    "Aggressive": OverfittingPreset.AGGRESSIVE,
-}
-
-# Preset -> default parameter values (subset of _PRESET_PARAMS in config.py)
-_PRESET_DEFAULTS: dict[str, dict[str, float | int]] = {
-    "Conservative": {
-        "max_epochs": 100,
-        "learning_rate": 5e-4,
-        "dropout": 0.4,
-        "weight_decay": 0.05,
-        "kl_weight_max": 0.005,
-    },
-    "Balanced": {
-        "max_epochs": 200,
-        "learning_rate": 1e-3,
-        "dropout": 0.2,
-        "weight_decay": 0.01,
-        "kl_weight_max": 0.01,
-    },
-    "Aggressive": {
-        "max_epochs": 500,
-        "learning_rate": 2e-3,
-        "dropout": 0.1,
-        "weight_decay": 0.001,
-        "kl_weight_max": 0.02,
-    },
-}
-
 
 # -------------------------------------------------------------------
 # Training callback (runs in training thread, stores events)
@@ -83,8 +52,9 @@ def _training_callback(event: object) -> None:
     """MetricsCallback that stores events for the Timer to read.
 
     Thread-safe: ``list.append`` is atomic under CPython GIL.
+    Handles both v1.0 (EpochMetrics) and v1.1 (VQEpochMetrics) events.
     """
-    if isinstance(event, EpochMetrics):
+    if isinstance(event, (EpochMetrics, VQEpochMetrics)):
         app_state.metrics_buffer["epoch_metrics"].append(event)
     elif isinstance(event, PreviewEvent):
         app_state.metrics_buffer["previews"].append(event)
@@ -124,11 +94,6 @@ def _get_output_dir() -> Path:
     return app_state.datasets_dir / name / "training"
 
 
-def _get_checkpoint_dir() -> Path:
-    """Return the checkpoint directory for the current dataset."""
-    return _get_output_dir() / "checkpoints"
-
-
 # -------------------------------------------------------------------
 # Tab builder
 # -------------------------------------------------------------------
@@ -165,14 +130,8 @@ def build_train_tab() -> dict:
             value="",
         )
 
-        # -- Config section -----------------------------------------------
+        # -- VQ-VAE Config section ----------------------------------------
         with gr.Row():
-            preset_dd = gr.Dropdown(
-                choices=["Conservative", "Balanced", "Aggressive"],
-                value="Balanced",
-                label="Training Preset",
-                scale=1,
-            )
             max_epochs_num = gr.Number(
                 value=200,
                 label="Max Epochs",
@@ -185,6 +144,30 @@ def build_train_tab() -> dict:
                 precision=6,
                 scale=1,
             )
+
+        with gr.Row():
+            rvq_levels_slider = gr.Slider(
+                minimum=2,
+                maximum=4,
+                step=1,
+                value=3,
+                label="RVQ Levels",
+                info="Fewer levels = faster, more levels = finer detail",
+            )
+            commitment_weight_num = gr.Slider(
+                minimum=0.01,
+                maximum=1.0,
+                step=0.01,
+                value=0.25,
+                label="Commitment Weight",
+                info="Controls codebook learning rate. Most users leave this at 0.25.",
+            )
+
+        codebook_size_display = gr.Textbox(
+            label="Codebook Size (auto)",
+            interactive=False,
+            value="Auto-determined from dataset size",
+        )
 
         with gr.Accordion("Advanced Training Settings", open=False):
             dropout_slider = gr.Slider(
@@ -201,18 +184,12 @@ def build_train_tab() -> dict:
                 value=0.01,
                 label="Weight Decay",
             )
-            kl_weight_slider = gr.Slider(
-                minimum=0.0,
-                maximum=0.1,
-                step=0.001,
-                value=0.01,
-                label="KL Weight (Beta)",
-            )
 
         # -- Control buttons ----------------------------------------------
         with gr.Row():
-            start_btn = gr.Button("Train", variant="primary")
+            start_btn = gr.Button("Train VQ-VAE", variant="primary")
             cancel_btn = gr.Button("Cancel", variant="stop", interactive=False)
+            # Resume hidden for VQ-VAE -- checkpoint resume needs runner adaptation
             resume_btn = gr.Button("Resume Training", visible=False)
 
         # -- Training dashboard -------------------------------------------
@@ -237,42 +214,14 @@ def build_train_tab() -> dict:
     # Event handlers
     # -------------------------------------------------------------------
 
-    def _on_preset_change(preset_name: str) -> tuple:
-        """Auto-populate config fields from preset defaults."""
-        defaults = _PRESET_DEFAULTS.get(preset_name, _PRESET_DEFAULTS["Balanced"])
-        return (
-            defaults["max_epochs"],
-            defaults["learning_rate"],
-            defaults["dropout"],
-            defaults["weight_decay"],
-            defaults["kl_weight_max"],
-        )
-
-    preset_dd.change(
-        fn=_on_preset_change,
-        inputs=[preset_dd],
-        outputs=[
-            max_epochs_num,
-            learning_rate_num,
-            dropout_slider,
-            weight_decay_slider,
-            kl_weight_slider,
-        ],
-    )
-
     def _check_dataset_ready() -> tuple:
         """Check if a dataset is loaded and toggle empty/main UI."""
         has_ds = app_state.current_dataset is not None
-        # Also check for existing checkpoints to show Resume button
-        show_resume = False
-        if has_ds:
-            ckpt_dir = _get_checkpoint_dir()
-            ckpts = list_checkpoints(ckpt_dir) if ckpt_dir.exists() else []
-            show_resume = len(ckpts) > 0
+        # Resume hidden for VQ-VAE (checkpoint resume needs adaptation)
         return (
             gr.update(visible=not has_ds),   # empty_state
             gr.update(visible=has_ds),        # train_ui
-            gr.update(visible=show_resume),   # resume_btn
+            gr.update(visible=False),         # resume_btn (always hidden for VQ-VAE)
         )
 
     # Poll dataset readiness when the tab renders via a load event
@@ -290,10 +239,10 @@ def build_train_tab() -> dict:
         learning_rate: float,
         dropout: float,
         weight_decay: float,
-        kl_weight_max: float,
-        preset_name: str,
+        rvq_levels: int,
+        commitment_weight: float,
     ) -> list:
-        """Start training in a background thread."""
+        """Start VQ-VAE training in a background thread."""
         ds = app_state.current_dataset
         if ds is None:
             return [
@@ -302,20 +251,18 @@ def build_train_tab() -> dict:
                 gr.Timer(active=False),  # timer
                 gr.update(interactive=True),   # start_btn
                 gr.update(interactive=False),  # cancel_btn
+                gr.update(),          # codebook_size_display
             ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
 
-        # Build config from adaptive base, override with UI values
+        # Build VQVAEConfig from adaptive base, override with UI values
         file_count = len(ds.valid_files) if hasattr(ds, "valid_files") else 10
-        config = get_adaptive_config(file_count)
+        config = get_adaptive_vqvae_config(file_count)
         config.max_epochs = int(max_epochs)
         config.learning_rate = float(learning_rate)
-        config.regularization.dropout = float(dropout)
-        config.regularization.weight_decay = float(weight_decay)
-        config.kl_weight_max = float(kl_weight_max)
-
-        # Map preset
-        if preset_name in _PRESET_MAP:
-            config.preset = _PRESET_MAP[preset_name]
+        config.dropout = float(dropout)
+        config.weight_decay = float(weight_decay)
+        config.num_quantizers = int(rvq_levels)
+        config.commitment_weight = float(commitment_weight)
 
         # Clear metrics buffer
         reset_metrics_buffer()
@@ -331,7 +278,7 @@ def build_train_tab() -> dict:
         file_paths = list(ds.valid_files) if hasattr(ds, "valid_files") else []
 
         try:
-            runner.start(
+            runner.start_vqvae(
                 config=config,
                 file_paths=file_paths,
                 output_dir=output_dir,
@@ -349,15 +296,20 @@ def build_train_tab() -> dict:
                 gr.Timer(active=False),
                 gr.update(interactive=True),
                 gr.update(interactive=False),
+                gr.update(),          # codebook_size_display
             ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
 
-        # Return: activate timer, disable Start, enable Cancel, hide previews
+        # Show auto-determined codebook size
+        cb_info = f"{config.codebook_size} entries x {config.num_quantizers} levels"
+
+        # Return: activate timer, disable Start, enable Cancel, show codebook size
         return [
             gr.update(value=None),           # loss_plot (clear)
             "Training started...",           # stats_md
             gr.Timer(active=True),           # timer
             gr.update(interactive=False),    # start_btn
             gr.update(interactive=True),     # cancel_btn
+            gr.update(value=cb_info),        # codebook_size_display
         ] + [gr.update(visible=False, value=None) for _ in range(_MAX_PREVIEW_SLOTS)]
 
     start_btn.click(
@@ -368,10 +320,13 @@ def build_train_tab() -> dict:
             learning_rate_num,
             dropout_slider,
             weight_decay_slider,
-            kl_weight_slider,
-            preset_dd,
+            rvq_levels_slider,
+            commitment_weight_num,
         ],
-        outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
+        outputs=[
+            loss_plot, stats_md, timer, start_btn, cancel_btn,
+            codebook_size_display,
+        ] + preview_audios,
     )
 
     def _cancel_training() -> list:
@@ -393,102 +348,13 @@ def build_train_tab() -> dict:
         outputs=[timer, start_btn, cancel_btn, stats_md],
     )
 
-    def _resume_training(
-        model_name: str,
-        max_epochs: int,
-        learning_rate: float,
-        dropout: float,
-        weight_decay: float,
-        kl_weight_max: float,
-        preset_name: str,
-    ) -> list:
-        """Resume training from the best existing checkpoint."""
-        ds = app_state.current_dataset
-        if ds is None:
-            return [
-                gr.update(),
-                "No dataset loaded.",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+    # --- Resume is hidden for VQ-VAE (checkpoint resume needs adaptation) ---
 
-        ckpt_dir = _get_checkpoint_dir()
-        best_ckpt = get_best_checkpoint(ckpt_dir)
-        if best_ckpt is None:
-            return [
-                gr.update(),
-                "No checkpoint found to resume from.",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+    # Resume button is hidden -- VQ-VAE checkpoint resume needs runner
+    # adaptation.  The button remains in the component tree but is never
+    # shown (visible=False is set at construction and _check_dataset_ready
+    # never reveals it for VQ-VAE).
 
-        # Build config
-        file_count = len(ds.valid_files) if hasattr(ds, "valid_files") else 10
-        config = get_adaptive_config(file_count)
-        config.max_epochs = int(max_epochs)
-        config.learning_rate = float(learning_rate)
-        config.regularization.dropout = float(dropout)
-        config.regularization.weight_decay = float(weight_decay)
-        config.kl_weight_max = float(kl_weight_max)
-
-        if preset_name in _PRESET_MAP:
-            config.preset = _PRESET_MAP[preset_name]
-
-        # Clear metrics buffer
-        reset_metrics_buffer()
-
-        output_dir = _get_output_dir()
-        runner = TrainingRunner()
-        app_state.training_runner = runner
-        app_state.training_active = True
-
-        file_paths = list(ds.valid_files) if hasattr(ds, "valid_files") else []
-
-        try:
-            runner.resume(
-                config=config,
-                file_paths=file_paths,
-                output_dir=output_dir,
-                device=app_state.device,
-                checkpoint_path=best_ckpt,
-                callback=_training_callback,
-                models_dir=app_state.models_dir,
-                dataset_name=ds.name,
-                model_name=model_name.strip() if model_name else "",
-            )
-        except RuntimeError as exc:
-            app_state.training_active = False
-            return [
-                gr.update(),
-                f"Failed to resume training: {exc}",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
-
-        return [
-            gr.update(value=None),
-            f"Resuming from checkpoint: {best_ckpt.name}",
-            gr.Timer(active=True),
-            gr.update(interactive=False),
-            gr.update(interactive=True),
-        ] + [gr.update(visible=False, value=None) for _ in range(_MAX_PREVIEW_SLOTS)]
-
-    resume_btn.click(
-        fn=_resume_training,
-        inputs=[
-            model_name_input,
-            max_epochs_num,
-            learning_rate_num,
-            dropout_slider,
-            weight_decay_slider,
-            kl_weight_slider,
-            preset_dd,
-        ],
-        outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
-    )
 
     def _poll_training() -> list:
         """Timer tick: read metrics buffer and update dashboard."""
@@ -521,15 +387,48 @@ def build_train_tab() -> dict:
         # Build loss chart
         chart = build_loss_chart(epoch_metrics)
 
-        # Build stats string
+        # Build stats string -- detect VQ-VAE vs v1.0 metrics
         if epoch_metrics:
             latest = epoch_metrics[-1]
             eta_str = _format_eta(latest.eta_seconds)
-            stats = (
-                f"**Epoch {latest.epoch + 1}/{latest.total_epochs}** | "
-                f"Train: {latest.train_loss:.4f} | Val: {latest.val_loss:.4f} | "
-                f"LR: {latest.learning_rate:.2e} | ETA: {eta_str}"
-            )
+
+            if isinstance(latest, VQEpochMetrics):
+                # VQ-VAE stats with codebook health
+                stats = (
+                    f"**Epoch {latest.epoch + 1}/{latest.total_epochs}** | "
+                    f"Train: {latest.train_loss:.4f} | Val: {latest.val_loss:.4f} | "
+                    f"Recon: {latest.val_recon_loss:.4f} | "
+                    f"Commit: {latest.val_commit_loss:.4f} | "
+                    f"LR: {latest.learning_rate:.2e} | ETA: {eta_str}"
+                )
+
+                # Codebook health table
+                if latest.codebook_health:
+                    stats += "\n\n**Codebook Health:**\n"
+                    stats += "| Level | Utilization | Perplexity | Dead Codes |\n"
+                    stats += "|-------|-------------|------------|------------|\n"
+                    for level_key in sorted(latest.codebook_health.keys()):
+                        h = latest.codebook_health[level_key]
+                        util_pct = h.get("utilization", 0) * 100
+                        perplexity = h.get("perplexity", 0)
+                        dead_codes = h.get("dead_code_count", 0)
+                        stats += (
+                            f"| {level_key} | {util_pct:.0f}% | "
+                            f"{perplexity:.1f} | {dead_codes} |\n"
+                        )
+
+                # Utilization warnings
+                if latest.utilization_warnings:
+                    stats += "\n**Warnings:** " + " | ".join(
+                        latest.utilization_warnings
+                    )
+            else:
+                # v1.0 stats (original format)
+                stats = (
+                    f"**Epoch {latest.epoch + 1}/{latest.total_epochs}** | "
+                    f"Train: {latest.train_loss:.4f} | Val: {latest.val_loss:.4f} | "
+                    f"LR: {latest.learning_rate:.2e} | ETA: {eta_str}"
+                )
         else:
             stats = "Waiting for first epoch..."
 
@@ -552,12 +451,22 @@ def build_train_tab() -> dict:
         if is_complete:
             if epoch_metrics:
                 latest = epoch_metrics[-1]
-                stats = (
-                    f"**Training complete!** "
-                    f"Final -- Train: {latest.train_loss:.4f} | "
-                    f"Val: {latest.val_loss:.4f} | "
-                    f"Epochs: {latest.epoch + 1}"
-                )
+                if isinstance(latest, VQEpochMetrics):
+                    stats = (
+                        f"**Training complete!** "
+                        f"Final -- Train: {latest.train_loss:.4f} | "
+                        f"Val: {latest.val_loss:.4f} | "
+                        f"Recon: {latest.val_recon_loss:.4f} | "
+                        f"Commit: {latest.val_commit_loss:.4f} | "
+                        f"Epochs: {latest.epoch + 1}"
+                    )
+                else:
+                    stats = (
+                        f"**Training complete!** "
+                        f"Final -- Train: {latest.train_loss:.4f} | "
+                        f"Val: {latest.val_loss:.4f} | "
+                        f"Epochs: {latest.epoch + 1}"
+                    )
             else:
                 stats = "Training complete."
             app_state.training_active = False
