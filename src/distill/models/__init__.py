@@ -11,6 +11,7 @@ from distill.models.losses import (
 )
 from distill.models.persistence import (
     MODEL_FILE_EXTENSION,
+    MODEL_FORMAT_MARKER,
     LoadedModel,
     ModelMetadata,
     SAVED_MODEL_VERSION,
@@ -38,5 +39,6 @@ __all__ = [
     "delete_model",
     "save_model_from_checkpoint",
     "MODEL_FILE_EXTENSION",
+    "MODEL_FORMAT_MARKER",
     "SAVED_MODEL_VERSION",
 ]
