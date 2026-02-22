@@ -112,21 +112,22 @@ def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
 def _handle_file_upload(files: list[str] | None) -> tuple:
     """Handle drag-and-drop file upload.
 
-    Args:
-        files: List of file path strings from gr.File upload.
+    Clears the file component after import so users can immediately
+    drop another batch of files.
 
     Returns:
-        Tuple of (stats_md, gallery_images, audio_player,
-                  stats_visible, gallery_visible).
+        Tuple of (file_upload_clear, stats_md, gallery_images,
+                  audio_player, stats_visible, gallery_visible).
     """
     if not files:
-        return "", [], None, gr.update(visible=False), gr.update(visible=False)
+        return None, "", [], None, gr.update(visible=False), gr.update(visible=False)
 
     file_paths = [Path(f) for f in files]
     stats, thumbnails, audio = _import_files(file_paths)
 
     has_results = bool(thumbnails)
     return (
+        None,  # clear file component so next drop works
         stats,
         thumbnails,
         audio,
@@ -137,9 +138,6 @@ def _handle_file_upload(files: list[str] | None) -> tuple:
 
 def _handle_folder_upload(files: list[str] | None) -> tuple:
     """Handle folder browse upload.
-
-    Args:
-        files: List of file path strings from gr.UploadButton directory upload.
 
     Returns:
         Tuple of (stats_md, gallery_images, audio_player,
@@ -206,12 +204,47 @@ def _handle_thumbnail_click(evt: gr.SelectData) -> str | None:
     return None
 
 
+def _load_existing_imports() -> tuple[str, list[str], bool]:
+    """Check for previously imported files and load them into app_state.
+
+    Called at startup so that files surviving from a previous session
+    are shown immediately without requiring a new upload.
+
+    Returns:
+        Tuple of (stats_markdown, thumbnail_paths, has_files).
+    """
+    import_dir = app_state.datasets_dir / "imported"
+    if not import_dir.exists():
+        return "", [], False
+
+    from distill.audio.validation import collect_audio_files
+
+    existing = collect_audio_files(import_dir)
+    if not existing:
+        return "", [], False
+
+    dataset = Dataset.from_directory(import_dir, name="imported")
+    app_state.current_dataset = dataset
+
+    summary = compute_summary(dataset, generate_thumbnails=True)
+    app_state.current_summary = summary
+
+    duration_str = _format_duration(summary.total_duration_seconds)
+    stats = (
+        f"**{summary.valid_file_count}** files | "
+        f"**{duration_str}** total | "
+        f"**{summary.dominant_sample_rate} Hz**"
+    )
+    thumbnails = [str(p) for p in summary.thumbnail_paths.values() if p.exists()]
+    return stats, thumbnails, True
+
+
 def build_data_tab() -> dict:
     """Build the Data tab UI within the current Blocks context.
 
     Layout:
     - Header
-    - Upload row (drag-and-drop file zone + folder browse button)
+    - Upload row (drag-and-drop file zone + folder browse button + clear)
     - Stats panel (hidden until import)
     - Waveform thumbnail gallery (hidden until import)
     - Audio player (hidden until thumbnail click)
@@ -219,6 +252,9 @@ def build_data_tab() -> dict:
     Returns:
         Dict of component references for cross-tab wiring.
     """
+    # Load any files left over from a previous session
+    init_stats, init_thumbs, has_existing = _load_existing_imports()
+
     gr.Markdown("## Data")
 
     with gr.Row():
@@ -240,13 +276,14 @@ def build_data_tab() -> dict:
         )
 
     stats_display = gr.Markdown(
-        value="",
-        visible=False,
+        value=init_stats,
+        visible=has_existing,
     )
 
     thumbnail_gallery = gr.Gallery(
         label="Waveform Thumbnails",
-        visible=False,
+        visible=has_existing,
+        value=init_thumbs if has_existing else None,
         columns=4,
         height=400,
     )
@@ -257,19 +294,21 @@ def build_data_tab() -> dict:
         interactive=False,
     )
 
-    # Wire events
-    outputs = [stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
+    # Wire events — file upload includes the component itself so we can
+    # clear it after import, allowing the user to drop more files.
+    file_outputs = [file_upload, stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
+    folder_outputs = [stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
 
     file_upload_event = file_upload.upload(
         fn=_handle_file_upload,
         inputs=[file_upload],
-        outputs=outputs,
+        outputs=file_outputs,
     )
 
     folder_upload_event = folder_btn.upload(
         fn=_handle_folder_upload,
         inputs=[folder_btn],
-        outputs=outputs,
+        outputs=folder_outputs,
     )
 
     clear_outputs = [file_upload, stats_display, thumbnail_gallery, audio_player, stats_display, thumbnail_gallery]
