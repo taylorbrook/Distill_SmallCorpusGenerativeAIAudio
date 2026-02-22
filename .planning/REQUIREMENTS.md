@@ -17,10 +17,10 @@ Requirements for complex spectrogram milestone. Each maps to roadmap phases.
 
 ### Model Architecture
 
-- [ ] **ARCH-01**: VAE encoder accepts 2-channel input (magnitude + IF)
-- [ ] **ARCH-02**: VAE decoder outputs 2-channel reconstruction (magnitude + IF)
-- [ ] **ARCH-03**: Default latent dimension is 128 (configurable)
-- [ ] **ARCH-04**: Decoder activation handles both magnitude (non-negative) and IF (unbounded) channels appropriately
+- [x] **ARCH-01**: VAE encoder accepts 2-channel input (magnitude + IF)
+- [x] **ARCH-02**: VAE decoder outputs 2-channel reconstruction (magnitude + IF)
+- [x] **ARCH-03**: Default latent dimension is 128 (configurable)
+- [x] **ARCH-04**: Decoder activation handles both magnitude (non-negative) and IF (unbounded) channels appropriately
 
 ### Loss Function
 
@@ -78,10 +78,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-03 | Phase 12 | Complete |
 | DATA-04 | Phase 12 | Complete |
 | DATA-05 | Phase 12 | Complete |
-| ARCH-01 | Phase 13 | Pending |
-| ARCH-02 | Phase 13 | Pending |
-| ARCH-03 | Phase 13 | Pending |
-| ARCH-04 | Phase 13 | Pending |
+| ARCH-01 | Phase 13 | Complete |
+| ARCH-02 | Phase 13 | Complete |
+| ARCH-03 | Phase 13 | Complete |
+| ARCH-04 | Phase 13 | Complete |
 | LOSS-01 | Phase 14 | Pending |
 | LOSS-02 | Phase 14 | Pending |
 | LOSS-03 | Phase 14 | Pending |

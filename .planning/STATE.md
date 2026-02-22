@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 12 - 2-Channel Data Pipeline (v2.0 Complex Spectrogram)
+**Current focus:** Phase 13 - 2-Channel VAE Architecture (v2.0 Complex Spectrogram)
 
 ## Current Position
 
-Phase: 12 of 16 (2-Channel Data Pipeline) -- COMPLETE
-Plan: 2 of 2 in current phase (all plans complete)
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 12-02-PLAN.md
+Phase: 13 of 16 (2-Channel VAE Architecture)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-02-22 -- Completed 13-01-PLAN.md
 
-Progress: [████████████░░░░░░░░] 60% (v2.0)
+Progress: [█████████████░░░░░░░] 65% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [████████████░░░░░░░░] 60% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 2 completed
+**v2.0 Plans:** 3 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -32,6 +32,7 @@ Progress: [████████████░░░░░░░░] 60% (v2
 **v2.0 Trend:**
 - 12-01: 6min (2 tasks, 4 files)
 - 12-02: 5min (2 tasks, 5 files)
+- 13-01: 3min (2 tasks, 2 files)
 
 *Updated after each plan completion*
 
@@ -52,6 +53,9 @@ Recent decisions affecting current work:
 - [12-01]: Hann window for STFT to avoid spectral leakage
 - [12-02]: Spectrogram-level train/val split for cached spectrograms (files mixed in cache)
 - [12-02]: Latent space analysis skipped in 2-channel mode (deferred to Phase 16)
+- [13-01]: 5th encoder layer uses 1024 channels (not 512) to exceed >10M param target (~17.3M)
+- [13-01]: Split-apply activation: Softplus for magnitude ch, Tanh for IF ch
+- [13-01]: Pad-to-32 strategy for 5 stride-2 layers
 
 ### Pending Todos
 
@@ -64,5 +68,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 12-02-PLAN.md -- Phase 12 complete, ready for Phase 13 (VAE architecture)
+Stopped at: Completed 13-01-PLAN.md -- VAE architecture rewritten for 2-channel, ready for 13-02 (config/training/v1.0 cleanup)
 Resume file: None
