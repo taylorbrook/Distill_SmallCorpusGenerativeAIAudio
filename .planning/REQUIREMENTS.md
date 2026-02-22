@@ -54,7 +54,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 
 ### Command Line
 
-- [ ] **CLI-01**: CLI supports VQ-VAE training with configurable codebook parameters
+- [x] **CLI-01**: CLI supports VQ-VAE training with configurable codebook parameters
 - [ ] **CLI-02**: CLI supports prior training on a trained VQ-VAE model
 - [ ] **CLI-03**: CLI supports encode/decode operations for code manipulation
 - [ ] **CLI-04**: CLI supports generation from trained prior with sampling controls
@@ -126,7 +126,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-03 | Phase 13 | Pending |
 | UI-04 | Phase 15 | Pending |
 | UI-05 | Phase 18 | Pending |
-| CLI-01 | Phase 13 | Pending |
+| CLI-01 | Phase 13 | Complete |
 | CLI-02 | Phase 14 | Pending |
 | CLI-03 | Phase 18 | Pending |
 | CLI-04 | Phase 15 | Pending |
