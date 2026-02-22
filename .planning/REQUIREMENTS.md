@@ -9,10 +9,10 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 
 ### Vocoder Core
 
-- [ ] **VOC-01**: BigVGAN-v2 universal vocoder converts mel spectrograms to waveforms as the default reconstruction method
+- [x] **VOC-01**: BigVGAN-v2 universal vocoder converts mel spectrograms to waveforms as the default reconstruction method
 - [ ] **VOC-02**: Mel adapter converts VAE's log1p-normalized mels to BigVGAN's log-clamp format
-- [ ] **VOC-03**: BigVGAN model downloads automatically on first use with progress indication
-- [ ] **VOC-04**: Vocoder inference runs on CUDA, MPS (Apple Silicon), and CPU
+- [x] **VOC-03**: BigVGAN model downloads automatically on first use with progress indication
+- [x] **VOC-04**: Vocoder inference runs on CUDA, MPS (Apple Silicon), and CPU
 - [ ] **VOC-05**: Vocoder auto-selects best available: per-model HiFi-GAN > BigVGAN universal
 - [x] **VOC-06**: BigVGAN source code vendored with version pinning (not pip-installed)
 
@@ -83,10 +83,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VOC-01 | Phase 12 | Pending |
+| VOC-01 | Phase 12 | Complete |
 | VOC-02 | Phase 12 | Pending |
-| VOC-03 | Phase 12 | Pending |
-| VOC-04 | Phase 12 | Pending |
+| VOC-03 | Phase 12 | Complete |
+| VOC-04 | Phase 12 | Complete |
 | VOC-05 | Phase 16 | Pending |
 | VOC-06 | Phase 12 | Complete |
 | GEN-01 | Phase 14 | Pending |

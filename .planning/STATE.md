@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 12 of 16 (Vocoder Interface & BigVGAN Integration)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-22 — Completed 12-01 (vendor BigVGAN + vocoder interface)
+Last activity: 2026-02-22 — Completed 12-02 (BigVGAN vocoder wrapper + weight manager)
 
-Progress: █░░░░░░░░░░░░░░░░░░░ 4% (v1.1)
+Progress: █░░░░░░░░░░░░░░░░░░░ 8% (v1.1)
 
 ## Performance Metrics
 
@@ -35,6 +35,7 @@ Progress: █░░░░░░░░░░░░░░░░░░░ 4% (v1.1)
 
 *Updated after each plan completion*
 | Phase 12 P01 | 2min | 2 tasks | 75 files |
+| Phase 12 P02 | 5min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -50,6 +51,7 @@ Recent decisions affecting current work:
 - [v1.1 Milestone]: librosa (new dep) for Slaney-normalized mel filterbanks matching BigVGAN training data
 - [Phase 12]: VENDOR_PIN.txt with commit hash for BigVGAN version pinning (no git submodule)
 - [Phase 12]: librosa added as full dependency (Slaney filterbank); numba/llvmlite transitive deps accepted
+- [Phase 12]: Direct model loading from cached dir instead of from_pretrained (huggingface_hub mixin compat issue with vendored BigVGAN)
 
 ### Pending Todos
 
@@ -64,5 +66,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 12-01-PLAN.md
-Resume file: .planning/phases/12-vocoder-interface-bigvgan-integration/12-01-SUMMARY.md
+Stopped at: Completed 12-02-PLAN.md
+Resume file: .planning/phases/12-vocoder-interface-bigvgan-integration/12-02-SUMMARY.md
