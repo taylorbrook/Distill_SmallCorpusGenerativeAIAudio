@@ -75,7 +75,10 @@ Plans:
   2. IF channel reconstruction loss is weighted by magnitude so that errors in low-energy (inaudible) regions contribute less
   3. Loss term weights (STFT vs. per-channel, magnitude vs. IF, KL) are configurable via training config without code changes
   4. Training on a small dataset (5-20 files) converges with the combined loss (loss decreases over epochs, no NaN/divergence)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 14-01-PLAN.md -- Loss config (LossConfig dataclass) and combined loss function (auraloss STFT + magnitude-weighted IF recon + KL)
+- [ ] 14-02-PLAN.md -- Wire combined loss into training loop with per-component logging and divergence detection
 
 ### Phase 15: ISTFT Reconstruction
 **Goal**: Generated spectrograms are converted to audio waveforms via ISTFT using phase reconstructed from instantaneous frequency, with no Griffin-Lim dependency
