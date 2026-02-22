@@ -48,7 +48,7 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 
 - [ ] **UI-01**: New Codes tab in Gradio UI for code visualization and editing
 - [ ] **UI-02**: Codebook usage heatmap displayed as post-training diagnostic
-- [ ] **UI-03**: Training tab updated for VQ-VAE config (codebook size, RVQ levels, commitment weight)
+- [x] **UI-03**: Training tab updated for VQ-VAE config (codebook size, RVQ levels, commitment weight)
 - [ ] **UI-04**: Generate tab updated for prior-based generation (temperature, top-k, top-p controls)
 - [ ] **UI-05**: Codebook health shown as green/yellow/red indicator with plain-language labels
 
@@ -123,7 +123,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-03 | Phase 18 | Pending |
 | UI-01 | Phase 17 | Pending |
 | UI-02 | Phase 18 | Pending |
-| UI-03 | Phase 13 | Pending |
+| UI-03 | Phase 13 | Complete |
 | UI-04 | Phase 15 | Pending |
 | UI-05 | Phase 18 | Pending |
 | CLI-01 | Phase 13 | Complete |

@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 13 of 18 (VQ-VAE Training Pipeline)
-Plan: 3 of 3 in current phase
-Status: In Progress
-Last activity: 2026-02-22 -- Completed 13-03-PLAN.md (CLI VQ-VAE training with codebook flags)
+Plan: 3 of 3 in current phase (all complete)
+Status: Phase Complete
+Last activity: 2026-02-22 -- Completed 13-02-PLAN.md (VQ-VAE training UI controls + codebook health)
 
-Progress: [=============░░░░░░░] 67% (v1.0 complete, Phase 12 complete, Phase 13 plan 3/3)
+Progress: [==============░░░░░░] 69% (v1.0 complete, Phase 12 complete, Phase 13 complete)
 
 ## Performance Metrics
 
@@ -36,16 +36,14 @@ Progress: [=============░░░░░░░] 67% (v1.0 complete, Phase 12 comp
 | 12 | 01 | 4 min | 2 | 4 |
 | 12 | 02 | 2 min | 2 | 2 |
 | 13 | 01 | 7 min | 2 | 8 |
+| 13 | 02 | 5 min | 2 | 2 |
 | 13 | 03 | 2 min | 1 | 1 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
-- v1.1 Phase 13: In progress (2/3 plans, 9 min so far)
+- v1.1 Phase 13: Complete (3/3 plans, 14 min total)
 - Trend: Stable
-
-*Updated after each plan completion*
-| Phase 13 P03 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -75,6 +73,9 @@ Recent decisions affecting current work:
 - 13-03: Remove --preset flag entirely (v1.0 KL presets irrelevant for VQ-VAE)
 - 13-03: Show (auto)/(override) suffix on codebook_size in CLI config summary
 - 13-03: Accumulate utilization warnings across epochs for end-of-training summary
+- 13-02: Hide resume button for VQ-VAE (checkpoint resume needs runner adaptation)
+- 13-02: Duck-type metric detection (hasattr val_commit_loss) in loss chart to avoid circular imports
+- 13-02: Per-level codebook health as markdown table in stats panel (utilization%, perplexity, dead codes)
 - [Phase 13]: Remove --preset flag entirely (v1.0 KL presets irrelevant for VQ-VAE)
 
 ### Pending Todos
@@ -90,5 +91,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 13-03-PLAN.md -- CLI VQ-VAE training with codebook flags and health display
+Stopped at: Completed 13-02-PLAN.md -- VQ-VAE training UI controls + codebook health display. Phase 13 fully complete (all 3 plans).
 Resume file: None
