@@ -56,6 +56,23 @@ from distill.training.loop import train_vqvae, train_vqvae_epoch, validate_vqvae
 from distill.training.metrics import VQEpochMetrics, VQMetricsHistory, VQStepMetrics
 from distill.training.preview import generate_vqvae_reconstruction_preview
 
+# ---------------------------------------------------------------------------
+# v1.1 Prior training exports -- added in Phase 14
+# ---------------------------------------------------------------------------
+
+from distill.training.metrics import (
+    PriorEpochMetrics,
+    PriorStepMetrics,
+    PriorTrainingCompleteEvent,
+)
+from distill.training.prior_config import PriorConfig, get_adaptive_prior_config
+from distill.training.prior_loop import (
+    check_memorization,
+    train_prior,
+    train_prior_epoch,
+    validate_prior_epoch,
+)
+
 __all__ = [
     # config.py (v1.0)
     "TrainingConfig",
@@ -103,4 +120,16 @@ __all__ = [
     "validate_vqvae_epoch",
     # runner.py
     "TrainingRunner",
+    # prior_config.py (v1.1)
+    "PriorConfig",
+    "get_adaptive_prior_config",
+    # prior_loop.py (v1.1)
+    "train_prior",
+    "train_prior_epoch",
+    "validate_prior_epoch",
+    "check_memorization",
+    # metrics.py (v1.1 prior)
+    "PriorStepMetrics",
+    "PriorEpochMetrics",
+    "PriorTrainingCompleteEvent",
 ]

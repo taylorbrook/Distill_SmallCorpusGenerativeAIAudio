@@ -45,6 +45,13 @@ from distill.models.losses import multi_scale_mel_loss, vqvae_loss
 from distill.models.vqvae import ConvVQVAE, QuantizerWrapper, VQDecoder, VQEncoder
 from distill.training.config import VQVAEConfig, get_adaptive_vqvae_config
 
+# ---------------------------------------------------------------------------
+# v1.1 Prior exports -- added in Phase 14
+# ---------------------------------------------------------------------------
+
+from distill.models.persistence import save_prior_to_model
+from distill.models.prior import CodePrior, extract_code_sequences, flatten_codes, unflatten_codes
+
 __all__ = [
     # vae.py (v1.0)
     "ConvVAE",
@@ -79,4 +86,11 @@ __all__ = [
     # config (v1.1)
     "VQVAEConfig",
     "get_adaptive_vqvae_config",
+    # prior.py (v1.1)
+    "CodePrior",
+    "flatten_codes",
+    "unflatten_codes",
+    "extract_code_sequences",
+    # persistence.py (v1.1 prior)
+    "save_prior_to_model",
 ]
