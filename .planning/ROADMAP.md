@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Milestone Goal:** Replace Griffin-Lim reconstruction with neural vocoders (BigVGAN-v2 universal + optional per-model HiFi-GAN V2) for dramatically improved audio quality, then fully remove Griffin-Lim.
 
-- [ ] **Phase 12: Vocoder Interface & BigVGAN Integration** - Abstract vocoder layer, mel adapter, BigVGAN-v2 as default reconstruction
+- [x] **Phase 12: Vocoder Interface & BigVGAN Integration** - Abstract vocoder layer, mel adapter, BigVGAN-v2 as default reconstruction
 - [ ] **Phase 13: Model Persistence v2** - Model format update with optional vocoder state and backward compatibility
 - [ ] **Phase 14: Generation Pipeline Integration** - Wire neural vocoder through all generation paths with sample rate handling
 - [ ] **Phase 15: UI & CLI Vocoder Controls** - Vocoder selection dropdown, download progress, and CLI flags
@@ -50,9 +50,9 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
   5. The mel adapter correctly converts VAE's log1p-normalized mels to BigVGAN's log-clamp format (no muffled or distorted output)
 **Plans**: 3 plans
 Plans:
-- [ ] 12-01-PLAN.md — Vendor BigVGAN source code and create vocoder interface
-- [ ] 12-02-PLAN.md — Implement BigVGAN vocoder wrapper and weight manager
-- [ ] 12-03-PLAN.md — Implement mel adapter and verify audio quality
+- [x] 12-01-PLAN.md — Vendor BigVGAN source code and create vocoder interface
+- [x] 12-02-PLAN.md — Implement BigVGAN vocoder wrapper and weight manager
+- [x] 12-03-PLAN.md — Implement mel adapter and verify audio quality
 
 ### Phase 13: Model Persistence v2
 **Goal**: The .distill model format supports optional per-model vocoder state while all existing v1.0 models continue to load without error
@@ -115,7 +115,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 9. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-14 |
 | 10. Multi-Format Export & Spatial Audio | v1.0 | 5/5 | Complete | 2026-02-15 |
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
-| 12. Vocoder Interface & BigVGAN Integration | 2/3 | In Progress|  | - |
+| 12. Vocoder Interface & BigVGAN Integration | v1.1 | 3/3 | Complete | 2026-02-22 |
 | 13. Model Persistence v2 | v1.1 | 0/TBD | Not started | - |
 | 14. Generation Pipeline Integration | v1.1 | 0/TBD | Not started | - |
 | 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
