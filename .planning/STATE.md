@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 12 — Vocoder Interface & BigVGAN Integration
+**Current focus:** Phase 13 — Model Persistence v2
 
 ## Current Position
 
-Phase: 12 of 16 (Vocoder Interface & BigVGAN Integration) -- COMPLETE
-Plan: 3 of 3 in current phase -- ALL COMPLETE
-Status: Phase complete, ready for Phase 13
-Last activity: 2026-02-22 — Completed 12-03-PLAN.md (mel adapter + audio quality verified)
+Phase: 13 of 16 (Model Persistence v2)
+Plan: 1 of 2 in current phase -- COMPLETE
+Status: Executing Phase 13
+Last activity: 2026-02-22 — Completed 13-01-PLAN.md (persistence layer .distillgan format)
 
-Progress: ██████░░░░░░░░░░░░░░ 20% (v1.1) [3/3 Phase 12 plans complete]
+Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1) [1/2 Phase 13 plans complete]
 
 ## Performance Metrics
 
@@ -37,6 +37,7 @@ Progress: ██████░░░░░░░░░░░░░░ 20% (v1.1
 | Phase 12 P01 | 2min | 2 tasks | 75 files |
 | Phase 12 P02 | 5min | 2 tasks | 3 files |
 | Phase 12 P03 | 3min | 2 tasks | 3 files |
+| Phase 13 P01 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -55,6 +56,7 @@ Recent decisions affecting current work:
 - [Phase 12]: Direct model loading from cached dir instead of from_pretrained (huggingface_hub mixin compat issue with vendored BigVGAN)
 - [Phase 12]: Waveform round-trip (Griffin-Lim) for mel conversion -- simpler than transfer matrix, guaranteed correct BigVGAN mels
 - [Phase 12]: Griffin-Lim quality loss accepted as stopgap -- Phase 16 per-model HiFi-GAN eliminates both BigVGAN OOD and mel conversion issues
+- [Phase 13]: Omit vocoder_state key from saved dict when None (not null marker) -- cleaner serialization
 
 ### Pending Todos
 
@@ -69,5 +71,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 12-03-PLAN.md -- Phase 12 fully complete
-Resume file: Phase 13 planning needed next
+Stopped at: Completed 13-01-PLAN.md
+Resume file: 13-02-PLAN.md next
