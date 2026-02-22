@@ -60,6 +60,9 @@ class StepMetrics:
     kl_weight: float
     learning_rate: float
     step_time_s: float
+    stft_loss: float = 0.0           # Multi-resolution STFT loss (unweighted)
+    mag_recon_loss: float = 0.0      # Magnitude channel L1 loss (unweighted)
+    if_recon_loss: float = 0.0       # IF channel mag-weighted L1 loss (unweighted)
 
 
 @dataclass
@@ -104,6 +107,9 @@ class EpochMetrics:
     learning_rate: float
     eta_seconds: float
     elapsed_seconds: float
+    val_stft_loss: float = 0.0       # Validation STFT loss (unweighted)
+    val_mag_recon_loss: float = 0.0  # Validation magnitude L1 loss (unweighted)
+    val_if_recon_loss: float = 0.0   # Validation IF mag-weighted L1 loss (unweighted)
 
 
 @dataclass
@@ -308,6 +314,9 @@ class MetricsHistory:
                     "kl_weight": m.kl_weight,
                     "learning_rate": m.learning_rate,
                     "step_time_s": m.step_time_s,
+                    "stft_loss": m.stft_loss,
+                    "mag_recon_loss": m.mag_recon_loss,
+                    "if_recon_loss": m.if_recon_loss,
                 }
                 for m in self.step_metrics
             ],
@@ -324,6 +333,9 @@ class MetricsHistory:
                     "learning_rate": m.learning_rate,
                     "eta_seconds": m.eta_seconds,
                     "elapsed_seconds": m.elapsed_seconds,
+                    "val_stft_loss": m.val_stft_loss,
+                    "val_mag_recon_loss": m.val_mag_recon_loss,
+                    "val_if_recon_loss": m.val_if_recon_loss,
                 }
                 for m in self.epoch_metrics
             ],
@@ -345,7 +357,14 @@ class MetricsHistory:
         """
         history = cls()
         for d in data.get("step_metrics", []):
+            # Ensure backward compat: old checkpoints may lack new fields
+            d.setdefault("stft_loss", 0.0)
+            d.setdefault("mag_recon_loss", 0.0)
+            d.setdefault("if_recon_loss", 0.0)
             history.add_step(StepMetrics(**d))
         for d in data.get("epoch_metrics", []):
+            d.setdefault("val_stft_loss", 0.0)
+            d.setdefault("val_mag_recon_loss", 0.0)
+            d.setdefault("val_if_recon_loss", 0.0)
             history.add_epoch(EpochMetrics(**d))
         return history

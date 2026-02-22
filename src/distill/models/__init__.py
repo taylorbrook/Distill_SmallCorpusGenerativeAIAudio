@@ -5,7 +5,9 @@ and :mod:`models.persistence`.
 """
 
 from distill.models.losses import (
+    compute_combined_loss,
     compute_kl_divergence,
+    create_stft_loss,
     get_kl_weight,
     vae_loss,
 )
@@ -28,6 +30,8 @@ __all__ = [
     "ConvDecoder",
     # losses.py
     "vae_loss",
+    "compute_combined_loss",
+    "create_stft_loss",
     "get_kl_weight",
     "compute_kl_divergence",
     # persistence.py

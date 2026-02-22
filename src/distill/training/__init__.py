@@ -14,8 +14,12 @@ from distill.training.checkpoint import (
 )
 from distill.training.config import (
     ComplexSpectrogramConfig,
+    KLLossConfig,
+    LossConfig,
     OverfittingPreset,
+    ReconLossConfig,
     RegularizationConfig,
+    STFTLossConfig,
     TrainingConfig,
     get_adaptive_config,
     get_effective_preview_interval,
@@ -45,9 +49,13 @@ from distill.training.runner import TrainingRunner
 __all__ = [
     # config.py
     "ComplexSpectrogramConfig",
-    "TrainingConfig",
+    "KLLossConfig",
+    "LossConfig",
     "OverfittingPreset",
+    "ReconLossConfig",
     "RegularizationConfig",
+    "STFTLossConfig",
+    "TrainingConfig",
     "get_adaptive_config",
     "get_effective_preview_interval",
     # dataset.py
