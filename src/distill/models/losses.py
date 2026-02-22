@@ -124,3 +124,109 @@ def compute_kl_divergence(mu: torch.Tensor, logvar: torch.Tensor) -> float:
     """
     kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
     return kl_per_dim.sum(dim=1).mean().item()
+
+
+# ---------------------------------------------------------------------------
+# VQ-VAE loss functions (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def multi_scale_mel_loss(
+    recon: torch.Tensor,
+    target: torch.Tensor,
+) -> torch.Tensor:
+    """Multi-scale MSE loss on mel spectrograms at multiple resolutions.
+
+    Captures both fine-grained spectral detail and coarse structural
+    reconstruction quality by comparing at three scales:
+
+    1. **Full resolution:** Pixel-level MSE between recon and target.
+    2. **2x downsampled:** ``avg_pool2d(kernel=2)`` smooths out fine detail,
+       focusing on medium-scale spectral structure.
+    3. **4x downsampled:** ``avg_pool2d(kernel=4)`` captures broad energy
+       distribution and overall spectral shape.
+
+    Averaging across scales prevents the loss from being dominated by
+    high-frequency noise while still penalising blurry reconstructions.
+
+    Parameters
+    ----------
+    recon : torch.Tensor
+        Reconstructed mel spectrogram ``[B, 1, n_mels, time]``.
+    target : torch.Tensor
+        Original mel spectrogram ``[B, 1, n_mels, time]``.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar loss averaged across all three scales.
+    """
+    # Full resolution
+    loss_full = F.mse_loss(recon, target, reduction="mean")
+
+    # 2x downsampled
+    loss_2x = F.mse_loss(
+        F.avg_pool2d(recon, 2),
+        F.avg_pool2d(target, 2),
+        reduction="mean",
+    )
+
+    # 4x downsampled
+    loss_4x = F.mse_loss(
+        F.avg_pool2d(recon, 4),
+        F.avg_pool2d(target, 4),
+        reduction="mean",
+    )
+
+    return (loss_full + loss_2x + loss_4x) / 3.0
+
+
+def vqvae_loss(
+    recon: torch.Tensor,
+    target: torch.Tensor,
+    commit_loss: torch.Tensor,
+    commitment_weight: float = 0.25,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """VQ-VAE loss combining multi-scale spectral reconstruction with commitment loss.
+
+    Replaces :func:`vae_loss` for VQ-VAE training (v1.1).  There is **no KL
+    divergence**, no free bits, and no annealing schedule.  The only tunable
+    parameter is ``commitment_weight`` which balances reconstruction quality
+    against codebook commitment (encoder-to-codebook alignment).
+
+    The reconstruction term uses :func:`multi_scale_mel_loss` which compares
+    mel spectrograms at full, 2x, and 4x downsampled resolutions for both
+    fine-grained and structural reconstruction quality.
+
+    Parameters
+    ----------
+    recon : torch.Tensor
+        Reconstructed mel spectrogram ``[B, 1, n_mels, time]``.
+    target : torch.Tensor
+        Original mel spectrogram ``[B, 1, n_mels, time]``.
+    commit_loss : torch.Tensor
+        Commitment loss from :class:`QuantizerWrapper` (scalar or
+        multi-element tensor from per-quantizer losses).
+    commitment_weight : float
+        Weight for commitment loss term (default 0.25).  This is the single
+        tunable hyperparameter for VQ-VAE loss -- per user decision, no other
+        scheduling or weighting mechanisms are used.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        ``(total_loss, recon_loss, weighted_commit)`` -- all finite scalar
+        tensors suitable for ``.backward()``.
+    """
+    # Multi-scale spectral reconstruction loss
+    recon_loss = multi_scale_mel_loss(recon, target)
+
+    # Commitment term: handle both scalar and multi-element commit_loss
+    if commit_loss.dim() > 0:
+        commit_loss = commit_loss.sum()
+    weighted_commit = commitment_weight * commit_loss
+
+    # Total: reconstruction + commitment (no KL, no annealing)
+    total_loss = recon_loss + weighted_commit
+
+    return total_loss, recon_loss, weighted_commit
