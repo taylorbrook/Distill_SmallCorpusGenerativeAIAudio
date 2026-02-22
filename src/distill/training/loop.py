@@ -388,13 +388,13 @@ def train(
     # (required for checkpoint resume -- lazy layers must be materialized first)
     n_mels = spec_config.n_mels
     time_frames = spec_config.sample_rate // spec_config.hop_length + 1
-    pad_h = (16 - n_mels % 16) % 16
-    pad_w = (16 - time_frames % 16) % 16
+    pad_h = (32 - n_mels % 32) % 32
+    pad_w = (32 - time_frames % 32) % 32
     padded_h = n_mels + pad_h
     padded_w = time_frames + pad_w
-    spatial = (padded_h // 16, padded_w // 16)
+    spatial = (padded_h // 32, padded_w // 32)  # 5 stride-2 layers
     model.decoder._init_linear(spatial)
-    flatten_dim = 256 * spatial[0] * spatial[1]
+    flatten_dim = 1024 * spatial[0] * spatial[1]
     model.encoder._init_linear(flatten_dim)
 
     # Create optimiser

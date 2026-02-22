@@ -311,7 +311,7 @@ def load_model(
     spectrogram = AudioSpectrogram(spec_config)
 
     # Reconstruct ConvVAE with correct latent_dim
-    latent_dim = saved.get("latent_dim", 64)
+    latent_dim = saved.get("latent_dim", 128)
     model = ConvVAE(latent_dim=latent_dim)
 
     # CRITICAL: Initialize decoder (and encoder if present in state_dict)
@@ -320,21 +320,21 @@ def load_model(
     n_mels = spec_config.n_mels
     time_frames = spec_config.sample_rate // spec_config.hop_length + 1
 
-    # Pad to multiple of 16 (matching encoder forward pass)
-    pad_h = (16 - n_mels % 16) % 16
-    pad_w = (16 - time_frames % 16) % 16
+    # Pad to multiple of 32 (matching encoder forward pass)
+    pad_h = (32 - n_mels % 32) % 32
+    pad_w = (32 - time_frames % 32) % 32
     padded_h = n_mels + pad_h
     padded_w = time_frames + pad_w
 
-    # After 4 stride-2 layers: spatial dims / 16
-    spatial = (padded_h // 16, padded_w // 16)
+    # After 5 stride-2 layers: spatial dims / 32
+    spatial = (padded_h // 32, padded_w // 32)
     model.decoder._init_linear(spatial)
 
     # Init encoder linear layers only if they exist in the state_dict
     # (trained models have them; sample-only models may not)
     state_dict = saved["model_state_dict"]
     if "encoder.fc_mu.weight" in state_dict:
-        flatten_dim = 256 * spatial[0] * spatial[1]
+        flatten_dim = 1024 * spatial[0] * spatial[1]
         model.encoder._init_linear(flatten_dim)
 
     # Load weights
@@ -462,20 +462,20 @@ def save_model_from_checkpoint(
     training_config = checkpoint.get("training_config", {})
 
     # Reconstruct model
-    latent_dim = checkpoint.get("latent_dim", 64)
+    latent_dim = checkpoint.get("latent_dim", 128)
     model = ConvVAE(latent_dim=latent_dim)
 
     # Initialize encoder/decoder linear layers from spectrogram config
     spec_config = SpectrogramConfig(**spectrogram_config)
     n_mels = spec_config.n_mels
     time_frames = spec_config.sample_rate // spec_config.hop_length + 1
-    pad_h = (16 - n_mels % 16) % 16
-    pad_w = (16 - time_frames % 16) % 16
+    pad_h = (32 - n_mels % 32) % 32
+    pad_w = (32 - time_frames % 32) % 32
     padded_h = n_mels + pad_h
     padded_w = time_frames + pad_w
-    spatial = (padded_h // 16, padded_w // 16)
+    spatial = (padded_h // 32, padded_w // 32)  # 5 stride-2 layers
     model.decoder._init_linear(spatial)
-    flatten_dim = 256 * spatial[0] * spatial[1]
+    flatten_dim = 1024 * spatial[0] * spatial[1]
     model.encoder._init_linear(flatten_dim)
 
     # Load model weights
