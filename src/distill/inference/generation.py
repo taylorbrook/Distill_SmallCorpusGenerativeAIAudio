@@ -7,8 +7,9 @@ coherent API.
 
 Design notes:
 - Lazy imports for ``torch``, ``numpy``, ``torchaudio`` (project pattern).
-- All internal audio processing at 48 kHz; resample only at the very end.
-- Resampler instances cached in a module-level dict (Phase 2 pattern).
+- All internal audio processing at vocoder native rate (44.1 kHz for BigVGAN).
+- Kaiser-windowed sinc resampler instances cached in a module-level dict
+  (Phase 2 pattern).
 - Peak normalisation applied after spatial processing to catch any clipping
   introduced by mid-side widening (research pitfall #3).
 - SpatialConfig replaces old stereo_mode/stereo_width; backward compat
@@ -92,7 +93,7 @@ class GenerationConfig:
     export_format: str = "wav"
     """Export format string: ``"wav"``, ``"mp3"``, ``"flac"``, or ``"ogg"``."""
 
-    sample_rate: int = 48_000
+    sample_rate: int = 44_100
     """Output sample rate in Hz."""
 
     bit_depth: str = "24-bit"
@@ -245,8 +246,63 @@ def _get_resampler(orig_freq: int, new_freq: int) -> object:
     if key not in _resampler_cache:
         import torchaudio  # noqa: WPS433 -- lazy import
 
-        _resampler_cache[key] = torchaudio.transforms.Resample(orig_freq, new_freq)
+        _resampler_cache[key] = torchaudio.transforms.Resample(
+            orig_freq,
+            new_freq,
+            resampling_method="sinc_interp_kaiser",
+            lowpass_filter_width=64,
+        )
     return _resampler_cache[key]
+
+
+# ---------------------------------------------------------------------------
+# Vocoder OOM fallback helper
+# ---------------------------------------------------------------------------
+
+
+def _vocoder_with_fallback(
+    vocoder: "VocoderBase",
+    mel: "torch.Tensor",
+    original_device: "torch.device",
+) -> "torch.Tensor":
+    """Run vocoder mel-to-waveform with GPU OOM fallback to CPU.
+
+    Parameters
+    ----------
+    vocoder : VocoderBase
+        Vocoder instance.
+    mel : torch.Tensor
+        Mel spectrogram tensor.
+    original_device : torch.device
+        Device the vocoder was originally on (for restoration).
+
+    Returns
+    -------
+    torch.Tensor
+        Waveform tensor.
+    """
+    import logging  # noqa: WPS433 -- lazy import
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        return vocoder.mel_to_waveform(mel)
+    except RuntimeError as exc:
+        if "out of memory" not in str(exc):
+            raise
+        logger.warning(
+            "GPU OOM during vocoder inference; falling back to CPU"
+        )
+        import torch  # noqa: WPS433 -- lazy import
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        try:
+            vocoder.to(torch.device("cpu"))
+            result = vocoder.mel_to_waveform(mel.cpu())
+            return result
+        finally:
+            vocoder.to(original_device)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +320,7 @@ def _generate_chunks_from_vector(
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
     evolution_amount: float = 0.5,
+    vocoder: "VocoderBase | None" = None,
 ) -> "np.ndarray":
     """Generate continuous audio from a user-provided latent vector.
 
@@ -278,7 +335,7 @@ def _generate_chunks_from_vector(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape computation).
     latent_vector : torch.Tensor
         1-D latent vector on the target device.
     num_chunks : int
@@ -294,6 +351,8 @@ def _generate_chunks_from_vector(
     evolution_amount : float
         How far each anchor drifts from the starting vector (0-1).
         0 = static, 1 = anchors are fully random targets.
+    vocoder : VocoderBase | None
+        Vocoder for mel-to-waveform conversion.
 
     Returns
     -------
@@ -336,8 +395,8 @@ def _generate_chunks_from_vector(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    wav = _vocoder_with_fallback(vocoder, combined_mel, vocoder._device)
+    return wav.squeeze().cpu().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +415,12 @@ class GenerationPipeline:
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter for mel-to-waveform conversion.
+        Spectrogram converter (for mel shape computation).
     device : torch.device
         Device the model is on.
+    vocoder : VocoderBase | None
+        Neural vocoder for mel-to-waveform conversion.  When ``None``,
+        a default BigVGAN vocoder is created via :func:`get_vocoder`.
     """
 
     def __init__(
@@ -366,10 +428,14 @@ class GenerationPipeline:
         model: "ConvVAE",
         spectrogram: "AudioSpectrogram",
         device: "torch.device",
+        vocoder: "VocoderBase | None" = None,
     ) -> None:
+        from distill.vocoder import get_vocoder  # noqa: WPS433 -- lazy import
+
         self.model = model
         self.spectrogram = spectrogram
         self.device = device
+        self.vocoder = vocoder or get_vocoder("bigvgan", device=str(device))
         self.model_name: str = "unknown"
 
     def generate(self, config: GenerationConfig) -> GenerationResult:
@@ -382,7 +448,7 @@ class GenerationPipeline:
         4. Apply anti-aliasing filter
         5. Apply spatial processing (mono/stereo/binaural)
         6. Peak normalize (after spatial to catch clipping)
-        7. Resample to target sample rate (if different from 48 kHz)
+        7. Resample to target sample rate (if different from vocoder native rate)
         8. Compute quality score
         9. Trim to exact requested duration
 
@@ -419,9 +485,9 @@ class GenerationPipeline:
         spatial_config = config.get_spatial_config()
 
         # 3. Compute chunk parameters
-        internal_sr = 48_000  # all processing at 48 kHz
+        internal_sr = self.vocoder.sample_rate  # vocoder native rate (44100 for BigVGAN)
         num_chunks = math.ceil(config.duration_s / config.chunk_duration_s)
-        chunk_samples = int(config.chunk_duration_s * internal_sr)
+        chunk_samples = int(config.chunk_duration_s * self.spectrogram.config.sample_rate)
 
         # 4. Set seed
         seed_used: int
@@ -452,6 +518,7 @@ class GenerationPipeline:
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
                 evolution_amount=config.evolution_amount,
+                vocoder=self.vocoder,
             )
         elif config.concat_mode == "crossfade":
             audio = generate_chunks_crossfade(
@@ -462,6 +529,7 @@ class GenerationPipeline:
                 seed=seed_used,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                vocoder=self.vocoder,
             )
         else:  # latent_interpolation
             audio = generate_chunks_latent_interp(
@@ -472,6 +540,7 @@ class GenerationPipeline:
                 seed=seed_used,
                 chunk_samples=chunk_samples,
                 steps_between=config.steps_between,
+                vocoder=self.vocoder,
             )
 
         # 6. Apply anti-aliasing filter (always at internal sample rate)
@@ -522,7 +591,7 @@ class GenerationPipeline:
         # 8. Peak normalize after spatial (catches clipping from widening)
         audio = peak_normalize(audio, target_peak=0.891)
 
-        # 9. Resample if target sample rate differs from internal 48 kHz
+        # 9. Resample if target sample rate differs from vocoder native rate
         if config.sample_rate != internal_sr:
             resampler = _get_resampler(internal_sr, config.sample_rate)
             audio_tensor = torch.from_numpy(audio).float()
@@ -603,6 +672,7 @@ class GenerationPipeline:
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
                 evolution_amount=config.evolution_amount,
+                vocoder=self.vocoder,
             )
         elif config.concat_mode == "crossfade":
             return generate_chunks_crossfade(
@@ -613,6 +683,7 @@ class GenerationPipeline:
                 seed=seed_used + 1,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                vocoder=self.vocoder,
             )
         else:
             return generate_chunks_latent_interp(
@@ -623,6 +694,7 @@ class GenerationPipeline:
                 seed=seed_used + 1,
                 chunk_samples=chunk_samples,
                 steps_between=config.steps_between,
+                vocoder=self.vocoder,
             )
 
     def export(
