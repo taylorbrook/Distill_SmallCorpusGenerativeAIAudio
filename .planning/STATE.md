@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 14 of 16 (Generation Pipeline Integration)
-Plan: 1 of 2 in current phase -- COMPLETE
-Status: Executing Phase 14
-Last activity: 2026-02-27 — Completed 14-01-PLAN.md (vocoder pipeline integration)
+Phase: 14 of 16 (Generation Pipeline Integration) -- COMPLETE
+Plan: 2 of 2 in current phase -- COMPLETE
+Status: Phase 14 complete, ready for Phase 15
+Last activity: 2026-02-27 — Completed 14-02-PLAN.md (vocoder call site wiring)
 
-Progress: ███████░░░░░░░░░░░░░ 35% (v1.1) [1/2 Phase 14 plans complete]
+Progress: ████████░░░░░░░░░░░░ 40% (v1.1) [2/2 Phase 14 plans complete]
 
 ## Performance Metrics
 
@@ -40,6 +40,7 @@ Progress: ███████░░░░░░░░░░░░░ 35% (v1.1
 | Phase 13 P01 | 2min | 2 tasks | 2 files |
 | Phase 13 P02 | 4min | 2 tasks | 8 files |
 | Phase 14 P01 | 4min | 2 tasks | 2 files |
+| Phase 14 P02 | 4min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Recent decisions affecting current work:
 - [Phase 14]: Internal sample rate derived from vocoder.sample_rate (44100) instead of hardcoded 48000
 - [Phase 14]: Kaiser-windowed sinc resampler with lowpass_filter_width=64 for high-quality output
 - [Phase 14]: GenerationConfig.sample_rate default changed from 48000 to 44100 (BigVGAN native)
+- [Phase 14]: Training preview functions require vocoder parameter (no Griffin-Lim fallback) -- intentional hard break
+- [Phase 14]: Preview sample_rate in PreviewEvent derived from vocoder.sample_rate, not spec_config.sample_rate
 
 ### Pending Todos
 
@@ -78,5 +81,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: Completed 14-01-PLAN.md (vocoder pipeline integration)
-Resume file: 14-02-PLAN.md next
+Stopped at: Completed 14-02-PLAN.md (vocoder call site wiring) -- Phase 14 complete
+Resume file: Phase 15 next

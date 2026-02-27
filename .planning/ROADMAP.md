@@ -32,7 +32,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 - [x] **Phase 12: Vocoder Interface & BigVGAN Integration** - Abstract vocoder layer, mel adapter, BigVGAN-v2 as default reconstruction
 - [x] **Phase 13: Model Persistence v2** - Model format update with optional vocoder state and backward compatibility (completed 2026-02-22)
-- [ ] **Phase 14: Generation Pipeline Integration** - Wire neural vocoder through all generation paths with sample rate handling
+- [x] **Phase 14: Generation Pipeline Integration** - Wire neural vocoder through all generation paths with sample rate handling (completed 2026-02-27)
 - [ ] **Phase 15: UI & CLI Vocoder Controls** - Vocoder selection dropdown, download progress, and CLI flags
 - [ ] **Phase 16: Per-Model HiFi-GAN Training & Griffin-Lim Removal** - Adversarial vocoder training, auto-selection, training UI/CLI, and full Griffin-Lim removal
 
@@ -123,7 +123,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. Vocoder Interface & BigVGAN Integration | v1.1 | Complete    | 2026-02-22 | 2026-02-22 |
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
-| 14. Generation Pipeline Integration | 1/2 | In Progress|  | - |
+| 14. Generation Pipeline Integration | 2/2 | Complete   | 2026-02-27 | - |
 | 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
 | 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/TBD | Not started | - |
 
