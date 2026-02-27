@@ -31,8 +31,8 @@ Requirements for complex spectrogram milestone. Each maps to roadmap phases.
 
 ### Reconstruction
 
-- [ ] **RECON-01**: Phase is reconstructed from IF via cumulative sum
-- [ ] **RECON-02**: Waveform is reconstructed via ISTFT from magnitude + reconstructed phase
+- [x] **RECON-01**: Phase is reconstructed from IF via cumulative sum
+- [x] **RECON-02**: Waveform is reconstructed via ISTFT from magnitude + reconstructed phase
 - [ ] **RECON-03**: Griffin-Lim code is removed from the generation pipeline
 
 ### Integration
@@ -86,8 +86,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOSS-02 | Phase 14 | Complete |
 | LOSS-03 | Phase 14 | Complete |
 | LOSS-04 | Phase 14 | Complete |
-| RECON-01 | Phase 15 | Pending |
-| RECON-02 | Phase 15 | Pending |
+| RECON-01 | Phase 15 | Complete |
+| RECON-02 | Phase 15 | Complete |
 | RECON-03 | Phase 15 | Pending |
 | INTEG-01 | Phase 16 | Pending |
 | INTEG-02 | Phase 16 | Pending |

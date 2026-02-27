@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 14 - Multi-Resolution Loss (v2.0 Complex Spectrogram)
+**Current focus:** Phase 15 - ISTFT Reconstruction (v2.0 Complex Spectrogram)
 
 ## Current Position
 
-Phase: 14 of 16 (Multi-Resolution Loss)
-Plan: 2 of 2 in current phase (COMPLETE)
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 14-02-PLAN.md
+Phase: 15 of 16 (ISTFT Reconstruction)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-02-27 -- Completed 15-01-PLAN.md
 
-Progress: [████████████████░░░░] 80% (v2.0)
+Progress: [█████████████████░░░] 85% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [████████████████░░░░] 80% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 6 completed
+**v2.0 Plans:** 7 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -36,6 +36,7 @@ Progress: [████████████████░░░░] 80% (v2
 - 13-02: 4min (2 tasks, 3 files)
 - 14-01: 4min (2 tasks, 3 files)
 - 14-02: 4min (2 tasks, 4 files)
+- 15-01: 3min (2 tasks, 2 files)
 
 *Updated after each plan completion*
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - [14-02]: KL annealing uses config.loss.kl.warmup_fraction and weight_max (nested config takes precedence)
 - [14-02]: Divergence detection threshold: 5 consecutive epochs of increasing loss
 - [14-02]: Combined loss fallback: loss_config=None triggers legacy vae_loss path
+- [15-01]: InverseMelScale used for both magnitude and phase mel-to-linear inversion
+- [15-01]: Phase cumulative sum starts at zero, left unwrapped (per user decision)
+- [15-01]: Denormalization handled inside complex_mel_to_waveform when stats dict provided
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 14-02-PLAN.md -- Training loop wired to compute_combined_loss with per-component logging and divergence detection
+Last session: 2026-02-27
+Stopped at: Completed 15-01-PLAN.md -- ISTFT reconstruction via complex_mel_to_waveform with cumsum phase and InverseMelScale
 Resume file: None
