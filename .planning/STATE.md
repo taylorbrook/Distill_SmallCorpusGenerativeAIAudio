@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using discrete audio codes and generative priors
-**Current focus:** Phase 14 - Autoregressive Prior
+**Current focus:** Phase 15 - Generation Pipeline
 
 ## Current Position
 
-Phase: 14 of 18 (Autoregressive Prior)
-Plan: 3 of 3 in current phase
-Status: Phase Complete
-Last activity: 2026-02-22 -- Completed 14-03-PLAN.md (Prior persistence + CLI command)
+Phase: 15 of 18 (Generation Pipeline)
+Plan: 1 of 3 in current phase
+Status: In Progress
+Last activity: 2026-02-27 -- Completed 15-01-PLAN.md (Core sampling engine + generation pipeline)
 
-Progress: [================░░░░] 78% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete)
+Progress: [================░░░░] 81% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete, Phase 15: 1/3)
 
 ## Performance Metrics
 
@@ -41,12 +41,14 @@ Progress: [================░░░░] 78% (v1.0 complete, Phase 12 complete, 
 | 14 | 01 | 3 min | 2 | 2 |
 | 14 | 02 | 4 min | 2 | 2 |
 | 14 | 03 | 4 min | 3 | 5 |
+| 15 | 01 | 3 min | 2 | 4 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
 - v1.1 Phase 14: Complete (3/3 plans, 11 min total)
+- v1.1 Phase 15: In progress (1/3 plans)
 - Trend: Stable
 
 ## Accumulated Context
@@ -90,6 +92,9 @@ Recent decisions affecting current work:
 - 14-03: Atomic write (temp file + os.replace) for prior bundling into .distill files
 - 14-03: Lazy CodePrior import in load_model_v2 to keep fast import time for non-prior loads
 - 14-03: CLI train-prior mirrors train.py patterns (Rich, SIGINT, auto/override suffixes, JSON output)
+- 15-01: sample_code_sequence is module-level function, not CodePrior method
+- 15-01: generate_audio_from_prior is standalone function, not GenerationPipeline method (v1.0 class untouched)
+- 15-01: Each chunk gets unique seed (actual_seed + i) for variety across multi-chunk generation
 
 ### Pending Todos
 
@@ -103,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 14-03-PLAN.md -- Prior persistence + CLI. Phase 14 complete (3/3 plans).
+Last session: 2026-02-27
+Stopped at: Completed 15-01-PLAN.md -- Core sampling engine + generation pipeline. Phase 15: 1/3 plans complete.
 Resume file: None

@@ -94,7 +94,7 @@ Plans:
   2. User can control generation diversity via temperature, top-k, and top-p sliders in the generate tab
   3. Generated audio longer than one chunk uses overlap-add stitching with no audible seams at chunk boundaries
   4. User can generate from CLI with `--temperature`, `--top-k`, and `--top-p` flags
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 Plans:
 - [ ] 15-01-PLAN.md -- Core sampling engine (sample_code_sequence) and generate_audio_from_prior() with multi-chunk stitching
 - [ ] 15-02-PLAN.md -- Generate tab UI rework with prior-based sampling controls (temperature, top-k, top-p, duration)
@@ -155,7 +155,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 12. RVQ-VAE Core Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
 | 14. Autoregressive Prior | 3/3 | Complete    | 2026-02-22 | - |
-| 15. Generation Pipeline | v1.1 | 0/3 | Planned | - |
+| 15. Generation Pipeline | 1/3 | In Progress|  | - |
 | 16. Encode/Decode + Code Visualization | v1.1 | 0/0 | Not started | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
 | 18. Diagnostics + Library Integration | v1.1 | 0/0 | Not started | - |
