@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 15 of 18 (Generation Pipeline)
-Plan: 1 of 3 in current phase
-Status: In Progress
-Last activity: 2026-02-27 -- Completed 15-01-PLAN.md (Core sampling engine + generation pipeline)
+Plan: 3 of 3 in current phase
+Status: Phase Complete
+Last activity: 2026-02-27 -- Completed 15-03-PLAN.md (CLI generate VQ-VAE extension)
 
-Progress: [================░░░░] 81% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete, Phase 15: 1/3)
+Progress: [=================░░░] 85% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete, Phase 15 complete)
 
 ## Performance Metrics
 
@@ -42,13 +42,15 @@ Progress: [================░░░░] 81% (v1.0 complete, Phase 12 complete, 
 | 14 | 02 | 4 min | 2 | 2 |
 | 14 | 03 | 4 min | 3 | 5 |
 | 15 | 01 | 3 min | 2 | 4 |
+| 15 | 02 | 3 min | 2 | 2 |
+| 15 | 03 | 3 min | 2 | 1 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
 - v1.1 Phase 12: 6 min total (2 plans, 4 tasks, 6 files)
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
 - v1.1 Phase 14: Complete (3/3 plans, 11 min total)
-- v1.1 Phase 15: In progress (1/3 plans)
+- v1.1 Phase 15: Complete (3/3 plans, 9 min total)
 - Trend: Stable
 
 ## Accumulated Context
@@ -95,6 +97,12 @@ Recent decisions affecting current work:
 - 15-01: sample_code_sequence is module-level function, not CodePrior method
 - 15-01: generate_audio_from_prior is standalone function, not GenerationPipeline method (v1.0 class untouched)
 - 15-01: Each chunk gets unique seed (actual_seed + i) for variety across multi-chunk generation
+- 15-02: Dual control sections (prior_controls_section + controls_section) toggled by model type
+- 15-02: Prior export uses simplified inline handler (no sidecar JSON, no metadata fields)
+- 15-02: Overlap ms-to-samples conversion at 48kHz (48 samples/ms) in UI handler
+- 15-03: _detect_model_version() peeks at .distill file to route v1 vs v2 without full model load
+- 15-03: isinstance(loaded, LoadedVQModel) routing in single-model CLI path
+- 15-03: Incompatible v1.0 flags (--slider, --preset, --blend) warn but don't error for VQ-VAE models
 
 ### Pending Todos
 
@@ -109,5 +117,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: Completed 15-01-PLAN.md -- Core sampling engine + generation pipeline. Phase 15: 1/3 plans complete.
+Stopped at: Completed 15-03-PLAN.md -- CLI generate VQ-VAE extension. Phase 15: 3/3 plans complete (phase done).
 Resume file: None

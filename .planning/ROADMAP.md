@@ -33,7 +33,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 12: RVQ-VAE Core Architecture** - Build the ConvVQVAE model with residual vector quantization, codebook management, and commitment loss (completed 2026-02-22)
 - [x] **Phase 13: VQ-VAE Training Pipeline** - Wire VQ-VAE into training loop with codebook health monitoring, model persistence, and training UI/CLI (completed 2026-02-22)
 - [x] **Phase 14: Autoregressive Prior** - Build and train the autoregressive prior model on frozen VQ-VAE code sequences (completed 2026-02-22)
-- [ ] **Phase 15: Generation Pipeline** - Wire prior-based generation with sampling controls, multi-chunk stitching, and generate UI/CLI
+- [x] **Phase 15: Generation Pipeline** - Wire prior-based generation with sampling controls, multi-chunk stitching, and generate UI/CLI (completed 2026-02-27)
 - [ ] **Phase 16: Encode/Decode + Code Visualization** - Encode audio to codes, decode back, visualize as timeline grid, preview codebook entries
 - [ ] **Phase 17: Code Editing** - Interactive code manipulation: cell editing, region swapping, embedding blending, undo/redo
 - [ ] **Phase 18: Diagnostics + Library Integration** - Codebook health indicators, usage heatmaps, model library v2 support, CLI encode/decode
@@ -94,7 +94,7 @@ Plans:
   2. User can control generation diversity via temperature, top-k, and top-p sliders in the generate tab
   3. Generated audio longer than one chunk uses overlap-add stitching with no audible seams at chunk boundaries
   4. User can generate from CLI with `--temperature`, `--top-k`, and `--top-p` flags
-**Plans:** 1/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 15-01-PLAN.md -- Core sampling engine (sample_code_sequence) and generate_audio_from_prior() with multi-chunk stitching
 - [ ] 15-02-PLAN.md -- Generate tab UI rework with prior-based sampling controls (temperature, top-k, top-p, duration)
@@ -155,7 +155,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 12. RVQ-VAE Core Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
 | 14. Autoregressive Prior | 3/3 | Complete    | 2026-02-22 | - |
-| 15. Generation Pipeline | 1/3 | In Progress|  | - |
+| 15. Generation Pipeline | 3/3 | Complete   | 2026-02-27 | - |
 | 16. Encode/Decode + Code Visualization | v1.1 | 0/0 | Not started | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
 | 18. Diagnostics + Library Integration | v1.1 | 0/0 | Not started | - |
