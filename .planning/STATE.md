@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 13 — Model Persistence v2
+**Current focus:** Phase 14 — Generation Pipeline Integration
 
 ## Current Position
 
-Phase: 13 of 16 (Model Persistence v2)
-Plan: 2 of 2 in current phase -- COMPLETE
-Status: Phase 13 COMPLETE
-Last activity: 2026-02-22 — Completed 13-02-PLAN.md (catalog, CLI, UI sweep for .distillgan)
+Phase: 14 of 16 (Generation Pipeline Integration)
+Plan: 1 of 2 in current phase -- COMPLETE
+Status: Executing Phase 14
+Last activity: 2026-02-27 — Completed 14-01-PLAN.md (vocoder pipeline integration)
 
-Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1) [2/2 Phase 13 plans complete]
+Progress: ███████░░░░░░░░░░░░░ 35% (v1.1) [1/2 Phase 14 plans complete]
 
 ## Performance Metrics
 
@@ -39,6 +39,7 @@ Progress: ██████░░░░░░░░░░░░░░ 30% (v1.1
 | Phase 12 P03 | 3min | 2 tasks | 3 files |
 | Phase 13 P01 | 2min | 2 tasks | 2 files |
 | Phase 13 P02 | 4min | 2 tasks | 8 files |
+| Phase 14 P01 | 4min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -60,6 +61,9 @@ Recent decisions affecting current work:
 - [Phase 13]: Omit vocoder_state key from saved dict when None (not null marker) -- cleaner serialization
 - [Phase 13]: hasattr guard for optional vocoder field in display layers for backward compat
 - [Phase 13]: VocoderInfo populated from vocoder_state training_metadata dict in save_model
+- [Phase 14]: Internal sample rate derived from vocoder.sample_rate (44100) instead of hardcoded 48000
+- [Phase 14]: Kaiser-windowed sinc resampler with lowpass_filter_width=64 for high-quality output
+- [Phase 14]: GenerationConfig.sample_rate default changed from 48000 to 44100 (BigVGAN native)
 
 ### Pending Todos
 
@@ -73,6 +77,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 13-02-PLAN.md (Phase 13 complete)
-Resume file: Phase 14 next
+Last session: 2026-02-27
+Stopped at: Completed 14-01-PLAN.md (vocoder pipeline integration)
+Resume file: 14-02-PLAN.md next
