@@ -68,14 +68,17 @@ Plans:
 - [ ] 13-02-PLAN.md — Sweep catalog, CLI, UI, and training references to .distillgan with vocoder display
 
 ### Phase 14: Generation Pipeline Integration
-**Goal**: Every generation path in the application (single chunk, crossfade, latent interpolation, preview, reconstruction) uses the neural vocoder and produces correct 48kHz output
+**Goal**: Every generation path in the application (single chunk, crossfade, latent interpolation, preview, reconstruction) uses the neural vocoder, defaults to 44.1kHz native output, and optionally resamples to 48kHz at the export boundary
 **Depends on**: Phase 12, Phase 13
 **Requirements**: GEN-01, GEN-02, GEN-03
 **Success Criteria** (what must be TRUE):
   1. All five generation code paths (single chunk, crossfade, latent interpolation, preview, reconstruction) produce audio through the neural vocoder
   2. BigVGAN's 44.1kHz output is transparently resampled to 48kHz with no pitch shift or timing error
   3. Export pipeline (WAV/MP3/FLAC/OGG), metadata embedding, and spatial audio processing work identically with vocoder output as they did with Griffin-Lim output
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 14-01-PLAN.md — Wire vocoder through core generation pipeline and chunking functions
+- [ ] 14-02-PLAN.md — Update callers, training previews, and sample rate defaults
 
 ### Phase 15: UI & CLI Vocoder Controls
 **Goal**: Users can select their vocoder and see download progress in both the Gradio web UI and the CLI
@@ -120,7 +123,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 11. Wire Latent Space Analysis | v1.0 | 2/2 | Complete | 2026-02-14 |
 | 12. Vocoder Interface & BigVGAN Integration | v1.1 | Complete    | 2026-02-22 | 2026-02-22 |
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
-| 14. Generation Pipeline Integration | v1.1 | 0/TBD | Not started | - |
+| 14. Generation Pipeline Integration | v1.1 | 0/2 | Not started | - |
 | 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
 | 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/TBD | Not started | - |
 
