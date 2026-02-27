@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 15 of 16 (ISTFT Reconstruction)
-Plan: 1 of 2 in current phase
-Status: In Progress
-Last activity: 2026-02-27 -- Completed 15-01-PLAN.md
+Phase: 15 of 16 (ISTFT Reconstruction) -- COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase Complete
+Last activity: 2026-02-27 -- Completed 15-02-PLAN.md
 
-Progress: [█████████████████░░░] 85% (v2.0)
+Progress: [██████████████████░░] 90% (v2.0)
 
 ## Performance Metrics
 
@@ -23,7 +23,7 @@ Progress: [█████████████████░░░] 85% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 7 completed
+**v2.0 Plans:** 8 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -37,6 +37,7 @@ Progress: [█████████████████░░░] 85% (v2
 - 14-01: 4min (2 tasks, 3 files)
 - 14-02: 4min (2 tasks, 4 files)
 - 15-01: 3min (2 tasks, 2 files)
+- 15-02: 4min (1 task, 7 files)
 
 *Updated after each plan completion*
 
@@ -73,6 +74,8 @@ Recent decisions affecting current work:
 - [15-01]: InverseMelScale used for both magnitude and phase mel-to-linear inversion
 - [15-01]: Phase cumulative sum starts at zero, left unwrapped (per user decision)
 - [15-01]: Denormalization handled inside complex_mel_to_waveform when stats dict provided
+- [15-02]: All mel_to_waveform call sites replaced with NotImplementedError or commented out (not just analyzer.py/generation.py)
+- [15-02]: Analyzer feature sweep gracefully degrades with empty arrays when waveform unavailable
 
 ### Pending Todos
 
@@ -85,5 +88,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: Completed 15-01-PLAN.md -- ISTFT reconstruction via complex_mel_to_waveform with cumsum phase and InverseMelScale
+Stopped at: Completed 15-02-PLAN.md -- Griffin-Lim removal complete, zero references in src/, v2.0-only codebase
 Resume file: None
