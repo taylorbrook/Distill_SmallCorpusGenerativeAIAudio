@@ -817,6 +817,47 @@ def _keep_winner(side: str):
 
 
 # ---------------------------------------------------------------------------
+# Model-type UI visibility helper
+# ---------------------------------------------------------------------------
+
+
+def _update_generate_tab_for_model():
+    """Return visibility updates for the generate tab based on loaded model type.
+
+    Returns a list of gr.update dicts for:
+        [empty_msg, controls_section, prior_controls_section]
+
+    - VQ-VAE model with prior loaded: show prior_controls, hide v1.0 controls, hide empty_msg
+    - v1.0 model loaded: show v1.0 controls, hide prior_controls, hide empty_msg
+    - Neither loaded: show empty_msg, hide both control sections
+    """
+    if (
+        app_state.loaded_vq_model is not None
+        and app_state.loaded_vq_model.prior is not None
+    ):
+        # VQ-VAE model with prior -- show prior controls
+        return [
+            gr.update(visible=False),   # empty_msg
+            gr.update(visible=False),   # controls_section (v1.0)
+            gr.update(visible=True),    # prior_controls_section
+        ]
+    elif app_state.loaded_model is not None:
+        # v1.0 model -- show v1.0 controls
+        return [
+            gr.update(visible=False),   # empty_msg
+            gr.update(visible=True),    # controls_section (v1.0)
+            gr.update(visible=False),   # prior_controls_section
+        ]
+    else:
+        # Nothing loaded -- show empty state
+        return [
+            gr.update(visible=True),    # empty_msg
+            gr.update(visible=False),   # controls_section (v1.0)
+            gr.update(visible=False),   # prior_controls_section
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Tab builder
 # ---------------------------------------------------------------------------
 
@@ -826,7 +867,8 @@ def build_generate_tab() -> dict:
 
     Layout:
     - Empty state message (shown when no model loaded)
-    - Controls section (hidden until model loaded):
+    - Prior controls section (visible when VQ-VAE model with prior loaded)
+    - Controls section (hidden until v1.0 model loaded):
       - Multi-model blend accordion (collapsible)
       - Sliders in 3 columns (timbral / temporal / spatial)
       - Generation config (duration, output mode, spatial width/depth)
@@ -847,7 +889,91 @@ def build_generate_tab() -> dict:
         visible=True,
     )
 
-    # Controls section -- hidden until model loaded
+    # ----- Prior-based controls section (v1.1) -----
+    # Visible when VQ-VAE model with prior loaded
+    with gr.Column(visible=False) as prior_controls_section:
+        gr.Markdown("## Generate from Prior")
+
+        # Sampling controls row
+        with gr.Row():
+            prior_temperature = gr.Slider(
+                minimum=0.1,
+                maximum=2.0,
+                value=1.0,
+                step=0.05,
+                label="Temperature",
+                info="Higher = more diverse, lower = more focused",
+            )
+            prior_top_p = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                value=0.9,
+                step=0.05,
+                label="Top-p (Nucleus)",
+                info="0 = disabled. Lower = more focused.",
+            )
+            prior_top_k = gr.Slider(
+                minimum=0,
+                maximum=512,
+                value=0,
+                step=1,
+                label="Top-k",
+                info="0 = disabled. Lower = fewer choices per step.",
+            )
+
+        # Duration and overlap row
+        with gr.Row():
+            prior_duration = gr.Slider(
+                minimum=1,
+                maximum=30,
+                value=10,
+                step=1,
+                label="Duration (seconds)",
+            )
+            prior_overlap = gr.Slider(
+                minimum=0,
+                maximum=200,
+                value=50,
+                step=10,
+                label="Crossfade Overlap (ms)",
+                info="Overlap between chunks. 50ms default.",
+            )
+
+        # Seed row
+        with gr.Row():
+            prior_seed = gr.Number(
+                label="Seed",
+                value=None,
+                precision=0,
+            )
+            prior_randomize_btn = gr.Button("Randomize", size="sm")
+
+        # Generate button
+        prior_generate_btn = gr.Button(
+            "Generate", variant="primary", size="lg",
+        )
+
+        # Audio output section
+        prior_audio_output = gr.Audio(
+            label="Generated Audio",
+            visible=False,
+            type="numpy",
+            interactive=False,
+            autoplay=False,
+        )
+        prior_status_md = gr.Markdown(value="")
+
+        # Simplified export section for prior-generated audio
+        with gr.Accordion("Export", open=False):
+            prior_export_format_dd = gr.Dropdown(
+                choices=["wav", "mp3", "flac", "ogg"],
+                value="wav",
+                label="Format",
+            )
+            prior_export_btn = gr.Button("Export", variant="secondary")
+            prior_export_status = gr.Markdown(value="")
+
+    # Controls section -- hidden until v1.0 model loaded
     with gr.Column(visible=False) as controls_section:
         gr.Markdown("## Generate")
 
@@ -1105,6 +1231,69 @@ def build_generate_tab() -> dict:
 
     # ----- Wire event handlers -----
 
+    # ----- Prior controls event wiring (v1.1) -----
+
+    # Randomize seed (prior section)
+    prior_randomize_btn.click(
+        fn=_randomize_seed,
+        inputs=None,
+        outputs=[prior_seed],
+    )
+
+    # Generate from prior
+    prior_generate_btn.click(
+        fn=_generate_prior_audio,
+        inputs=[
+            prior_temperature,
+            prior_top_k,
+            prior_top_p,
+            prior_duration,
+            prior_overlap,
+            prior_seed,
+        ],
+        outputs=[prior_audio_output, prior_status_md, prior_audio_output],
+    )
+
+    # Prior export (simplified -- exports last prior result as WAV)
+    def _export_prior_audio(export_format: str):
+        """Export the last prior-generated audio."""
+        last = app_state.metrics_buffer.get("last_prior_result")
+        if last is None:
+            return "No prior audio to export. Generate audio first."
+        try:
+            from distill.inference.export import ExportFormat, export_audio
+            from datetime import datetime, timezone
+
+            fmt = ExportFormat(export_format)
+            output_dir = app_state.generated_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            from distill.inference.export import FORMAT_EXTENSIONS
+
+            ext = FORMAT_EXTENSIONS[fmt]
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            fname = f"prior_{timestamp}_seed{last['seed_used']}{ext}"
+            output_path = output_dir / fname
+            export_audio(
+                audio=last["audio"],
+                path=output_path,
+                sample_rate=48000,
+                format=fmt,
+                bit_depth="24-bit",
+                metadata=None,
+            )
+            return f"Exported to `{output_path}`"
+        except Exception as exc:
+            logger.exception("Prior export failed")
+            return f"**Export failed:** {exc}"
+
+    prior_export_btn.click(
+        fn=_export_prior_audio,
+        inputs=[prior_export_format_dd],
+        outputs=[prior_export_status],
+    )
+
+    # ----- v1.0 controls event wiring -----
+
     # Spatial controls visibility toggle
     output_mode_dd.change(
         fn=_toggle_spatial_controls,
@@ -1239,6 +1428,7 @@ def build_generate_tab() -> dict:
         "sliders": sliders,
         "preset_dd": preset_dd,
         "controls_section": controls_section,
+        "prior_controls_section": prior_controls_section,
         "empty_msg": empty_msg,
         "blend_model_dds": blend_model_dds,
     }
