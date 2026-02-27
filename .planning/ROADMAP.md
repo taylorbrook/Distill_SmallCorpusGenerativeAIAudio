@@ -88,7 +88,10 @@ Plans:
   1. Phase is reconstructed from the IF channel by cumulative sum along the time axis, producing a continuous phase signal
   2. A waveform is produced by combining denormalized magnitude with reconstructed phase and applying ISTFT -- no Griffin-Lim anywhere in the pipeline
   3. All Griffin-Lim code paths are removed or disabled; attempting to use Griffin-Lim reconstruction raises an error or is simply absent
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 15-01-PLAN.md -- ISTFT reconstruction function (phase from IF via cumsum, mel-to-linear inversion, torch.istft) with TDD tests
+- [ ] 15-02-PLAN.md -- Griffin-Lim removal and v1.0 reconstruction cleanup (delete all Griffin-Lim code, update docstrings)
 
 ### Phase 16: Full Pipeline Integration
 **Goal**: All user-facing workflows (generation, export, training previews, slider controls, UI, CLI) work end-to-end with the new 2-channel ISTFT pipeline
@@ -123,9 +126,9 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 12. 2-Channel Data Pipeline | 2/2 | Complete    | 2026-02-22 | - |
 | 13. 2-Channel VAE Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Multi-Resolution Loss | 2/2 | Complete   | 2026-02-22 | - |
-| 15. ISTFT Reconstruction | v2.0 | 0/? | Not started | - |
+| 15. ISTFT Reconstruction | v2.0 | 0/2 | Not started | - |
 | 16. Full Pipeline Integration | v2.0 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
-*Last updated: 2026-02-21 after Phase 13 planning (2 plans)*
+*Last updated: 2026-02-27 after Phase 15 planning (2 plans)*
