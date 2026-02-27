@@ -301,6 +301,76 @@ def _generate_audio(*args):
     )
 
 
+def _generate_prior_audio(
+    temperature, top_k, top_p, duration, overlap_ms, seed_val,
+    progress=gr.Progress(),
+):
+    """Generate audio from a trained VQ-VAE prior.
+
+    Returns:
+        Tuple of (audio, status_markdown, audio_visibility).
+    """
+    # Validate model loaded
+    if (
+        app_state.loaded_vq_model is None
+        or app_state.loaded_vq_model.prior is None
+    ):
+        return (
+            None,
+            "**No VQ-VAE model with prior loaded.** Train a prior first.",
+            gr.update(visible=False),
+        )
+
+    # Parse seed
+    seed = (
+        int(seed_val)
+        if seed_val is not None and seed_val != ""
+        else None
+    )
+
+    # Compute overlap_samples from overlap_ms (48 samples per ms at 48kHz)
+    overlap_samples = int(float(overlap_ms) * 48)
+
+    # Progress callback wrapping gr.Progress
+    def _progress_cb(fraction, desc):
+        progress(fraction, desc=desc)
+
+    try:
+        from distill.inference.generation import generate_audio_from_prior
+
+        audio, seed_used = generate_audio_from_prior(
+            loaded=app_state.loaded_vq_model,
+            temperature=float(temperature),
+            top_k=int(top_k),
+            top_p=float(top_p),
+            duration_s=float(duration),
+            overlap_samples=overlap_samples,
+            seed=seed,
+            progress_callback=_progress_cb,
+        )
+
+        # Store result info for potential export
+        app_state.metrics_buffer["last_prior_result"] = {
+            "audio": audio,
+            "seed_used": seed_used,
+            "duration_s": len(audio) / 48000,
+            "sample_rate": 48000,
+        }
+
+        return (
+            (48000, audio),
+            f"**Generated** -- seed: {seed_used}, duration: {len(audio)/48000:.1f}s",
+            gr.update(visible=True),
+        )
+    except Exception as exc:
+        logger.exception("Prior generation failed")
+        return (
+            None,
+            f"**Generation failed:** {exc}",
+            gr.update(visible=False),
+        )
+
+
 def _export_audio(
     sample_rate_str: str,
     bit_depth: str,

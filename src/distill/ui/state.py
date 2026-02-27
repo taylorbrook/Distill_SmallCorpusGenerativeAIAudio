@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from distill.inference.blending import BlendEngine
     from distill.inference.generation import GenerationPipeline
     from distill.library.catalog import ModelLibrary
-    from distill.models.persistence import LoadedModel
+    from distill.models.persistence import LoadedModel, LoadedVQModel
     from distill.presets.manager import PresetManager
     from distill.training.runner import TrainingRunner
 
@@ -44,6 +44,9 @@ class AppState:
     # Current loaded model
     loaded_model: Optional[LoadedModel] = None
     pipeline: Optional[GenerationPipeline] = None
+
+    # Current loaded VQ-VAE model (v1.1)
+    loaded_vq_model: Optional[LoadedVQModel] = None
 
     # Current dataset
     current_dataset: Optional[Dataset] = None
