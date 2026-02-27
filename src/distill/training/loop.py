@@ -343,6 +343,7 @@ def train(
         TrainingCompleteEvent,
     )
     from distill.training.preview import generate_preview
+    from distill.vocoder import get_vocoder
 
     # -----------------------------------------------------------------
     # Setup
@@ -365,6 +366,9 @@ def train(
     )
     model = model.to(device)
     spectrogram.to(device)
+
+    # Create vocoder for preview generation
+    vocoder = get_vocoder("bigvgan", device=str(device))
 
     # Initialize lazy linear layers before any load_state_dict call
     # (required for checkpoint resume -- lazy layers must be materialized first)
@@ -590,13 +594,14 @@ def train(
                     output_dir=preview_dir,
                     epoch=epoch,
                     device=device,
+                    vocoder=vocoder,
                 )
                 for p in preview_paths:
                     if callback is not None:
                         callback(PreviewEvent(
                             epoch=epoch,
                             audio_path=str(p),
-                            sample_rate=spec_config.sample_rate,
+                            sample_rate=vocoder.sample_rate,
                         ))
             except Exception:
                 logger.warning("Preview generation failed at epoch %d", epoch, exc_info=True)
