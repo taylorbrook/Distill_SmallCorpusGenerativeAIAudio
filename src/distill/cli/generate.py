@@ -220,6 +220,23 @@ def generate(
             help="Blend models as MODEL:WEIGHT pairs (e.g., --blend 'model_a:60' --blend 'model_b:40')",
         ),
     ] = None,
+    # --- Prior sampling options (Phase 15) ---
+    temperature: float = typer.Option(
+        1.0, "--temperature", "-t",
+        help="Sampling temperature (0.1-2.0, higher = more diverse)",
+    ),
+    top_k: int = typer.Option(
+        0, "--top-k",
+        help="Top-k sampling (0 = disabled, limits choices per step)",
+    ),
+    top_p: float = typer.Option(
+        0.9, "--top-p",
+        help="Nucleus sampling threshold (0 = disabled, 0.9 = default)",
+    ),
+    overlap_ms: float = typer.Option(
+        50.0, "--overlap",
+        help="Crossfade overlap in milliseconds for multi-chunk stitching",
+    ),
     # --- Metadata override options (Phase 10) ---
     meta_artist: Annotated[
         Optional[str],
@@ -260,7 +277,8 @@ def generate(
     """Generate audio from a trained model.
 
     Supports multi-format export, spatial audio, model blending, and
-    metadata embedding.
+    metadata embedding.  For VQ-VAE v2 models with a trained prior,
+    uses --temperature, --top-k, and --top-p for sampling control.
     """
     from rich.console import Console
 
@@ -451,6 +469,47 @@ def generate(
             f"(device: {torch_device.type})"
         )
 
+        # ---- VQ-VAE v2 model: prior-based generation ----
+        from distill.models.persistence import LoadedVQModel
+
+        if isinstance(loaded, LoadedVQModel):
+            # Warn on incompatible v1.0 flags
+            if slider is not None:
+                console.print(
+                    "[yellow]Warning:[/yellow] --slider is not supported "
+                    "for VQ-VAE models. Ignored."
+                )
+            if preset is not None:
+                console.print(
+                    "[yellow]Warning:[/yellow] --preset is not supported "
+                    "for VQ-VAE models. Ignored."
+                )
+            if blend is not None:
+                console.print(
+                    "[yellow]Warning:[/yellow] --blend is not supported "
+                    "for VQ-VAE models. Ignored."
+                )
+
+            _generate_prior_cli(
+                loaded=loaded,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                duration=duration,
+                overlap_ms=overlap_ms,
+                seed=seed,
+                count=count,
+                output_dir=output_dir,
+                export_format=export_format,
+                file_ext=file_ext,
+                sample_rate=sample_rate,
+                bit_depth=bit_depth,
+                meta_overrides=meta_overrides,
+                console=console,
+                json_output=json_output,
+            )
+            return
+
         # Build generation config
         latent_vector = None
 
@@ -599,6 +658,202 @@ def generate(
             console.print(
                 f"[green]Generated:[/green] {export_path} ({fmt_lower})"
             )
+
+    # Output results
+    if json_output:
+        print(json.dumps(results, indent=2))
+    else:
+        for r in results:
+            print(r["file"])
+
+
+# ---------------------------------------------------------------------------
+# Prior-based generation helper (Phase 15)
+# ---------------------------------------------------------------------------
+
+
+def _generate_prior_cli(
+    loaded: "LoadedVQModel",
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    duration: float,
+    overlap_ms: float,
+    seed: "int | None",
+    count: int,
+    output_dir: Path,
+    export_format: "ExportFormat",
+    file_ext: str,
+    sample_rate: int,
+    bit_depth: str,
+    meta_overrides: dict,
+    console: "Console",
+    json_output: bool,
+) -> None:
+    """Generate audio from a VQ-VAE model with a trained prior.
+
+    Handles the full CLI flow for prior-based generation: validation,
+    Rich progress display, batch generation, and export.
+
+    Parameters
+    ----------
+    loaded : LoadedVQModel
+        Loaded VQ-VAE model with prior.
+    temperature : float
+        Sampling temperature.
+    top_k : int
+        Top-k sampling parameter.
+    top_p : float
+        Nucleus sampling threshold.
+    duration : float
+        Duration in seconds.
+    overlap_ms : float
+        Crossfade overlap in milliseconds.
+    seed : int or None
+        Random seed.
+    count : int
+        Number of files to generate.
+    output_dir : Path
+        Output directory.
+    export_format : ExportFormat
+        Target export format.
+    file_ext : str
+        File extension without dot.
+    sample_rate : int
+        Output sample rate.
+    bit_depth : str
+        Bit depth string.
+    meta_overrides : dict
+        Metadata override dict.
+    console : Console
+        Rich console (stderr).
+    json_output : bool
+        Whether to output JSON to stdout.
+    """
+    from datetime import datetime, timezone
+
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+
+    from distill.inference.export import export_audio, write_sidecar_json
+    from distill.inference.generation import generate_audio_from_prior
+
+    # Validate prior exists
+    if loaded.prior is None:
+        console.print(
+            "[bold red]Error:[/bold red] Model has no trained prior. "
+            "Run 'distill train-prior' first."
+        )
+        raise typer.Exit(1)
+
+    # Print model info
+    console.print(
+        f"[green]Loaded VQ-VAE:[/green] {loaded.metadata.name} "
+        f"(prior: yes, device: {loaded.device.type})"
+    )
+    console.print(
+        f"[dim]temperature={temperature}, top_k={top_k}, "
+        f"top_p={top_p}, duration={duration}s[/dim]"
+    )
+
+    # Compute overlap in samples (48 samples/ms at 48 kHz)
+    overlap_samples = int(overlap_ms * 48)
+
+    results: list[dict] = []
+
+    for i in range(count):
+        current_seed = seed + i if seed is not None else None
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total} chunks"),
+            console=console,
+        ) as progress:
+            import math  # noqa: WPS433 -- lazy import
+
+            num_chunks = max(1, math.ceil(duration / 1.0))
+            task_id = progress.add_task(
+                f"Generating ({i + 1}/{count})...",
+                total=num_chunks,
+            )
+
+            def _progress_cb(frac: float, msg: str) -> None:
+                completed = int(frac * num_chunks)
+                progress.update(task_id, completed=completed, description=msg)
+
+            audio, seed_used = generate_audio_from_prior(
+                loaded,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                duration_s=duration,
+                overlap_samples=overlap_samples,
+                seed=current_seed,
+                progress_callback=_progress_cb,
+            )
+
+            progress.update(task_id, completed=num_chunks)
+
+        # Export audio
+        import numpy as np  # noqa: WPS433
+
+        audio_arr = np.asarray(audio, dtype=np.float32)
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"gen_{timestamp}_seed{seed_used}.{file_ext}"
+        export_path = output_dir / filename
+
+        channels = 1 if audio_arr.ndim == 1 else audio_arr.shape[0]
+
+        # Write sidecar JSON first (research pitfall #6)
+        gen_config_dict = {
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+            "duration_s": duration,
+            "overlap_samples": overlap_samples,
+            "model_type": "vqvae",
+        }
+        write_sidecar_json(
+            wav_path=export_path,
+            model_name=loaded.metadata.name,
+            generation_config=gen_config_dict,
+            seed=seed_used,
+            quality_metrics={},
+            duration_s=audio_arr.shape[-1] / 48000,
+            sample_rate=sample_rate,
+            bit_depth=bit_depth,
+            channels=channels,
+        )
+
+        # Build metadata for tag embedding
+        from distill.audio.metadata import build_export_metadata  # noqa: WPS433
+
+        metadata = build_export_metadata(
+            model_name=loaded.metadata.name,
+            seed=seed_used,
+            preset_name=None,
+            overrides=meta_overrides if meta_overrides else None,
+        )
+
+        export_audio(
+            audio=audio_arr,
+            path=export_path,
+            sample_rate=sample_rate,
+            format=export_format,
+            bit_depth=bit_depth,
+            metadata=metadata,
+        )
+
+        results.append({
+            "file": str(export_path),
+            "format": file_ext,
+            "seed": seed_used,
+        })
+        console.print(
+            f"[green]Generated:[/green] {export_path} ({file_ext})"
+        )
 
     # Output results
     if json_output:
