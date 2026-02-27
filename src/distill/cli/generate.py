@@ -32,11 +32,39 @@ _VALID_FORMATS = ("wav", "mp3", "flac", "ogg")
 # ---------------------------------------------------------------------------
 
 
+def _detect_model_version(model_path: Path) -> tuple[int, str]:
+    """Peek at a .distill file to detect version and model_type without full load.
+
+    Returns (version, model_type) -- e.g. (1, "vae") or (2, "vqvae").
+    """
+    import torch  # noqa: WPS433 -- lazy import
+
+    saved = torch.load(model_path, map_location="cpu", weights_only=False)
+    version = saved.get("version", 1)
+    model_type = saved.get("model_type", "vae")
+    return version, model_type
+
+
+def _load_by_version(
+    model_path: Path,
+    device: str,
+) -> "LoadedModel | LoadedVQModel":
+    """Load a model file, dispatching to v1 or v2 loader based on version."""
+    version, model_type = _detect_model_version(model_path)
+    if version >= 2 and model_type == "vqvae":
+        from distill.models.persistence import load_model_v2
+
+        return load_model_v2(model_path, device=device)
+    from distill.models.persistence import load_model
+
+    return load_model(model_path, device=device)
+
+
 def resolve_model(
     model_ref: str,
     models_dir: Path,
     device: str,
-) -> "LoadedModel":
+) -> "LoadedModel | LoadedVQModel":
     """Resolve a model reference to a loaded model.
 
     Resolution order:
@@ -55,21 +83,20 @@ def resolve_model(
 
     Returns
     -------
-    LoadedModel
-        Loaded model ready for generation.
+    LoadedModel | LoadedVQModel
+        Loaded model ready for generation.  Returns ``LoadedVQModel`` for
+        v2 VQ-VAE models, ``LoadedModel`` for v1 models.
 
     Raises
     ------
     typer.BadParameter
         If model is not found or reference is ambiguous.
     """
-    from distill.models.persistence import load_model
-
     # 1. Direct .distill file path
     if model_ref.endswith(".distill"):
         sda_path = Path(model_ref)
         if sda_path.exists():
-            return load_model(sda_path, device=device)
+            return _load_by_version(sda_path, device=device)
         raise typer.BadParameter(f"Model file not found: {model_ref}")
 
     # 2. UUID lookup
@@ -78,12 +105,12 @@ def resolve_model(
     library = ModelLibrary(models_dir)
     entry = library.get(model_ref)
     if entry is not None:
-        return load_model(models_dir / entry.file_path, device=device)
+        return _load_by_version(models_dir / entry.file_path, device=device)
 
     # 3. Name search
     results = library.search(query=model_ref)
     if len(results) == 1:
-        return load_model(models_dir / results[0].file_path, device=device)
+        return _load_by_version(models_dir / results[0].file_path, device=device)
     if len(results) > 1:
         names = ", ".join(f"'{r.name}'" for r in results)
         raise typer.BadParameter(
