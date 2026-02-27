@@ -2,7 +2,7 @@
 
 For audio longer than one chunk, latent vectors are decoded to
 overlapping mel windows and combined via Hann-windowed overlap-add
-before a single Griffin-Lim pass.  This produces truly seamless audio
+before a single vocoder pass.  This produces truly seamless audio
 with no chunk boundaries, clicks, or windowing artifacts.
 
 Two generation modes:
@@ -14,8 +14,8 @@ Two generation modes:
 Design notes:
 - Lazy imports for ``torch`` and ``numpy`` (project pattern).
 - ``model.decode(z, target_shape=mel_shape)`` passes mel shape to decoder.
-- ``spectrogram.mel_to_waveform()`` forces CPU (existing InverseMelScale
-  pattern from ``audio/spectrogram.py``).
+- ``vocoder.mel_to_waveform()`` converts the continuous mel to audio at
+  the vocoder's native sample rate.
 - 50% Hann overlap satisfies the COLA (Constant Overlap-Add) condition,
   guaranteeing amplitude consistency across the synthesized mel.
 """
@@ -215,8 +215,8 @@ def synthesize_continuous_mel(
     at 50% hop satisfies the COLA condition, producing a smooth
     continuous mel spectrogram with no chunk boundaries or artifacts.
 
-    A single Griffin-Lim pass on this mel reconstructs phase over the
-    entire spectrogram, eliminating clicks entirely.
+    A single vocoder pass on this mel produces the final waveform
+    over the entire spectrogram, eliminating clicks entirely.
 
     Parameters
     ----------
@@ -388,6 +388,7 @@ def generate_chunks_crossfade(
     seed: int | None,
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
+    vocoder: "VocoderBase | None" = None,
 ) -> "np.ndarray":
     """Generate audio via continuous overlap-add synthesis.
 
@@ -400,7 +401,7 @@ def generate_chunks_crossfade(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape computation).
     num_chunks : int
         Target duration in chunks (each chunk_samples long).
     device : torch.device
@@ -411,6 +412,8 @@ def generate_chunks_crossfade(
         Number of audio samples per chunk (default 48000 = 1 s at 48 kHz).
     overlap_samples : int
         Kept for API compatibility (overlap is now 50% mel frames).
+    vocoder : VocoderBase | None
+        Vocoder for mel-to-waveform conversion.
 
     Returns
     -------
@@ -431,8 +434,10 @@ def generate_chunks_crossfade(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    from distill.inference.generation import _vocoder_with_fallback  # noqa: WPS433
+
+    wav = _vocoder_with_fallback(vocoder, combined_mel, vocoder._device)
+    return wav.squeeze().cpu().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +453,7 @@ def generate_chunks_latent_interp(
     seed: int | None,
     chunk_samples: int = 48_000,
     steps_between: int = 10,
+    vocoder: "VocoderBase | None" = None,
 ) -> "np.ndarray":
     """Generate audio via SLERP interpolation with continuous synthesis.
 
@@ -459,7 +465,7 @@ def generate_chunks_latent_interp(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape computation).
     num_chunks : int
         Number of anchor latent vectors / target duration in seconds.
     device : torch.device
@@ -470,6 +476,8 @@ def generate_chunks_latent_interp(
         Audio samples per decoded chunk (default 48000 = 1 s at 48 kHz).
     steps_between : int
         Kept for API compatibility.
+    vocoder : VocoderBase | None
+        Vocoder for mel-to-waveform conversion.
 
     Returns
     -------
@@ -490,5 +498,7 @@ def generate_chunks_latent_interp(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    from distill.inference.generation import _vocoder_with_fallback  # noqa: WPS433
+
+    wav = _vocoder_with_fallback(vocoder, combined_mel, vocoder._device)
+    return wav.squeeze().cpu().numpy().astype(np.float32)
