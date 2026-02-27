@@ -5,8 +5,7 @@ users can hear the model improve over time.  Previews are listed by epoch
 for a scrollable timeline in the UI.
 
 Design notes:
-- ``InverseMelScale`` + ``GriffinLim`` run on CPU (project pattern from
-  ``audio/spectrogram.py``).
+- Neural vocoder (BigVGAN) used for all mel-to-waveform conversion.
 - Per-file try/except: one failed preview does not stop training.
 - Peak normalization prevents clipping in 16-bit WAV output.
 - Lazy imports for ``torch``, ``soundfile``, ``numpy`` (project pattern).
@@ -37,13 +36,14 @@ def generate_preview(
     epoch: int,
     device: "torch.device",
     num_samples: int = 1,
-    sample_rate: int = 48_000,
+    sample_rate: int = 44_100,
+    vocoder: "VocoderBase" = None,
 ) -> list[Path]:
     """Generate WAV preview files from random latent vectors.
 
     Sets the model to eval mode, generates samples, then restores train mode.
     Each sample is decoded through the VAE decoder and converted to a waveform
-    via ``spectrogram.mel_to_waveform`` (CPU-based InverseMelScale + GriffinLim).
+    via the neural vocoder.
 
     Parameters
     ----------
@@ -60,7 +60,10 @@ def generate_preview(
     num_samples : int
         Number of preview samples to generate (default 1).
     sample_rate : int
-        Output sample rate in Hz (default 48000).
+        Output sample rate in Hz (default 44100).
+    vocoder : VocoderBase
+        Neural vocoder for mel-to-waveform conversion.  Required --
+        Griffin-Lim is removed.
 
     Returns
     -------
@@ -68,6 +71,8 @@ def generate_preview(
         Paths to successfully saved WAV files.
     """
     import torch  # noqa: WPS433 -- lazy import
+
+    from distill.inference.generation import _vocoder_with_fallback
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -81,8 +86,9 @@ def generate_preview(
             # Generate mel spectrograms from random latent vectors
             mel_recon = model.sample(num_samples, device)
 
-            # Convert to waveform on CPU (InverseMelScale requirement)
-            waveforms = spectrogram.mel_to_waveform(mel_recon.cpu())
+            # Convert to waveform via neural vocoder
+            waveforms = _vocoder_with_fallback(vocoder, mel_recon, vocoder._device)
+            waveforms = waveforms.cpu()
 
             # Save each sample as WAV
             for i in range(waveforms.shape[0]):
@@ -120,7 +126,8 @@ def generate_reconstruction_preview(
     output_dir: Path,
     epoch: int,
     device: "torch.device",
-    sample_rate: int = 48_000,
+    sample_rate: int = 44_100,
+    vocoder: "VocoderBase" = None,
 ) -> list[Path]:
     """Generate original vs. reconstruction WAV pairs for quality monitoring.
 
@@ -143,7 +150,10 @@ def generate_reconstruction_preview(
     device : torch.device
         Device the model is on.
     sample_rate : int
-        Output sample rate in Hz (default 48000).
+        Output sample rate in Hz (default 44100).
+    vocoder : VocoderBase
+        Neural vocoder for mel-to-waveform conversion.  Required --
+        Griffin-Lim is removed.
 
     Returns
     -------
@@ -151,6 +161,8 @@ def generate_reconstruction_preview(
         Paths to all successfully saved WAV files (originals + reconstructions).
     """
     import torch  # noqa: WPS433 -- lazy import
+
+    from distill.inference.generation import _vocoder_with_fallback
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -166,9 +178,11 @@ def generate_reconstruction_preview(
             sample_batch = sample_batch[:n_items].to(device)
             recon, _mu, _logvar = model(sample_batch)
 
-            # Convert both to waveform on CPU
-            orig_waveforms = spectrogram.mel_to_waveform(sample_batch.cpu())
-            recon_waveforms = spectrogram.mel_to_waveform(recon.cpu())
+            # Convert both to waveform via neural vocoder
+            orig_waveforms = _vocoder_with_fallback(vocoder, sample_batch, vocoder._device)
+            recon_waveforms = _vocoder_with_fallback(vocoder, recon, vocoder._device)
+            orig_waveforms = orig_waveforms.cpu()
+            recon_waveforms = recon_waveforms.cpu()
 
             for i in range(n_items):
                 # Original
