@@ -179,7 +179,7 @@ class ComplexSpectrogram:
 
     def __init__(self, config: "ComplexSpectrogramConfig") -> None:
         import torch  # noqa: WPS433 -- lazy import
-        from torchaudio.transforms import MelScale, MelSpectrogram
+        from torchaudio.transforms import InverseMelScale, MelScale, MelSpectrogram
 
         self.config = config
         self.if_masking_threshold = config.if_masking_threshold
@@ -208,6 +208,13 @@ class ComplexSpectrogram:
 
         # Pre-create a hann window for STFT to avoid spectral leakage warning
         self._stft_window = torch.hann_window(config.n_fft)
+
+        # Inverse mel scale for reconstruction (must stay on CPU -- project pattern)
+        self._inverse_mel = InverseMelScale(
+            n_stft=config.n_fft // 2 + 1,
+            n_mels=config.n_mels,
+            sample_rate=48_000,
+        )
 
         self._torch = torch
         self._pi = math.pi
@@ -285,6 +292,89 @@ class ComplexSpectrogram:
 
         # Stack: [B, 2, n_mels, time]
         return torch.stack([mel_mag, if_mel], dim=1)
+
+    # ------------------------------------------------------------------
+    # Inverse: 2-channel mel -> waveform via ISTFT
+    # ------------------------------------------------------------------
+
+    def complex_mel_to_waveform(
+        self,
+        spectrogram: "torch.Tensor",
+        stats: dict[str, float] | None = None,
+        sample_rate: int = 48_000,
+    ) -> "torch.Tensor":
+        """Reconstruct audio waveform from 2-channel magnitude + IF spectrogram.
+
+        Converts the mel-domain representation back to linear frequency,
+        reconstructs phase via cumulative sum of IF, and applies ISTFT.
+
+        Parameters
+        ----------
+        spectrogram : torch.Tensor
+            Shape ``[B, 2, n_mels, time]`` -- normalised or raw.
+        stats : dict[str, float] | None
+            If provided, denormalise before reconstruction.
+        sample_rate : int
+            Sample rate for InverseMelScale (default 48 kHz).
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``[B, 1, samples]`` -- reconstructed mono waveforms.
+        """
+        torch = self._torch
+        pi = self._pi
+        config = self.config
+
+        # -- Step 1: Denormalize (if stats provided) --------------------------
+        if stats is not None:
+            spectrogram = self.denormalize(spectrogram, stats)
+
+        # -- Step 2: Split channels -------------------------------------------
+        mag_mel = spectrogram[:, 0]   # [B, n_mels, time] -- log1p domain
+        if_mel = spectrogram[:, 1]    # [B, n_mels, time] -- normalised [-1, 1]
+
+        # -- Step 3: Undo log1p on magnitude ----------------------------------
+        # log1p domain -> linear mel power -> mel amplitude (sqrt for power=2.0)
+        mel_power = torch.expm1(mag_mel).clamp(min=0)
+        mel_amp = torch.sqrt(mel_power)  # [B, n_mels, time]
+
+        # -- Step 4: Undo IF normalization ------------------------------------
+        if_radians = if_mel * pi  # [-1,1] -> [-pi, pi]
+
+        # -- Step 5: Reconstruct phase via cumulative sum ---------------------
+        # Starting from zero at time step 0 (per user decision)
+        phase_mel = torch.cumsum(if_radians, dim=-1)  # [B, n_mels, time]
+        # Leave phase unwrapped (per user decision)
+
+        # -- Step 6: Invert mel scale to linear frequency ---------------------
+        # InverseMelScale must run on CPU (torch.linalg.lstsq MPS issues)
+        original_device = mel_amp.device
+        mel_amp_cpu = mel_amp.cpu()
+        phase_mel_cpu = phase_mel.cpu()
+
+        mag_linear = self._inverse_mel(mel_amp_cpu)     # [B, n_stft, time]
+        phase_linear = self._inverse_mel(phase_mel_cpu)  # [B, n_stft, time]
+
+        # Move back to original device
+        mag_linear = mag_linear.to(original_device)
+        phase_linear = phase_linear.to(original_device)
+
+        # -- Step 7: Combine magnitude + phase into complex STFT --------------
+        stft_complex = mag_linear * torch.exp(1j * phase_linear)
+
+        # -- Step 8: Apply ISTFT ----------------------------------------------
+        window = self._stft_window.to(original_device)
+        waveform = torch.istft(
+            stft_complex,
+            n_fft=config.n_fft,
+            hop_length=config.hop_length,
+            window=window,
+            return_complex=False,
+        )  # [B, samples]
+
+        # -- Step 9: Return [B, 1, samples] -----------------------------------
+        return waveform.unsqueeze(1)
 
     # ------------------------------------------------------------------
     # Dataset statistics
@@ -397,10 +487,14 @@ class ComplexSpectrogram:
     def to(self, device: "torch.device") -> "ComplexSpectrogram":
         """Move transforms to the given device.
 
+        ``_inverse_mel`` is NOT moved -- it must stay on CPU because
+        ``InverseMelScale`` uses ``torch.linalg.lstsq`` which has MPS issues.
+
         Returns ``self`` for chaining.
         """
         self.mel_transform = self.mel_transform.to(device)
         self.mel_scale = self.mel_scale.to(device)
         self._mel_fb_sum = self._mel_fb_sum.to(device)
         self._stft_window = self._stft_window.to(device)
+        # Note: self._inverse_mel stays on CPU (project pattern)
         return self
