@@ -210,6 +210,105 @@ class CodePrior(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Autoregressive sampling
+# ---------------------------------------------------------------------------
+
+
+@torch.no_grad()
+def sample_code_sequence(
+    prior: CodePrior,
+    temperature: float = 1.0,
+    top_k: int = 0,
+    top_p: float = 0.9,
+    seed: int | None = None,
+    device: torch.device = torch.device("cpu"),
+) -> torch.Tensor:
+    """Sample a code sequence autoregressively from a trained prior.
+
+    Generates a flattened code sequence of length ``prior.seq_len`` by
+    iteratively predicting the next token given all previous tokens.
+    Supports temperature scaling, top-k filtering, and nucleus (top-p)
+    sampling for controllable diversity.
+
+    Parameters
+    ----------
+    prior:
+        A trained :class:`CodePrior` model.
+    temperature:
+        Softmax temperature.  ``1.0`` = unmodified logits, ``< 1.0`` =
+        sharper (more deterministic), ``> 1.0`` = flatter (more random).
+    top_k:
+        If ``> 0``, keep only the *k* highest-probability tokens and
+        zero out the rest before sampling.
+    top_p:
+        Nucleus sampling threshold.  If ``0 < top_p < 1.0``, keep the
+        smallest set of tokens whose cumulative probability exceeds
+        *top_p* and zero out the rest.
+    seed:
+        Random seed for reproducibility.  ``None`` for non-deterministic.
+    device:
+        Device to run sampling on.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``[1, seq_len]`` -- sampled code indices (long tensor).
+    """
+    prior.eval()
+
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    seq_len = prior.seq_len
+
+    # Start with a single random token
+    generated = torch.randint(
+        0, prior.codebook_size, (1, 1), device=device,
+    )
+
+    for _step in range(seq_len - 1):
+        # Forward pass: get logits for the last position
+        logits = prior(generated)[:, -1, :]  # [1, codebook_size]
+
+        # Temperature scaling
+        if temperature != 1.0:
+            logits = logits / temperature
+
+        # Top-k filtering
+        if top_k > 0:
+            k = min(top_k, logits.size(-1))
+            top_k_values, _ = torch.topk(logits, k, dim=-1)
+            threshold = top_k_values[:, -1].unsqueeze(-1)
+            logits = logits.masked_fill(logits < threshold, float("-inf"))
+
+        # Nucleus (top-p) filtering
+        if 0 < top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(
+                logits, descending=True, dim=-1,
+            )
+            sorted_probs = torch.softmax(sorted_logits, dim=-1)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+            # Mask tokens where (cumulative - current) >= top_p
+            sorted_mask = (cumulative_probs - sorted_probs) >= top_p
+            sorted_logits = sorted_logits.masked_fill(
+                sorted_mask, float("-inf"),
+            )
+
+            # Scatter back to original indices
+            logits = logits.scatter(1, sorted_indices, sorted_logits)
+
+        # Sample from the filtered distribution
+        probs = torch.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)  # [1, 1]
+
+        # Append to generated sequence
+        generated = torch.cat([generated, next_token], dim=1)
+
+    return generated  # [1, seq_len]
+
+
+# ---------------------------------------------------------------------------
 # Code extraction pipeline
 # ---------------------------------------------------------------------------
 
