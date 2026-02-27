@@ -2,7 +2,7 @@
 
 Applies a Butterworth low-pass filter to remove frequencies above the
 audible range (default 20 kHz) from generated audio.  Used after
-GriffinLim output and before sample rate conversion.
+audio reconstruction and before sample rate conversion.
 
 Design notes:
 - Lazy imports for ``numpy`` and ``scipy`` (project pattern).

@@ -4,12 +4,12 @@ Converts between raw waveforms and normalized log-mel spectrograms.
 All audio entering or leaving the VAE passes through this module,
 ensuring consistent mel parameters (n_fft, n_mels, hop_length, sample_rate).
 
-v2.0 adds :class:`ComplexSpectrogram` which computes 2-channel
-magnitude + instantaneous frequency (IF) spectrograms in mel domain.
+:class:`AudioSpectrogram` is forward-only (waveform to mel).
+:class:`ComplexSpectrogram` (v2.0) handles both directions via 2-channel
+magnitude + instantaneous frequency (IF) spectrograms with ISTFT reconstruction.
 
 Design notes:
 - Lazy-imports torchaudio.transforms inside ``__init__`` (project pattern).
-- ``InverseMelScale`` runs on CPU to avoid ``torch.linalg.lstsq`` issues on MPS.
 - ``log1p`` / ``expm1`` normalisation compresses dynamic range and handles zeros.
 """
 
@@ -50,7 +50,7 @@ class AudioSpectrogram:
 
     def __init__(self, config: SpectrogramConfig | None = None) -> None:
         import torch  # noqa: WPS433 -- lazy import
-        from torchaudio.transforms import GriffinLim, InverseMelScale, MelSpectrogram
+        from torchaudio.transforms import MelSpectrogram
 
         self.config = config or SpectrogramConfig()
         c = self.config
@@ -64,28 +64,12 @@ class AudioSpectrogram:
             f_max=c.f_max,
             power=c.power,
         )
-        self.inverse_mel = InverseMelScale(
-            n_stft=c.n_fft // 2 + 1,
-            n_mels=c.n_mels,
-            sample_rate=c.sample_rate,
-            f_min=c.f_min,
-            f_max=c.f_max,
-        )
-        self.griffin_lim = GriffinLim(
-            n_fft=c.n_fft,
-            n_iter=128,
-            hop_length=c.hop_length,
-            power=c.power,
-        )
 
         # Keep a reference to torch for use in methods without re-importing
         self._torch = torch
 
     def to(self, device: "torch.device") -> "AudioSpectrogram":
         """Move the forward mel transform to the given device.
-
-        Only ``mel_transform`` is moved -- ``inverse_mel`` and ``griffin_lim``
-        remain on CPU (InverseMelScale requires CPU for ``torch.linalg.lstsq``).
 
         Returns ``self`` for chaining.
         """
@@ -113,33 +97,6 @@ class AudioSpectrogram:
         mel = self.mel_transform(waveform.squeeze(1))  # [B, n_mels, time]
         mel_log = torch.log1p(mel)  # log(1 + x), handles zeros gracefully
         return mel_log.unsqueeze(1)  # [B, 1, n_mels, time]
-
-    # ------------------------------------------------------------------
-    # Inverse: mel -> waveform
-    # ------------------------------------------------------------------
-
-    def mel_to_waveform(self, mel_log: "torch.Tensor") -> "torch.Tensor":
-        """Convert normalised log-mel spectrogram back to waveform.
-
-        ``InverseMelScale`` is forced to CPU to avoid
-        ``torch.linalg.lstsq`` issues on MPS.
-
-        Parameters
-        ----------
-        mel_log : torch.Tensor
-            Shape ``[B, 1, n_mels, time]`` -- normalised log-mel spectrogram.
-
-        Returns
-        -------
-        torch.Tensor
-            Shape ``[B, 1, samples]`` -- reconstructed mono waveforms.
-        """
-        torch = self._torch
-        mel = torch.expm1(mel_log.squeeze(1).clamp(min=0))  # inverse of log1p
-        # InverseMelScale must run on CPU (torch.linalg.lstsq MPS issues)
-        linear_spec = self.inverse_mel(mel.cpu())  # [B, n_stft, time]
-        waveform = self.griffin_lim(linear_spec)  # [B, samples]
-        return waveform.unsqueeze(1)  # [B, 1, samples]
 
     # ------------------------------------------------------------------
     # Utility

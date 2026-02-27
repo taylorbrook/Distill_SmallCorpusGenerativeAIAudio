@@ -308,21 +308,21 @@ class LatentSpaceAnalyzer:
 
                         # Decode to mel, convert to waveform
                         mel_out = model.decode(z_tensor, target_shape=mel_shape)
-                        wav = spectrogram.mel_to_waveform(mel_out.cpu())
-                        wav_np = wav.squeeze().numpy().astype(np.float32)
-
-                        # Compute audio features
-                        features = compute_audio_features(
-                            wav_np, spectrogram.config.sample_rate,
-                        )
-                        for name in FEATURE_NAMES:
-                            sweep_features[name].append(features[name])
+                        # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+                        #   wav = spectrogram.mel_to_waveform(mel_out.cpu())
+                        #   wav_np = wav.squeeze().numpy().astype(np.float32)
+                        #   features = compute_audio_features(
+                        #       wav_np, spectrogram.config.sample_rate,
+                        #   )
+                        #   for name in FEATURE_NAMES:
+                        #       sweep_features[name].append(features[name])
+                        pass  # Waveform reconstruction deferred to Phase 16
 
                     # Compute Pearson correlation for each feature
                     for name in FEATURE_NAMES:
                         values = np.array(sweep_features[name])
-                        # Check for constant values (pearsonr would error)
-                        if np.std(values) < 1e-12:
+                        # Check for empty or constant values (pearsonr would error)
+                        if len(values) == 0 or np.std(values) < 1e-12:
                             feature_correlations[name].append(0.0)
                             feature_pvalues[name].append(1.0)
                         else:

@@ -2,8 +2,8 @@
 
 For audio longer than one chunk, latent vectors are decoded to
 overlapping mel windows and combined via Hann-windowed overlap-add
-before a single Griffin-Lim pass.  This produces truly seamless audio
-with no chunk boundaries, clicks, or windowing artifacts.
+for continuous audio.  Overlap-add mel synthesis produces seamless
+audio with no chunk boundaries, clicks, or windowing artifacts.
 
 Two generation modes:
 
@@ -14,8 +14,6 @@ Two generation modes:
 Design notes:
 - Lazy imports for ``torch`` and ``numpy`` (project pattern).
 - ``model.decode(z, target_shape=mel_shape)`` passes mel shape to decoder.
-- ``spectrogram.mel_to_waveform()`` forces CPU (existing InverseMelScale
-  pattern from ``audio/spectrogram.py``).
 - 50% Hann overlap satisfies the COLA (Constant Overlap-Add) condition,
   guaranteeing amplitude consistency across the synthesized mel.
 """
@@ -214,9 +212,6 @@ def synthesize_continuous_mel(
     Hann-windowed, and accumulated with 50% overlap.  The Hann window
     at 50% hop satisfies the COLA condition, producing a smooth
     continuous mel spectrogram with no chunk boundaries or artifacts.
-
-    A single Griffin-Lim pass on this mel reconstructs phase over the
-    entire spectrogram, eliminating clicks entirely.
 
     Parameters
     ----------
@@ -431,8 +426,12 @@ def generate_chunks_crossfade(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+    #   wav = spectrogram.mel_to_waveform(combined_mel)
+    #   return wav.squeeze().numpy().astype(np.float32)
+    raise NotImplementedError(
+        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -490,5 +489,9 @@ def generate_chunks_latent_interp(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+    #   wav = spectrogram.mel_to_waveform(combined_mel)
+    #   return wav.squeeze().numpy().astype(np.float32)
+    raise NotImplementedError(
+        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+    )

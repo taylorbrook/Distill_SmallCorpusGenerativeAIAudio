@@ -687,9 +687,6 @@ def train(
             )
 
         # Preview generation
-        # NOTE: Preview generation uses GriffinLim (v1.0 single-channel)
-        # which is not compatible with 2-channel models.  Phase 15 will
-        # replace this with ISTFT-based preview.  For now, gracefully skip.
         if effective_preview_interval > 0 and epoch > 0 and epoch % effective_preview_interval == 0:
             try:
                 preview_paths = generate_preview(
@@ -708,8 +705,8 @@ def train(
                         ))
             except Exception:
                 logger.warning(
-                    "Preview generation not yet supported for 2-channel models "
-                    "(requires Phase 15 ISTFT) -- skipping epoch %d preview",
+                    "Preview generation failed for epoch %d "
+                    "(Phase 16 will wire ISTFT-based preview) -- skipping",
                     epoch, exc_info=True,
                 )
 

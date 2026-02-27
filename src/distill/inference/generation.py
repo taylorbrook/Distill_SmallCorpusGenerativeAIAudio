@@ -336,8 +336,12 @@ def _generate_chunks_from_vector(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    wav = spectrogram.mel_to_waveform(combined_mel)
-    return wav.squeeze().numpy().astype(np.float32)
+    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+    #   wav = spectrogram.mel_to_waveform(combined_mel)
+    #   return wav.squeeze().numpy().astype(np.float32)
+    raise NotImplementedError(
+        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+    )
 
 
 # ---------------------------------------------------------------------------

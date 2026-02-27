@@ -5,8 +5,6 @@ users can hear the model improve over time.  Previews are listed by epoch
 for a scrollable timeline in the UI.
 
 Design notes:
-- ``InverseMelScale`` + ``GriffinLim`` run on CPU (project pattern from
-  ``audio/spectrogram.py``).
 - Per-file try/except: one failed preview does not stop training.
 - Peak normalization prevents clipping in 16-bit WAV output.
 - Lazy imports for ``torch``, ``soundfile``, ``numpy`` (project pattern).
@@ -43,7 +41,7 @@ def generate_preview(
 
     Sets the model to eval mode, generates samples, then restores train mode.
     Each sample is decoded through the VAE decoder and converted to a waveform
-    via ``spectrogram.mel_to_waveform`` (CPU-based InverseMelScale + GriffinLim).
+    via spectrogram reconstruction.
 
     Parameters
     ----------
@@ -81,8 +79,11 @@ def generate_preview(
             # Generate mel spectrograms from random latent vectors
             mel_recon = model.sample(num_samples, device)
 
-            # Convert to waveform on CPU (InverseMelScale requirement)
-            waveforms = spectrogram.mel_to_waveform(mel_recon.cpu())
+            # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+            #   waveforms = spectrogram.mel_to_waveform(mel_recon.cpu())
+            raise NotImplementedError(
+                "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+            )
 
             # Save each sample as WAV
             for i in range(waveforms.shape[0]):
@@ -166,9 +167,12 @@ def generate_reconstruction_preview(
             sample_batch = sample_batch[:n_items].to(device)
             recon, _mu, _logvar = model(sample_batch)
 
-            # Convert both to waveform on CPU
-            orig_waveforms = spectrogram.mel_to_waveform(sample_batch.cpu())
-            recon_waveforms = spectrogram.mel_to_waveform(recon.cpu())
+            # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
+            #   orig_waveforms = spectrogram.mel_to_waveform(sample_batch.cpu())
+            #   recon_waveforms = spectrogram.mel_to_waveform(recon.cpu())
+            raise NotImplementedError(
+                "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+            )
 
             for i in range(n_items):
                 # Original
