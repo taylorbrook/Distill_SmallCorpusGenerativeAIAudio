@@ -936,7 +936,7 @@ def build_generate_tab() -> dict:
                 )
                 export_sr_dd = gr.Dropdown(
                     choices=["44100", "48000", "96000"],
-                    value="48000",
+                    value="44100",
                     label="Sample Rate",
                 )
                 export_bd_dd = gr.Dropdown(

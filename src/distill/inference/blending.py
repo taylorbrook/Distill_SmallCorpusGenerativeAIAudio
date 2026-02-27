@@ -551,10 +551,14 @@ class BlendEngine:
                 overlap_samples=config.overlap_samples,
                 latent_vector=latent_vector,
             )
+            from distill.vocoder import get_vocoder
+
+            vocoder = get_vocoder("bigvgan", device=str(slot.device))
             pipeline = GenerationPipeline(
                 model=slot.model,
                 spectrogram=slot.spectrogram,
                 device=slot.device,
+                vocoder=vocoder,
             )
             pipeline.model_name = slot.metadata.name
             return pipeline.generate(gen_config)
@@ -672,10 +676,14 @@ class BlendEngine:
             overlap_samples=config.overlap_samples,
             latent_vector=blended_z,
         )
+        from distill.vocoder import get_vocoder
+
+        vocoder = get_vocoder("bigvgan", device=str(first.device))
         pipeline = GenerationPipeline(
             model=first.model,
             spectrogram=first.spectrogram,
             device=first.device,
+            vocoder=vocoder,
         )
         model_names = [s.metadata.name for s in active_slots]
         pipeline.model_name = " + ".join(model_names)
@@ -699,8 +707,13 @@ class BlendEngine:
         )
         from distill.inference.quality import compute_quality_score
 
+        from distill.vocoder import get_vocoder
+
         audio_outputs = []
         seed_used = None
+
+        # Create vocoder once for all slots (typically same device)
+        vocoder = get_vocoder("bigvgan", device=str(active_slots[0].device))
 
         for i, slot in enumerate(active_slots):
             z = self._build_latent_for_slot(slot, slider_positions, i, union_sliders)
@@ -722,6 +735,7 @@ class BlendEngine:
                 model=slot.model,
                 spectrogram=slot.spectrogram,
                 device=slot.device,
+                vocoder=vocoder,
             )
             pipeline.model_name = slot.metadata.name
             result = pipeline.generate(gen_config)

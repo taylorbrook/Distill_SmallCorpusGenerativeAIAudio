@@ -160,11 +160,15 @@ def _load_model_handler(selected_name: str) -> tuple:
         device_str = str(app_state.device) if app_state.device else "cpu"
         loaded = load_model(model_path, device=device_str)
 
+        from distill.vocoder import get_vocoder
+
         app_state.loaded_model = loaded
+        vocoder = get_vocoder("bigvgan", device=device_str)
         app_state.pipeline = GenerationPipeline(
             model=loaded.model,
             spectrogram=loaded.spectrogram,
             device=loaded.device,
+            vocoder=vocoder,
         )
         app_state.preset_manager = PresetManager(
             model_id=entry.model_id,

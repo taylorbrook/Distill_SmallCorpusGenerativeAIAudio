@@ -222,7 +222,7 @@ def generate(
         ),
     ] = None,
     sample_rate: int = typer.Option(
-        48000, "--sample-rate", help="Output sample rate: 44100, 48000, 96000"
+        44100, "--sample-rate", help="Output sample rate: 44100, 48000, 96000"
     ),
     bit_depth: str = typer.Option(
         "24-bit", "--bit-depth", help="Bit depth: 16-bit, 24-bit, 32-bit-float"
@@ -534,9 +534,12 @@ def generate(
             latent_vector=latent_vector,
         )
 
-        # Create pipeline
+        # Create pipeline with vocoder
+        from distill.vocoder import get_vocoder
+
+        vocoder = get_vocoder("bigvgan", device=str(torch_device))
         pipeline = GenerationPipeline(
-            loaded.model, loaded.spectrogram, torch_device
+            loaded.model, loaded.spectrogram, torch_device, vocoder=vocoder
         )
         pipeline.model_name = loaded.metadata.name
 
