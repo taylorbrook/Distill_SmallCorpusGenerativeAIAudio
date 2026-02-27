@@ -35,10 +35,13 @@ from distill.inference.export import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import numpy as np
     import torch
 
     from distill.inference.spatial import SpatialConfig
+    from distill.models.persistence import LoadedVQModel
 
 # Module-level resampler cache (project pattern from Phase 2)
 _resampler_cache: dict[tuple[int, int], object] = {}
@@ -715,3 +718,147 @@ class GenerationPipeline:
         )
 
         return (audio_path, json_path)
+
+
+# ---------------------------------------------------------------------------
+# Prior-based generation (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def generate_audio_from_prior(
+    loaded: "LoadedVQModel",
+    temperature: float = 1.0,
+    top_k: int = 0,
+    top_p: float = 0.9,
+    duration_s: float = 10.0,
+    overlap_samples: int = 2400,
+    seed: int | None = None,
+    progress_callback: "Callable[[float, str], None] | None" = None,
+) -> tuple["np.ndarray", int]:
+    """Generate audio from a trained VQ-VAE prior end-to-end.
+
+    Samples code sequences autoregressively from the prior, decodes
+    them through the VQ-VAE, and stitches multi-chunk audio with
+    crossfade overlap-add.  This is the primary backend for all
+    prior-based audio generation.
+
+    Parameters
+    ----------
+    loaded:
+        A :class:`~distill.models.persistence.LoadedVQModel` with a
+        trained prior (``loaded.prior`` must not be ``None``).
+    temperature:
+        Softmax temperature for sampling (``1.0`` = unmodified).
+    top_k:
+        If ``> 0``, keep only the *k* highest-probability tokens.
+    top_p:
+        Nucleus sampling threshold (``0 < top_p < 1.0``).
+    duration_s:
+        Desired output duration in seconds (each chunk is ~1 second).
+    overlap_samples:
+        Number of samples for crossfade overlap between chunks
+        (default 2400 = 50 ms at 48 kHz).
+    seed:
+        Random seed for reproducibility.  ``None`` generates a random
+        seed.
+    progress_callback:
+        Optional callback ``(progress_fraction, status_message)``
+        called after each chunk and before stitching.
+
+    Returns
+    -------
+    tuple[np.ndarray, int]
+        ``(audio_waveform, seed_used)`` where ``audio_waveform`` is a
+        1-D float32 numpy array and ``seed_used`` is the actual seed
+        used (for reproducibility tracking).
+
+    Raises
+    ------
+    ValueError
+        If ``loaded.prior`` is ``None`` (model has no trained prior).
+    """
+    import math  # noqa: WPS433 -- lazy import
+    import random  # noqa: WPS433 -- lazy import
+
+    import numpy as np  # noqa: WPS433 -- lazy import
+    import torch  # noqa: WPS433 -- lazy import
+
+    from distill.models.prior import sample_code_sequence, unflatten_codes
+
+    # 1. Extract components from loaded model
+    prior = loaded.prior
+    vqvae = loaded.model
+    spectrogram = loaded.spectrogram
+    device = loaded.device
+
+    # 2. Validate prior exists
+    if prior is None:
+        raise ValueError("Model has no trained prior")
+
+    # 3. Set both models to eval mode
+    vqvae.eval()
+    prior.eval()
+
+    # 4. Compute spatial shape from spectrogram config
+    mel_shape = spectrogram.get_mel_shape(48000)  # 1 second at 48 kHz
+    n_mels, time_frames = mel_shape
+
+    # Compute downsampled spatial dimensions with padding awareness
+    pad_h = (16 - n_mels % 16) % 16
+    pad_w = (16 - time_frames % 16) % 16
+    H = (n_mels + pad_h) // 16
+    W = (time_frames + pad_w) // 16
+    spatial_shape = (H, W)
+
+    # 5. Compute number of chunks (each ~1 second)
+    num_chunks = max(1, math.ceil(duration_s / 1.0))
+
+    # 6. Resolve seed
+    actual_seed = seed if seed is not None else random.randint(0, 2**31)
+
+    # 7. Generate chunks
+    chunks: list[np.ndarray] = []
+
+    with torch.no_grad():
+        for i in range(num_chunks):
+            # Progress callback
+            if progress_callback is not None:
+                progress_callback(
+                    i / num_chunks,
+                    f"Generating chunk {i + 1}/{num_chunks}...",
+                )
+
+            # Sample code sequence from prior
+            codes_flat = sample_code_sequence(
+                prior,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                seed=actual_seed + i,
+                device=device,
+            )
+
+            # Unflatten codes: [1, seq_len] -> [1, spatial_positions, num_quantizers]
+            codes_3d = unflatten_codes(codes_flat, prior.num_quantizers)
+
+            # Decode through VQ-VAE: codes -> embeddings -> mel -> waveform
+            quantized = vqvae.codes_to_embeddings(
+                codes_3d.to(device), spatial_shape,
+            )
+            mel = vqvae.decode(quantized, target_shape=mel_shape)
+            wav = spectrogram.mel_to_waveform(mel)
+            chunks.append(wav.squeeze().numpy().astype(np.float32))
+
+    # 8. Progress callback for stitching
+    if progress_callback is not None:
+        progress_callback(1.0, "Stitching chunks...")
+
+    # 9. Stitch chunks
+    if len(chunks) == 1:
+        stitched = chunks[0]
+    else:
+        from distill.inference.chunking import crossfade_chunks  # noqa: WPS433
+
+        stitched = crossfade_chunks(chunks, overlap_samples=overlap_samples)
+
+    return (stitched, actual_seed)

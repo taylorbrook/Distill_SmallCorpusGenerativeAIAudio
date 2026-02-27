@@ -50,7 +50,13 @@ from distill.training.config import VQVAEConfig, get_adaptive_vqvae_config
 # ---------------------------------------------------------------------------
 
 from distill.models.persistence import save_prior_to_model
-from distill.models.prior import CodePrior, extract_code_sequences, flatten_codes, unflatten_codes
+from distill.models.prior import (
+    CodePrior,
+    extract_code_sequences,
+    flatten_codes,
+    sample_code_sequence,
+    unflatten_codes,
+)
 
 __all__ = [
     # vae.py (v1.0)
@@ -91,6 +97,7 @@ __all__ = [
     "flatten_codes",
     "unflatten_codes",
     "extract_code_sequences",
+    "sample_code_sequence",
     # persistence.py (v1.1 prior)
     "save_prior_to_model",
 ]

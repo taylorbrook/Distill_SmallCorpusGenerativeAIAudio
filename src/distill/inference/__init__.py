@@ -10,6 +10,7 @@ from distill.inference.generation import (
     GenerationConfig,
     GenerationResult,
     GenerationPipeline,
+    generate_audio_from_prior,
 )
 from distill.inference.export import (
     ExportFormat,
@@ -58,6 +59,7 @@ __all__ = [
     "GenerationConfig",
     "GenerationResult",
     "GenerationPipeline",
+    "generate_audio_from_prior",
     # export.py
     "ExportFormat",
     "FORMAT_EXTENSIONS",
