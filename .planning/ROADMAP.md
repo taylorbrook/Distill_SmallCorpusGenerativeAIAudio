@@ -126,7 +126,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 12. 2-Channel Data Pipeline | 2/2 | Complete    | 2026-02-22 | - |
 | 13. 2-Channel VAE Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Multi-Resolution Loss | 2/2 | Complete   | 2026-02-22 | - |
-| 15. ISTFT Reconstruction | 2/2 | Complete   | 2026-02-27 | - |
+| 15. ISTFT Reconstruction | 2/2 | Complete    | 2026-02-27 | - |
 | 16. Full Pipeline Integration | v2.0 | 0/? | Not started | - |
 
 ---
