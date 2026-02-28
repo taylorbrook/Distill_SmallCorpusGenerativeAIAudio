@@ -587,6 +587,7 @@ def train(
                 checkpoint_dir, model, optimizer, scheduler, epoch, 0,
                 train_results["train_loss"], float("inf"), kl_weight,
                 config, spec_config, metrics_history,
+                normalization_stats=norm_stats,
             )
             if callback is not None:
                 elapsed = time.time() - train_start_time
@@ -715,6 +716,7 @@ def train(
             _save_checkpoint_safe(
                 checkpoint_dir, model, optimizer, scheduler, epoch, 0,
                 t_loss, v_loss, kl_weight, config, spec_config, metrics_history,
+                normalization_stats=norm_stats,
             )
             try:
                 manage_checkpoints(checkpoint_dir, max_recent=config.max_checkpoints)
@@ -727,6 +729,7 @@ def train(
             _save_checkpoint_safe(
                 checkpoint_dir, model, optimizer, scheduler, epoch, 0,
                 t_loss, v_loss, kl_weight, config, spec_config, metrics_history,
+                normalization_stats=norm_stats,
             )
             if callback is not None:
                 callback(TrainingCompleteEvent(
@@ -761,6 +764,7 @@ def train(
     _save_checkpoint_safe(
         checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
         final_train, final_val, final_kl, config, spec_config, metrics_history,
+        normalization_stats=norm_stats,
     )
     try:
         manage_checkpoints(checkpoint_dir, max_recent=config.max_checkpoints)
@@ -797,6 +801,7 @@ def train(
                 metadata=metadata,
                 models_dir=models_dir,
                 analysis=analysis_result,
+                normalization_stats=norm_stats,
             )
             print(f"[TRAIN] Model saved to library: {saved_model_path}", flush=True)
         except Exception as exc:
@@ -875,6 +880,7 @@ def _save_checkpoint_safe(
     spec_config: "SpectrogramConfig",
     metrics_history: "MetricsHistory",
     latent_analysis: dict | None = None,
+    normalization_stats: dict | None = None,
 ) -> None:
     """Save a checkpoint, catching and logging any errors."""
     from dataclasses import asdict as _asdict
@@ -897,6 +903,7 @@ def _save_checkpoint_safe(
             spectrogram_config=_asdict(spec_config),
             metrics_history_dict=metrics_history.to_dict(),
             latent_analysis=latent_analysis,
+            normalization_stats=normalization_stats,
         )
     except Exception:
         logger.warning("Failed to save checkpoint at epoch %d", epoch, exc_info=True)

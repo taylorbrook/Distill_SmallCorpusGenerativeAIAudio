@@ -50,6 +50,7 @@ def save_checkpoint(
     spectrogram_config: dict,
     metrics_history_dict: dict,
     latent_analysis: dict | None = None,
+    normalization_stats: dict | None = None,
 ) -> Path:
     """Save a full training checkpoint and lightweight JSON sidecar.
 
@@ -107,6 +108,7 @@ def save_checkpoint(
         "spectrogram_config": spectrogram_config,
         "metrics_history": metrics_history_dict,
         "latent_analysis": latent_analysis,
+        "normalization_stats": normalization_stats,
     }
 
     torch.save(checkpoint, path)

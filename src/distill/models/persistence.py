@@ -82,6 +82,8 @@ class LoadedModel:
     analysis: "AnalysisResult | None"
     metadata: ModelMetadata
     device: "torch.device"
+    complex_spectrogram: "ComplexSpectrogram | None" = None
+    normalization_stats: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ def save_model(
     metadata: ModelMetadata,
     models_dir: Path,
     analysis: "AnalysisResult | None" = None,
+    normalization_stats: dict | None = None,
 ) -> Path:
     """Save a trained model with metadata to the model library.
 
@@ -197,6 +200,7 @@ def save_model(
         "latent_analysis": analysis_dict,
         "training_config": training_config,
         "metadata": asdict(metadata),
+        "normalization_stats": normalization_stats,
     }
 
     # Sanitize filename from model name
@@ -287,17 +291,19 @@ def load_model(
 
     from distill.audio.spectrogram import (
         AudioSpectrogram,
+        ComplexSpectrogram,
         SpectrogramConfig,
     )
     from distill.controls.serialization import analysis_from_dict
     from distill.models.vae import ConvVAE
+    from distill.training.config import ComplexSpectrogramConfig
 
     model_path = Path(model_path)
     saved = torch.load(model_path, map_location=device, weights_only=False)
 
     # Validate format marker and version
     if saved.get("format") != MODEL_FORMAT_MARKER:
-        raise ValueError(f"Not a valid .distill model file: {model_path}")
+        raise ValueError("Incompatible model format. Please retrain with current version.")
     version = saved.get("version", 0)
     if version > SAVED_MODEL_VERSION:
         raise ValueError(
@@ -351,6 +357,13 @@ def load_model(
     if saved.get("latent_analysis") is not None:
         analysis = analysis_from_dict(saved["latent_analysis"])
 
+    # Reconstruct ComplexSpectrogram for ISTFT reconstruction
+    complex_spec = ComplexSpectrogram(ComplexSpectrogramConfig())
+    complex_spec.to(torch_device)
+
+    # Extract normalization stats (None for old models without them)
+    normalization_stats = saved.get("normalization_stats")
+
     # Reconstruct ModelMetadata from saved dict
     meta_dict = saved.get("metadata", {})
     metadata = ModelMetadata(**meta_dict)
@@ -368,6 +381,8 @@ def load_model(
         analysis=analysis,
         metadata=metadata,
         device=torch_device,
+        complex_spectrogram=complex_spec,
+        normalization_stats=normalization_stats,
     )
 
 
@@ -494,6 +509,9 @@ def save_model_from_checkpoint(
     if checkpoint.get("val_loss") is not None:
         metadata.final_val_loss = float(checkpoint["val_loss"])
 
+    # Extract normalization stats from checkpoint (if present)
+    normalization_stats = checkpoint.get("normalization_stats")
+
     # Save via the standard save_model function
     return save_model(
         model=model,
@@ -502,4 +520,5 @@ def save_model_from_checkpoint(
         metadata=metadata,
         models_dir=models_dir,
         analysis=analysis,
+        normalization_stats=normalization_stats,
     )
