@@ -104,7 +104,13 @@ Plans:
   3. When a model has a trained per-model vocoder, the system auto-selects it over BigVGAN universal (per-model HiFi-GAN > BigVGAN)
   4. Griffin-Lim reconstruction code is fully removed — no fallback, no legacy path, neural vocoder is the only reconstruction method
   5. Training supports cancellation with checkpoint save and can resume from where it left off
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 16-01-PLAN.md — HiFi-GAN V2 architecture (generator, discriminators, losses, config)
+- [ ] 16-02-PLAN.md — Griffin-Lim removal (AudioSpectrogram, MelAdapter, references)
+- [ ] 16-03-PLAN.md — Vocoder training loop, inference wrapper, auto-selection, persistence
+- [ ] 16-04-PLAN.md — UI vocoder training controls in Train tab with dual-loss chart
+- [ ] 16-05-PLAN.md — CLI train-vocoder command with Rich progress
 
 ## Progress
 
@@ -128,7 +134,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Generation Pipeline Integration | 2/2 | Complete    | 2026-02-27 | - |
 | 15. UI & CLI Vocoder Controls | 2/2 | Complete    | 2026-02-28 | - |
-| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/TBD | Not started | - |
+| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/5 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-12*
