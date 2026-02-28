@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
+    import threading
+
     import torch
 
     from distill.data.dataset import Dataset
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
     from distill.models.persistence import LoadedModel
     from distill.presets.manager import PresetManager
     from distill.training.runner import TrainingRunner
+    from distill.vocoder.hifigan.trainer import VocoderTrainer
 
 
 @dataclass
@@ -49,10 +52,16 @@ class AppState:
     current_dataset: Optional[Dataset] = None
     current_summary: Optional[DatasetSummary] = None
 
-    # Training state
+    # Training state (VAE)
     training_runner: Optional[TrainingRunner] = None
     training_active: bool = False
     metrics_buffer: dict[str, Any] = field(default_factory=dict)
+
+    # Vocoder training state
+    vocoder_trainer: Optional[VocoderTrainer] = None
+    vocoder_metrics_buffer: dict[str, Any] = field(default_factory=dict)
+    vocoder_cancel_event: Optional[threading.Event] = None
+    vocoder_training_active: bool = False
 
     # Managers
     preset_manager: Optional[PresetManager] = None
@@ -99,14 +108,25 @@ def init_state(config: dict[str, Any], device: Any) -> None:
     app_state.models_dir.mkdir(parents=True, exist_ok=True)
     app_state.model_library = ModelLibrary(app_state.models_dir)
 
-    # Initialize metrics buffer
+    # Initialize metrics buffers
     reset_metrics_buffer()
+    reset_vocoder_metrics_buffer()
 
 
 def reset_metrics_buffer() -> None:
     """Clear and reinitialize the metrics buffer for training polling."""
     app_state.metrics_buffer.clear()
     app_state.metrics_buffer.update({
+        "epoch_metrics": [],
+        "previews": [],
+        "complete": False,
+    })
+
+
+def reset_vocoder_metrics_buffer() -> None:
+    """Clear and reinitialize the vocoder metrics buffer for training polling."""
+    app_state.vocoder_metrics_buffer.clear()
+    app_state.vocoder_metrics_buffer.update({
         "epoch_metrics": [],
         "previews": [],
         "complete": False,

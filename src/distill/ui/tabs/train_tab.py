@@ -16,6 +16,7 @@ Key design points:
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 import gradio as gr
@@ -33,13 +34,18 @@ from distill.training.metrics import (
 )
 from distill.training.runner import TrainingRunner
 from distill.ui.components.guided_nav import get_empty_state_message
-from distill.ui.components.loss_chart import build_loss_chart
-from distill.ui.state import app_state, reset_metrics_buffer
+from distill.ui.components.loss_chart import build_loss_chart, build_vocoder_loss_chart
+from distill.ui.state import (
+    app_state,
+    reset_metrics_buffer,
+    reset_vocoder_metrics_buffer,
+)
 
 logger = logging.getLogger(__name__)
 
 # Number of pre-created audio preview slots
 _MAX_PREVIEW_SLOTS = 20
+_MAX_VOCODER_PREVIEWS = 5
 
 # Preset name -> OverfittingPreset enum mapping
 _PRESET_MAP: dict[str, OverfittingPreset] = {
@@ -92,6 +98,25 @@ def _training_callback(event: object) -> None:
         app_state.metrics_buffer["complete"] = True
 
 
+def _vocoder_training_callback(event: object) -> None:
+    """Vocoder training callback -- stores events for the vocoder Timer.
+
+    Thread-safe: ``list.append`` is atomic under CPython GIL.
+    """
+    from distill.vocoder.hifigan.trainer import (
+        VocoderEpochMetrics,
+        VocoderPreviewEvent,
+        VocoderTrainingCompleteEvent,
+    )
+
+    if isinstance(event, VocoderEpochMetrics):
+        app_state.vocoder_metrics_buffer["epoch_metrics"].append(event)
+    elif isinstance(event, VocoderPreviewEvent):
+        app_state.vocoder_metrics_buffer["previews"].append(event)
+    elif isinstance(event, VocoderTrainingCompleteEvent):
+        app_state.vocoder_metrics_buffer["complete"] = True
+
+
 # -------------------------------------------------------------------
 # Helper: format ETA
 # -------------------------------------------------------------------
@@ -127,6 +152,32 @@ def _get_output_dir() -> Path:
 def _get_checkpoint_dir() -> Path:
     """Return the checkpoint directory for the current dataset."""
     return _get_output_dir() / "checkpoints"
+
+
+def _get_model_path() -> Path | None:
+    """Return the .distillgan file path for the currently loaded model.
+
+    Looks up the model in the library catalog to find its on-disk path.
+    Returns None if model not found.
+    """
+    loaded = app_state.loaded_model
+    if loaded is None or app_state.model_library is None:
+        return None
+
+    # Search library entries for matching model_id
+    for entry in app_state.model_library.list_all():
+        if entry.model_id == loaded.metadata.model_id:
+            return app_state.models_dir / entry.file_path
+
+    # Fallback: scan for matching name via sanitized filename
+    from distill.models.persistence import _sanitize_filename
+
+    name = loaded.metadata.name
+    candidate = app_state.models_dir / f"{_sanitize_filename(name)}.distillgan"
+    if candidate.exists():
+        return candidate
+
+    return None
 
 
 # -------------------------------------------------------------------
@@ -590,6 +641,575 @@ def build_train_tab() -> dict:
         fn=_poll_training,
         inputs=None,
         outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
+    )
+
+    # ===================================================================
+    # Vocoder Training Section (below VAE training controls)
+    # ===================================================================
+
+    with gr.Accordion(
+        "Vocoder Training (Per-Model HiFi-GAN)", open=False, visible=True
+    ) as vocoder_accordion:
+        vocoder_status = gr.Markdown(
+            "Select a model with completed VAE training to enable vocoder training."
+        )
+
+        with gr.Row():
+            vocoder_epochs = gr.Number(
+                label="Epochs", value=200, minimum=10, maximum=5000, step=10
+            )
+            vocoder_lr = gr.Number(
+                label="Learning Rate",
+                value=0.0002,
+                minimum=1e-5,
+                maximum=1e-2,
+                step=1e-5,
+            )
+        with gr.Row():
+            vocoder_batch_size = gr.Number(
+                label="Batch Size", value=8, minimum=1, maximum=64, step=1
+            )
+            vocoder_checkpoint_interval = gr.Number(
+                label="Checkpoint Interval (epochs)",
+                value=50,
+                minimum=5,
+                maximum=500,
+                step=5,
+            )
+
+        vocoder_audio_dir = gr.Textbox(
+            label="Training Audio Directory",
+            placeholder="Path to the original training audio files...",
+            info="Point to the directory used to train this model's VAE",
+        )
+
+        with gr.Row():
+            vocoder_train_btn = gr.Button(
+                "Train Vocoder", variant="primary", interactive=False
+            )
+            vocoder_cancel_btn = gr.Button("Cancel", variant="stop", visible=False)
+            vocoder_resume_btn = gr.Button("Resume Training", visible=False)
+
+        # Warning for existing vocoder
+        vocoder_replace_warning = gr.Markdown(visible=False)
+        vocoder_replace_confirm = gr.Button(
+            "Yes, Replace Existing Vocoder", variant="stop", visible=False
+        )
+
+        # Progress display
+        vocoder_progress_text = gr.Markdown("")
+        vocoder_loss_chart = gr.Plot(label="Vocoder Loss")
+
+        # Vocoder Timer (inactive until vocoder training starts)
+        vocoder_timer = gr.Timer(value=2, active=False)
+
+        # Audio preview slots
+        vocoder_preview_label = gr.Markdown("### Audio Previews", visible=False)
+        vocoder_preview_slots: list[gr.Audio] = []
+        with gr.Column():
+            for i in range(_MAX_VOCODER_PREVIEWS):
+                slot = gr.Audio(
+                    label=f"Preview (epoch ?)",
+                    visible=False,
+                    interactive=False,
+                )
+                vocoder_preview_slots.append(slot)
+
+    # ---------------------------------------------------------------
+    # Vocoder: model readiness check
+    # ---------------------------------------------------------------
+
+    def _check_vocoder_ready() -> list:
+        """Check if current model supports vocoder training.
+
+        Returns updates for: vocoder_status, vocoder_train_btn,
+        vocoder_replace_warning, vocoder_replace_confirm, vocoder_resume_btn
+        """
+        loaded = app_state.loaded_model
+        if loaded is None:
+            return [
+                gr.update(
+                    value="Select a model with completed VAE training to enable vocoder training."
+                ),
+                gr.update(interactive=False),  # train_btn
+                gr.update(visible=False),  # replace_warning
+                gr.update(visible=False),  # replace_confirm
+                gr.update(visible=False),  # resume_btn
+            ]
+
+        meta = loaded.metadata
+        if not hasattr(meta, "training_epochs") or meta.training_epochs <= 0:
+            return [
+                gr.update(
+                    value="**Model has no VAE training.** Train a VAE model first before training a vocoder."
+                ),
+                gr.update(interactive=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+            ]
+
+        # Model is trained -- check for existing vocoder
+        has_vocoder = loaded.vocoder_state is not None
+        has_checkpoint = (
+            has_vocoder
+            and loaded.vocoder_state.get("checkpoint") is not None
+        )
+
+        status_parts = [f"**Model:** {meta.name} ({meta.training_epochs} VAE epochs)"]
+        if has_vocoder:
+            voc_meta = loaded.vocoder_state.get("training_metadata", {})
+            voc_epochs = voc_meta.get("epochs", 0)
+            status_parts.append(
+                f"\n\nThis model already has a trained vocoder ({voc_epochs} epochs). "
+                "You can replace it or resume from checkpoint."
+            )
+
+        return [
+            gr.update(value="".join(status_parts)),
+            gr.update(interactive=True),  # train_btn
+            gr.update(
+                visible=has_vocoder,
+                value=(
+                    "**Warning:** This model already has a trained vocoder. "
+                    "Training a new one will replace it."
+                )
+                if has_vocoder
+                else "",
+            ),
+            gr.update(visible=False),  # replace_confirm (shown on train click)
+            gr.update(visible=has_checkpoint),  # resume_btn
+        ]
+
+    # Wire vocoder readiness check to the page load event
+    if app_context is not None:
+        app_context.load(
+            fn=_check_vocoder_ready,
+            inputs=None,
+            outputs=[
+                vocoder_status,
+                vocoder_train_btn,
+                vocoder_replace_warning,
+                vocoder_replace_confirm,
+                vocoder_resume_btn,
+            ],
+        )
+
+    # ---------------------------------------------------------------
+    # Vocoder: training start handler
+    # ---------------------------------------------------------------
+
+    # Track whether user has confirmed replace
+    _vocoder_replace_confirmed = {"value": False}
+
+    def _start_vocoder_training(
+        epochs: int,
+        lr: float,
+        batch_size: int,
+        checkpoint_interval: int,
+        audio_dir: str,
+    ) -> list:
+        """Start vocoder training in a background thread."""
+        loaded = app_state.loaded_model
+        if loaded is None:
+            return [
+                "No model loaded.",  # vocoder_progress_text
+                gr.update(),  # vocoder_loss_chart
+                gr.update(interactive=True),  # vocoder_train_btn
+                gr.update(visible=False),  # vocoder_cancel_btn
+                gr.update(visible=False),  # vocoder_resume_btn
+                gr.Timer(active=False),  # vocoder_timer
+                gr.update(visible=False),  # replace_warning
+                gr.update(visible=False),  # replace_confirm
+                gr.update(),  # vocoder_preview_label
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        # Check for existing vocoder -- require explicit replace confirmation
+        if (
+            loaded.vocoder_state is not None
+            and not _vocoder_replace_confirmed["value"]
+        ):
+            return [
+                "Please confirm replacement of existing vocoder.",
+                gr.update(),
+                gr.update(interactive=False),  # disable train while confirming
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.Timer(active=False),
+                gr.update(visible=True),  # show warning
+                gr.update(visible=True),  # show confirm button
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        # Validate audio directory
+        audio_path = Path(audio_dir.strip()) if audio_dir.strip() else None
+        if audio_path is None or not audio_path.exists():
+            return [
+                "**Error:** Please provide a valid training audio directory.",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.Timer(active=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        # Build config
+        from distill.vocoder.hifigan.config import HiFiGANConfig
+        from distill.vocoder.hifigan.trainer import VocoderTrainer
+
+        config = HiFiGANConfig(
+            learning_rate=float(lr),
+            batch_size=int(batch_size),
+        )
+
+        trainer = VocoderTrainer(config, device=str(loaded.device))
+        cancel_event = threading.Event()
+
+        # Clear vocoder metrics buffer
+        reset_vocoder_metrics_buffer()
+
+        # Store in app state
+        app_state.vocoder_trainer = trainer
+        app_state.vocoder_cancel_event = cancel_event
+        app_state.vocoder_training_active = True
+
+        # Reset replace confirmation for next time
+        _vocoder_replace_confirmed["value"] = False
+
+        # Find model path
+        model_path = _get_model_path()
+        if model_path is None:
+            return [
+                "**Error:** Could not locate model file on disk.",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.Timer(active=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        # Start training in daemon thread
+        thread = threading.Thread(
+            target=trainer.train,
+            args=(model_path, audio_path),
+            kwargs={
+                "epochs": int(epochs),
+                "callback": _vocoder_training_callback,
+                "cancel_event": cancel_event,
+                "preview_interval": int(checkpoint_interval),
+            },
+            daemon=True,
+        )
+        thread.start()
+
+        return [
+            "Vocoder training started...",
+            gr.update(value=None),  # clear chart
+            gr.update(interactive=False),  # disable train btn
+            gr.update(visible=True),  # show cancel btn
+            gr.update(visible=False),  # hide resume btn
+            gr.Timer(active=True),  # activate timer
+            gr.update(visible=False),  # hide replace warning
+            gr.update(visible=False),  # hide replace confirm
+            gr.update(visible=True),  # show preview label
+        ] + [
+            gr.update(visible=False, value=None) for _ in range(_MAX_VOCODER_PREVIEWS)
+        ]
+
+    vocoder_train_btn.click(
+        fn=_start_vocoder_training,
+        inputs=[
+            vocoder_epochs,
+            vocoder_lr,
+            vocoder_batch_size,
+            vocoder_checkpoint_interval,
+            vocoder_audio_dir,
+        ],
+        outputs=[
+            vocoder_progress_text,
+            vocoder_loss_chart,
+            vocoder_train_btn,
+            vocoder_cancel_btn,
+            vocoder_resume_btn,
+            vocoder_timer,
+            vocoder_replace_warning,
+            vocoder_replace_confirm,
+            vocoder_preview_label,
+        ]
+        + vocoder_preview_slots,
+    )
+
+    # ---------------------------------------------------------------
+    # Vocoder: replace confirmation handler
+    # ---------------------------------------------------------------
+
+    def _confirm_vocoder_replace() -> list:
+        """User confirmed replacing the existing vocoder."""
+        _vocoder_replace_confirmed["value"] = True
+        return [
+            gr.update(visible=False),  # hide warning
+            gr.update(visible=False),  # hide confirm button
+            gr.update(interactive=True),  # re-enable train button
+            "Replacement confirmed. Click **Train Vocoder** to start.",
+        ]
+
+    vocoder_replace_confirm.click(
+        fn=_confirm_vocoder_replace,
+        inputs=None,
+        outputs=[
+            vocoder_replace_warning,
+            vocoder_replace_confirm,
+            vocoder_train_btn,
+            vocoder_progress_text,
+        ],
+    )
+
+    # ---------------------------------------------------------------
+    # Vocoder: cancel handler
+    # ---------------------------------------------------------------
+
+    def _cancel_vocoder_training() -> list:
+        """Cancel vocoder training -- saves checkpoint."""
+        if app_state.vocoder_cancel_event is not None:
+            app_state.vocoder_cancel_event.set()
+        app_state.vocoder_training_active = False
+
+        return [
+            gr.Timer(active=False),  # vocoder_timer
+            gr.update(interactive=True),  # vocoder_train_btn
+            gr.update(visible=False),  # vocoder_cancel_btn
+            "**Training cancelled.** Checkpoint saved -- you can resume later.",
+            gr.update(visible=True),  # vocoder_resume_btn
+        ]
+
+    vocoder_cancel_btn.click(
+        fn=_cancel_vocoder_training,
+        inputs=None,
+        outputs=[
+            vocoder_timer,
+            vocoder_train_btn,
+            vocoder_cancel_btn,
+            vocoder_progress_text,
+            vocoder_resume_btn,
+        ],
+    )
+
+    # ---------------------------------------------------------------
+    # Vocoder: resume handler
+    # ---------------------------------------------------------------
+
+    def _resume_vocoder_training(
+        epochs: int,
+        lr: float,
+        batch_size: int,
+        checkpoint_interval: int,
+        audio_dir: str,
+    ) -> list:
+        """Resume vocoder training from checkpoint in model's vocoder_state."""
+        loaded = app_state.loaded_model
+        if loaded is None or loaded.vocoder_state is None:
+            return [
+                "No model or checkpoint to resume from.",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.Timer(active=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        checkpoint = loaded.vocoder_state
+        ckpt_data = checkpoint.get("checkpoint")
+        if ckpt_data is None:
+            return [
+                "No resume checkpoint found (training completed normally).",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.Timer(active=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        resume_epoch = ckpt_data.get("epoch", 0) + 1
+
+        # Validate audio directory
+        audio_path = Path(audio_dir.strip()) if audio_dir.strip() else None
+        if audio_path is None or not audio_path.exists():
+            return [
+                "**Error:** Please provide a valid training audio directory to resume.",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.Timer(active=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        from distill.vocoder.hifigan.config import HiFiGANConfig
+        from distill.vocoder.hifigan.trainer import VocoderTrainer
+
+        config = HiFiGANConfig(
+            learning_rate=float(lr),
+            batch_size=int(batch_size),
+        )
+
+        trainer = VocoderTrainer(config, device=str(loaded.device))
+        cancel_event = threading.Event()
+
+        reset_vocoder_metrics_buffer()
+
+        app_state.vocoder_trainer = trainer
+        app_state.vocoder_cancel_event = cancel_event
+        app_state.vocoder_training_active = True
+
+        model_path = _get_model_path()
+        if model_path is None:
+            app_state.vocoder_training_active = False
+            return [
+                "**Error:** Could not locate model file on disk.",
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.Timer(active=False),
+                gr.update(),
+            ] + [gr.update() for _ in range(_MAX_VOCODER_PREVIEWS)]
+
+        thread = threading.Thread(
+            target=trainer.train,
+            args=(model_path, audio_path),
+            kwargs={
+                "epochs": int(epochs),
+                "callback": _vocoder_training_callback,
+                "cancel_event": cancel_event,
+                "checkpoint": checkpoint,
+                "preview_interval": int(checkpoint_interval),
+            },
+            daemon=True,
+        )
+        thread.start()
+
+        return [
+            f"Resuming vocoder training from epoch {resume_epoch}...",
+            gr.update(value=None),
+            gr.update(interactive=False),  # train btn
+            gr.update(visible=True),  # cancel btn
+            gr.update(visible=False),  # resume btn
+            gr.Timer(active=True),  # activate timer
+            gr.update(visible=True),  # preview label
+        ] + [
+            gr.update(visible=False, value=None) for _ in range(_MAX_VOCODER_PREVIEWS)
+        ]
+
+    vocoder_resume_btn.click(
+        fn=_resume_vocoder_training,
+        inputs=[
+            vocoder_epochs,
+            vocoder_lr,
+            vocoder_batch_size,
+            vocoder_checkpoint_interval,
+            vocoder_audio_dir,
+        ],
+        outputs=[
+            vocoder_progress_text,
+            vocoder_loss_chart,
+            vocoder_train_btn,
+            vocoder_cancel_btn,
+            vocoder_resume_btn,
+            vocoder_timer,
+            vocoder_preview_label,
+        ]
+        + vocoder_preview_slots,
+    )
+
+    # ---------------------------------------------------------------
+    # Vocoder: timer tick handler
+    # ---------------------------------------------------------------
+
+    def _poll_vocoder_training() -> list:
+        """Timer tick: read vocoder metrics buffer and update dashboard."""
+        buf = app_state.vocoder_metrics_buffer
+        epoch_metrics = buf.get("epoch_metrics", [])
+        previews = buf.get("previews", [])
+        is_complete = buf.get("complete", False)
+
+        # Build loss chart
+        chart = build_vocoder_loss_chart(epoch_metrics)
+
+        # Build stats string
+        if epoch_metrics:
+            latest = epoch_metrics[-1]
+            eta_str = _format_eta(latest.eta_seconds)
+            stats = (
+                f"**Epoch {latest.epoch + 1}/{latest.total_epochs}** | "
+                f"Gen: {latest.gen_loss:.4f} | Disc: {latest.disc_loss:.4f} | "
+                f"Mel: {latest.mel_loss:.4f} | "
+                f"LR: {latest.learning_rate:.2e} | ETA: {eta_str}"
+            )
+        else:
+            stats = "Waiting for first epoch..."
+
+        # Build preview audio updates
+        audio_updates = []
+        for i in range(_MAX_VOCODER_PREVIEWS):
+            if i < len(previews):
+                p = previews[i]
+                audio_updates.append(
+                    gr.update(
+                        visible=True,
+                        value=(p.sample_rate, p.audio),
+                        label=f"Preview (epoch {p.epoch + 1})",
+                    )
+                )
+            else:
+                audio_updates.append(gr.update())
+
+        # Handle training completion
+        if is_complete:
+            if epoch_metrics:
+                latest = epoch_metrics[-1]
+                stats = (
+                    f"**Vocoder training complete!** "
+                    f"Gen: {latest.gen_loss:.4f} | Disc: {latest.disc_loss:.4f} | "
+                    f"Epochs: {latest.epoch + 1}"
+                )
+            else:
+                stats = "Vocoder training complete."
+            app_state.vocoder_training_active = False
+            return [
+                chart,
+                stats,
+                gr.Timer(active=False),
+                gr.update(interactive=True),  # train btn
+                gr.update(visible=False),  # cancel btn
+            ] + audio_updates
+
+        return [
+            chart,
+            stats,
+            gr.update(),  # timer (keep active)
+            gr.update(),  # train btn
+            gr.update(),  # cancel btn
+        ] + audio_updates
+
+    vocoder_timer.tick(
+        fn=_poll_vocoder_training,
+        inputs=None,
+        outputs=[
+            vocoder_loss_chart,
+            vocoder_progress_text,
+            vocoder_timer,
+            vocoder_train_btn,
+            vocoder_cancel_btn,
+        ]
+        + vocoder_preview_slots,
     )
 
     return {
