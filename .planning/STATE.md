@@ -8,7 +8,7 @@ progress:
   total_phases: 15
   completed_phases: 15
   total_plans: 42
-  completed_plans: 42
+  completed_plans: 43
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration -- users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 15 - ISTFT Reconstruction (v2.0 Complex Spectrogram)
+**Current focus:** Phase 16 - Full Pipeline Integration (v2.0 Complex Spectrogram)
 
 ## Current Position
 
-Phase: 15 of 16 (ISTFT Reconstruction) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase Complete
-Last activity: 2026-02-27 -- Completed 15-02-PLAN.md
+Phase: 16 of 16 (Full Pipeline Integration)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-02-28 -- Completed 16-01-PLAN.md
 
-Progress: [██████████████████░░] 90% (v2.0)
+Progress: [███████████████████░] 95% (v2.0)
 
 ## Performance Metrics
 
@@ -36,7 +36,7 @@ Progress: [██████████████████░░] 90% (v2
 - Average duration: 3 min
 - Total execution time: 1.50 hours
 
-**v2.0 Plans:** 8 completed
+**v2.0 Plans:** 9 completed
 
 **Recent Trend (v1.0):**
 - Last 5 plans: 3min, 4min, 5min, 2min, 2min (avg 3.2min)
@@ -51,6 +51,7 @@ Progress: [██████████████████░░] 90% (v2
 - 14-02: 4min (2 tasks, 4 files)
 - 15-01: 3min (2 tasks, 2 files)
 - 15-02: 4min (1 task, 7 files)
+- 16-01: 7min (2 tasks, 8 files)
 
 *Updated after each plan completion*
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [15-01]: Denormalization handled inside complex_mel_to_waveform when stats dict provided
 - [15-02]: All mel_to_waveform call sites replaced with NotImplementedError or commented out (not just analyzer.py/generation.py)
 - [15-02]: Analyzer feature sweep gracefully degrades with empty arrays when waveform unavailable
+- [16-01]: ComplexSpectrogram constructed fresh in load_model with default config (not serialized)
+- [16-01]: normalization_stats stored as dict in saved model and checkpoint dicts
+- [16-01]: Generation functions accept complex_spectrogram and normalization_stats as optional kwargs
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Completed 15-02-PLAN.md -- Griffin-Lim removal complete, zero references in src/, v2.0-only codebase
+Last session: 2026-02-28
+Stopped at: Completed 16-01-PLAN.md -- ISTFT generation pipeline wired through persistence, chunking, generation, CLI, UI, blending
 Resume file: None
