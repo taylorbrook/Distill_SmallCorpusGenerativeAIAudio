@@ -28,15 +28,15 @@ Requirements for VQ-VAE milestone. Each maps to roadmap phases.
 
 ### Code Manipulation
 
-- [ ] **CODE-01**: User can encode any audio file into its discrete code representation
-- [ ] **CODE-02**: User can decode a code grid back to audio with playback preview
-- [ ] **CODE-03**: User can view codes as a timeline grid (rows = quantizer levels, columns = time positions)
+- [x] **CODE-01**: User can encode any audio file into its discrete code representation
+- [x] **CODE-02**: User can decode a code grid back to audio with playback preview
+- [x] **CODE-03**: User can view codes as a timeline grid (rows = quantizer levels, columns = time positions)
 - [ ] **CODE-04**: User can edit individual code cells (change codebook index)
 - [ ] **CODE-05**: User can swap code regions between two encoded audio files
 - [ ] **CODE-06**: User can blend codes in embedding space (smoother than index swapping)
-- [ ] **CODE-07**: User can preview individual codebook entries as audio (click a code, hear it)
+- [x] **CODE-07**: User can preview individual codebook entries as audio (click a code, hear it)
 - [ ] **CODE-08**: Code edits support undo/redo
-- [ ] **CODE-09**: Per-layer manipulation is labeled (Structure/Timbre/Detail)
+- [x] **CODE-09**: Per-layer manipulation is labeled (Structure/Timbre/Detail)
 
 ### Model Persistence
 
@@ -109,15 +109,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-04 | Phase 15 | Complete |
 | GEN-05 | Phase 14 | Complete |
 | GEN-06 | Phase 14 | Complete |
-| CODE-01 | Phase 16 | Pending |
-| CODE-02 | Phase 16 | Pending |
-| CODE-03 | Phase 16 | Pending |
+| CODE-01 | Phase 16 | Complete |
+| CODE-02 | Phase 16 | Complete |
+| CODE-03 | Phase 16 | Complete |
 | CODE-04 | Phase 17 | Pending |
 | CODE-05 | Phase 17 | Pending |
 | CODE-06 | Phase 17 | Pending |
-| CODE-07 | Phase 16 | Pending |
+| CODE-07 | Phase 16 | Complete |
 | CODE-08 | Phase 17 | Pending |
-| CODE-09 | Phase 16 | Pending |
+| CODE-09 | Phase 16 | Complete |
 | PERS-01 | Phase 13 | Complete |
 | PERS-02 | Phase 14 | Complete |
 | PERS-03 | Phase 18 | Pending |

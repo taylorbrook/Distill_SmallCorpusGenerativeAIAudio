@@ -109,7 +109,7 @@ Plans:
   2. Quantizer levels are labeled with semantic roles (e.g., Structure / Timbre / Detail) rather than raw level numbers
   3. User can click any codebook entry in the grid to hear a short audio preview of what that code sounds like
   4. User can decode the code grid back to audio and play it back, hearing a reconstruction of the original
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 16-01-PLAN.md -- Backend encode/decode/preview pipeline and interactive HTML code grid renderer
 - [ ] 16-02-PLAN.md -- Codes tab UI assembly with model selector, event wiring, and app registration
@@ -159,7 +159,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
 | 14. Autoregressive Prior | 3/3 | Complete    | 2026-02-22 | - |
 | 15. Generation Pipeline | 3/3 | Complete    | 2026-02-27 | - |
-| 16. Encode/Decode + Code Visualization | v1.1 | 0/2 | Planned | - |
+| 16. Encode/Decode + Code Visualization | 1/2 | In Progress|  | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
 | 18. Diagnostics + Library Integration | v1.1 | 0/0 | Not started | - |
 
