@@ -54,6 +54,11 @@ class BigVGANVocoder(VocoderBase):
         Device preference: "auto", "cuda", "mps", or "cpu".
         When "auto", uses the project's device auto-detection
         (CUDA > MPS > CPU with smoke testing).
+    tqdm_class : type | None
+        Optional tqdm-compatible class for customising download progress
+        display.  Forwarded to :func:`ensure_bigvgan_weights` so the
+        caller can use Gradio's ``gr.Progress`` tqdm wrapper or Rich
+        progress bars.
 
     Notes
     -----
@@ -62,7 +67,7 @@ class BigVGANVocoder(VocoderBase):
     - After first download, no network access is needed.
     """
 
-    def __init__(self, device: str = "auto") -> None:
+    def __init__(self, device: str = "auto", tqdm_class: type | None = None) -> None:
         import torch
 
         from distill.hardware.device import select_device
@@ -73,7 +78,7 @@ class BigVGANVocoder(VocoderBase):
         logger.info("BigVGANVocoder: using device %s", self._device)
 
         # Ensure weights are downloaded (logs progress on first use)
-        model_dir = ensure_bigvgan_weights()
+        model_dir = ensure_bigvgan_weights(tqdm_class=tqdm_class)
 
         # Import vendored BigVGAN and load model from cached directory
         bigvgan_module = _import_bigvgan()
