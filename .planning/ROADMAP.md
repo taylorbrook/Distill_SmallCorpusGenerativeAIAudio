@@ -103,7 +103,10 @@ Plans:
   3. PCA-based latent space analysis works correctly with the 128-dimensional latent space, producing musically meaningful slider controls
   4. The Gradio UI and CLI function identically to v1.0 from the user's perspective -- no changes to user-facing interfaces, controls, or workflows
   5. Export pipeline produces valid audio files in all supported formats with correct metadata
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 16-01-PLAN.md -- Core generation wiring (persistence with norm_stats, 2-channel chunking, ISTFT generation pipeline)
+- [ ] 16-02-PLAN.md -- Training previews and PCA analysis (ISTFT preview generation, feature sweep wiring, slider labels)
 
 ## Progress
 
