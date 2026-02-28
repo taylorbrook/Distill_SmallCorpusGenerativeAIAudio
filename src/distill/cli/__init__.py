@@ -202,6 +202,10 @@ from distill.cli.model import app as model_app
 
 app.add_typer(model_app, name="model", help="Manage saved models")
 
+from distill.cli.train_vocoder import app as train_vocoder_app
+
+app.add_typer(train_vocoder_app, name="train-vocoder", help="Train per-model HiFi-GAN vocoder")
+
 # ---------------------------------------------------------------------------
 # Entry point callable
 # ---------------------------------------------------------------------------
