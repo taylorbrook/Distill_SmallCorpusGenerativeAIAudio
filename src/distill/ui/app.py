@@ -1,11 +1,12 @@
 """Gradio Blocks application assembly.
 
-Builds the 4-tab layout (Data, Train, Generate, Library), wires tab
-builders, and provides the :func:`launch_ui` entry point.  Cross-tab
+Builds the 5-tab layout (Data, Train, Generate, Codes, Library), wires
+tab builders, and provides the :func:`launch_ui` entry point.  Cross-tab
 wiring connects:
 
 - Library load -> Generate tab slider updates
 - Library load -> Generate tab blend model dropdown refresh
+- Library load -> Codes tab model dropdown refresh
 - Data import -> Train tab empty-state/controls visibility
 - Library load -> Generate tab empty-state/controls visibility
 
@@ -20,6 +21,7 @@ from typing import Any
 
 import gradio as gr
 
+from distill.ui.tabs.codes_tab import build_codes_tab
 from distill.ui.tabs.data_tab import build_data_tab
 from distill.ui.tabs.generate_tab import build_generate_tab
 from distill.ui.tabs.library_tab import build_library_tab
@@ -71,6 +73,8 @@ def create_app(
                 train_refs = build_train_tab()
             with gr.Tab("Generate", id="generate"):
                 gen_refs = build_generate_tab()
+            with gr.Tab("Codes", id="codes"):
+                codes_refs = build_codes_tab()
             with gr.Tab("Library", id="library"):
                 lib_refs = build_library_tab()
 
@@ -112,6 +116,9 @@ def create_app(
             ]
         )
 
+        # Import Codes tab refresh helper for cross-tab dropdown sync
+        from distill.ui.tabs.codes_tab import _refresh_model_dropdown as _codes_refresh
+
         lib_refs["load_btn"].click(
             fn=_update_sliders_for_model,
             inputs=None,
@@ -120,6 +127,10 @@ def create_app(
             fn=_refresh_blend_model_choices,
             inputs=None,
             outputs=gen_refs["blend_model_dds"],
+        ).then(
+            fn=_codes_refresh,
+            inputs=None,
+            outputs=[codes_refs["model_dropdown"]],
         )
 
         # Card click -> select in dropdown, load model, update Generate sliders
@@ -147,6 +158,10 @@ def create_app(
             fn=_refresh_blend_model_choices,
             inputs=None,
             outputs=gen_refs["blend_model_dds"],
+        ).then(
+            fn=_codes_refresh,
+            inputs=None,
+            outputs=[codes_refs["model_dropdown"]],
         )
 
     return app
