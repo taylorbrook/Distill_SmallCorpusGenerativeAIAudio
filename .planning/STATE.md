@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: HiFi-GAN Vocoder
 status: unknown
-last_updated: "2026-02-28T23:06:57Z"
+last_updated: "2026-02-28T23:12:15Z"
 progress:
   total_phases: 16
   completed_phases: 15
   total_plans: 48
-  completed_plans: 46
+  completed_plans: 48
 ---
 
 # Project State
@@ -23,11 +23,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 16 of 16 (Per-Model HiFi-GAN Training & Griffin-Lim Removal)
-Plan: 3 of 5 in current phase -- COMPLETE
-Status: Plan 16-03 complete, proceeding to Plan 16-04
-Last activity: 2026-02-28 — Completed 16-03-PLAN.md (Training loop & inference)
+Plan: 5 of 5 in current phase -- COMPLETE
+Status: Plan 16-05 complete, Phase 16 complete
+Last activity: 2026-02-28 — Completed 16-05-PLAN.md (Train-vocoder CLI command)
 
-Progress: ████████████░░░░░░░░ 64% (v1.1) [3/5 Phase 16 plans complete]
+Progress: ████████████████████ 100% (v1.1) [5/5 Phase 16 plans complete]
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: ████████████░░░░░░░░ 64% (v1.1
 | Phase 16 P01 | 4min | 2 tasks | 5 files |
 | Phase 16 P02 | 5min | 2 tasks | 5 files |
 | Phase 16 P03 | 4min | 2 tasks | 4 files |
+| Phase 16 P05 | 3min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,9 @@ Recent decisions affecting current work:
 - [Phase 16]: Mel loss weight 45 (original HiFi-GAN paper) for strong reconstruction signal
 - [Phase 16]: HiFiGANVocoder undoes log1p via expm1 -- no MelAdapter needed, trained on VAE mel format directly
 - [Phase 16]: Auto-selection prefers per-model HiFi-GAN over BigVGAN when vocoder_state exists; low-epoch warning at <20
+- [Phase 16]: CLI command is distill train-vocoder (top-level, not nested under train) -- distinct operation from VAE training
+- [Phase 16]: CLI preview WAVs saved to disk alongside model for headless/SSH training review
+- [Phase 16]: checkpoint_interval CLI param maps to preview_interval trainer param
 
 ### Pending Todos
 
@@ -114,5 +118,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 16-03-PLAN.md (Training loop & inference)
-Resume file: 16-04-PLAN.md
+Stopped at: Completed 16-05-PLAN.md (Train-vocoder CLI command)
+Resume file: Phase 16 complete
