@@ -39,8 +39,8 @@ Requirements for complex spectrogram milestone. Each maps to roadmap phases.
 
 - [x] **INTEG-01**: Generation pipeline produces audio via ISTFT (not Griffin-Lim)
 - [x] **INTEG-02**: Export pipeline works with new reconstruction (all formats: WAV/MP3/FLAC/OGG)
-- [ ] **INTEG-03**: Training previews use ISTFT reconstruction
-- [ ] **INTEG-04**: PCA-based latent space analysis works with 128-dim latent space
+- [x] **INTEG-03**: Training previews use ISTFT reconstruction
+- [x] **INTEG-04**: PCA-based latent space analysis works with 128-dim latent space
 - [x] **INTEG-05**: UI and CLI function without changes to user-facing interfaces
 
 ## Future Requirements
@@ -91,8 +91,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RECON-03 | Phase 15 | Complete |
 | INTEG-01 | Phase 16 | Complete |
 | INTEG-02 | Phase 16 | Complete |
-| INTEG-03 | Phase 16 | Pending |
-| INTEG-04 | Phase 16 | Pending |
+| INTEG-03 | Phase 16 | Complete |
+| INTEG-04 | Phase 16 | Complete |
 | INTEG-05 | Phase 16 | Complete |
 
 **Coverage:**

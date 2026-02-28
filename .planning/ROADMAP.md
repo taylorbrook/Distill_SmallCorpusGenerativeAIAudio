@@ -34,7 +34,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 13: 2-Channel VAE Architecture** - Adapt encoder/decoder for 2-channel input/output with appropriate activations and 128-dim latent space (completed 2026-02-22)
 - [x] **Phase 14: Multi-Resolution Loss** - Add auraloss multi-resolution STFT loss with magnitude-weighted IF loss and configurable balancing (completed 2026-02-22)
 - [x] **Phase 15: ISTFT Reconstruction** - Reconstruct phase from IF via cumulative sum and produce waveforms via ISTFT, removing Griffin-Lim (completed 2026-02-27)
-- [ ] **Phase 16: Full Pipeline Integration** - Wire ISTFT generation through export, training previews, PCA analysis, UI, and CLI
+- [x] **Phase 16: Full Pipeline Integration** - Wire ISTFT generation through export, training previews, PCA analysis, UI, and CLI (completed 2026-02-28)
 
 ## Phase Details
 
@@ -130,7 +130,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. 2-Channel VAE Architecture | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Multi-Resolution Loss | 2/2 | Complete   | 2026-02-22 | - |
 | 15. ISTFT Reconstruction | 2/2 | Complete    | 2026-02-27 | - |
-| 16. Full Pipeline Integration | 1/2 | In Progress|  | - |
+| 16. Full Pipeline Integration | 2/2 | Complete   | 2026-02-28 | - |
 
 ---
 *Roadmap created: 2026-02-12*
