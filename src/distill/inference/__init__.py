@@ -53,6 +53,13 @@ from distill.inference.blending import (
     ModelSlot,
     MAX_BLEND_MODELS,
 )
+from distill.inference.codes import (
+    encode_audio_file,
+    decode_code_grid,
+    preview_single_code,
+    preview_time_slice,
+    play_row_audio,
+)
 
 __all__ = [
     # generation.py
@@ -95,4 +102,10 @@ __all__ = [
     "BlendEngine",
     "ModelSlot",
     "MAX_BLEND_MODELS",
+    # codes.py
+    "encode_audio_file",
+    "decode_code_grid",
+    "preview_single_code",
+    "preview_time_slice",
+    "play_row_audio",
 ]
