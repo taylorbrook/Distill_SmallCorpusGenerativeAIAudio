@@ -152,7 +152,6 @@ def _load_model_handler(selected_name: str) -> tuple:
 
     try:
         from distill.history.store import GenerationHistory
-        from distill.inference.generation import GenerationPipeline
         from distill.models.persistence import load_model
         from distill.presets.manager import PresetManager
 
@@ -160,16 +159,11 @@ def _load_model_handler(selected_name: str) -> tuple:
         device_str = str(app_state.device) if app_state.device else "cpu"
         loaded = load_model(model_path, device=device_str)
 
-        from distill.vocoder import get_vocoder
-
         app_state.loaded_model = loaded
-        vocoder = get_vocoder("bigvgan", device=device_str)
-        app_state.pipeline = GenerationPipeline(
-            model=loaded.model,
-            spectrogram=loaded.spectrogram,
-            device=loaded.device,
-            vocoder=vocoder,
-        )
+        # Vocoder creation is deferred to generate time (Phase 15).
+        # Pipeline will be created in _generate_audio after vocoder
+        # resolution, enabling lazy BigVGAN download on first generate.
+        app_state.pipeline = None
         app_state.preset_manager = PresetManager(
             model_id=entry.model_id,
             presets_dir=app_state.presets_dir,
@@ -179,7 +173,7 @@ def _load_model_handler(selected_name: str) -> tuple:
             history_dir=app_state.history_dir,
         )
 
-        logger.info("Loaded model '%s' from library", entry.name)
+        logger.info("Loaded model '%s' from library (vocoder deferred)", entry.name)
         return (f"Model loaded: {entry.name}",)
 
     except Exception as exc:

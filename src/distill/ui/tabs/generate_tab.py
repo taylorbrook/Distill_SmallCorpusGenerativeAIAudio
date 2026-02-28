@@ -66,8 +66,17 @@ def _assign_column(suggested_label: str) -> int:
     return -1
 
 
-def _quality_badge_markdown(quality: dict) -> str:
-    """Build a Markdown badge from a quality score dict."""
+def _quality_badge_markdown(quality: dict, vocoder_info: dict | None = None) -> str:
+    """Build a Markdown badge from a quality score dict.
+
+    Parameters
+    ----------
+    quality : dict
+        Quality metrics dict with ``rating``, ``rating_reason``, ``snr_db``.
+    vocoder_info : dict | None
+        Optional vocoder info dict from :func:`resolve_vocoder`.
+        When provided, appends the vocoder name to the badge.
+    """
     rating = quality.get("rating", "unknown")
     reason = quality.get("rating_reason", "")
     snr = quality.get("snr_db", 0.0)
@@ -82,7 +91,17 @@ def _quality_badge_markdown(quality: dict) -> str:
         icon = "⚪"
 
     snr_str = f"{snr:.1f}" if snr != float("inf") else ">60"
-    return f"**Quality:** {icon} {rating.upper()} -- SNR {snr_str} dB | {reason}"
+    badge = f"**Quality:** {icon} {rating.upper()} -- SNR {snr_str} dB | {reason}"
+
+    if vocoder_info:
+        vocoder_label = (
+            "BigVGAN Universal"
+            if vocoder_info["name"] == "bigvgan_universal"
+            else "Per-model HiFi-GAN"
+        )
+        badge += f" | **Vocoder:** {vocoder_label}"
+
+    return badge
 
 
 # ---------------------------------------------------------------------------
@@ -159,20 +178,68 @@ def _update_sliders_for_model():
     return updates
 
 
-def _generate_audio(*args):
+def _map_vocoder_selection(dropdown_value: str) -> str:
+    """Map UI dropdown value to resolve_vocoder selection string."""
+    _MAP = {
+        "Auto": "auto",
+        "BigVGAN Universal": "bigvgan",
+        "Per-model HiFi-GAN": "hifigan",
+    }
+    return _MAP.get(dropdown_value, "auto")
+
+
+def _make_error_outputs(
+    badge_text: str,
+    vocoder_status: str = "",
+    vocoder_progress: str = "",
+    retry_visible: bool = False,
+):
+    """Build the full output tuple for error paths.
+
+    Ensures generate button is always re-enabled on error.
+
+    Returns
+    -------
+    tuple
+        10-element tuple matching _generate_audio output spec.
+    """
+    return (
+        None,                                            # audio_output
+        badge_text,                                      # quality_badge
+        gr.update(visible=False),                        # audio_output visibility
+        gr.update(),                                     # history_gallery
+        gr.update(),                                     # ab_dropdown_a
+        gr.update(),                                     # ab_dropdown_b
+        gr.update(interactive=True, value="Generate"),   # generate_btn
+        vocoder_status,                                  # vocoder_status
+        gr.update(value=vocoder_progress, visible=bool(vocoder_progress)),  # vocoder_progress
+        gr.update(visible=retry_visible),                # retry_download_btn
+    )
+
+
+def _generate_audio(*args, progress=gr.Progress(track_tqdm=True)):
     """Generate audio from slider values and generation config.
+
+    This is a **generator** function: it can yield intermediate updates
+    to disable the Generate button during vocoder download, then yield
+    the final results.
 
     Arguments are unpacked as:
         slider_0 ... slider_{MAX_SLIDERS-1}, duration, output_mode,
-        spatial_width, spatial_depth, seed
+        spatial_width, spatial_depth, seed, evolution, vocoder_selection
 
-    Returns:
-        Tuple of (audio, badge, audio_visible, history_gallery, ab_choices_a,
-        ab_choices_b).
+    Yields
+    ------
+    tuple
+        10-element tuple of (audio, badge, audio_visible, history_gallery,
+        ab_choices_a, ab_choices_b, generate_btn, vocoder_status,
+        vocoder_progress, retry_download_btn).
     """
     from distill.controls.mapping import SliderState, sliders_to_latent
-    from distill.inference.generation import GenerationConfig
+    from distill.inference.generation import GenerationConfig, GenerationPipeline
     from distill.inference.spatial import SpatialConfig, SpatialMode
+    from distill.vocoder import resolve_vocoder
+    from distill.vocoder.weight_manager import is_bigvgan_cached
 
     # Unpack arguments
     slider_values = list(args[:MAX_SLIDERS])
@@ -182,28 +249,85 @@ def _generate_audio(*args):
     spatial_depth = args[MAX_SLIDERS + 3]
     seed_val = args[MAX_SLIDERS + 4]
     evolution = args[MAX_SLIDERS + 5]
+    vocoder_dd_value = args[MAX_SLIDERS + 6]
+
+    vocoder_selection = _map_vocoder_selection(vocoder_dd_value)
 
     # Validate model loaded
-    if app_state.loaded_model is None or app_state.pipeline is None:
-        return (
-            None,
-            "**No model loaded.** Go to the Library tab to load a model.",
-            gr.update(visible=False),
-            gr.update(),  # history gallery
-            gr.update(),  # ab dropdown a
-            gr.update(),  # ab dropdown b
+    if app_state.loaded_model is None:
+        yield _make_error_outputs(
+            "**No model loaded.** Go to the Library tab to load a model."
         )
+        return
 
     analysis = app_state.loaded_model.analysis
     if analysis is None:
-        return (
-            None,
-            "**Model has no latent space analysis.** Re-analyze the model.",
-            gr.update(visible=False),
-            gr.update(),
-            gr.update(),
-            gr.update(),
+        yield _make_error_outputs(
+            "**Model has no latent space analysis.** Re-analyze the model."
         )
+        return
+
+    # -- Vocoder resolution (lazy download) --
+    # If BigVGAN not cached and we'll need it, disable generate button
+    needs_download = (
+        vocoder_selection in ("auto", "bigvgan") and not is_bigvgan_cached()
+    )
+    if needs_download:
+        yield (
+            gr.update(),                                     # audio_output
+            gr.update(),                                     # quality_badge
+            gr.update(),                                     # audio_output visibility
+            gr.update(),                                     # history_gallery
+            gr.update(),                                     # ab_dropdown_a
+            gr.update(),                                     # ab_dropdown_b
+            gr.update(interactive=False, value="Downloading vocoder..."),  # generate_btn
+            "**Downloading BigVGAN universal vocoder...**",  # vocoder_status
+            gr.update(value="", visible=False),              # vocoder_progress
+            gr.update(visible=False),                        # retry_download_btn
+        )
+
+    # Resolve vocoder
+    device_str = str(app_state.device) if app_state.device else "cpu"
+    try:
+        vocoder, vocoder_info = resolve_vocoder(
+            vocoder_selection,
+            app_state.loaded_model,
+            device=device_str,
+        )
+    except ValueError as exc:
+        yield _make_error_outputs(
+            f"**Vocoder error:** {exc}",
+            vocoder_status=f"**Error:** {exc}",
+        )
+        return
+    except OSError as exc:
+        logger.exception("BigVGAN download failed")
+        yield _make_error_outputs(
+            f"**Download failed:** {exc}",
+            vocoder_status="**Download failed.** Click Retry to try again.",
+            vocoder_progress=str(exc),
+            retry_visible=True,
+        )
+        return
+
+    # Ensure pipeline exists (deferred from model load) or update vocoder
+    if app_state.pipeline is None:
+        app_state.pipeline = GenerationPipeline(
+            model=app_state.loaded_model.model,
+            spectrogram=app_state.loaded_model.spectrogram,
+            device=app_state.loaded_model.device,
+            vocoder=vocoder,
+        )
+    else:
+        app_state.pipeline.vocoder = vocoder
+
+    # Vocoder status text
+    vocoder_label = (
+        "BigVGAN Universal"
+        if vocoder_info["name"] == "bigvgan_universal"
+        else "Per-model HiFi-GAN"
+    )
+    vocoder_status_text = f"**Using:** {vocoder_label}"
 
     n_active = min(analysis.n_active_components, MAX_SLIDERS)
 
@@ -243,28 +367,22 @@ def _generate_audio(*args):
             result = app_state.blend_engine.blend_generate(positions, config)
         except Exception as exc:
             logger.exception("Blend generation failed")
-            return (
-                None,
+            yield _make_error_outputs(
                 f"**Blend generation failed:** {exc}",
-                gr.update(visible=False),
-                gr.update(),
-                gr.update(),
-                gr.update(),
+                vocoder_status=vocoder_status_text,
             )
+            return
     else:
         # Single model generation
         try:
             result = app_state.pipeline.generate(config)
         except Exception as exc:
             logger.exception("Generation failed")
-            return (
-                None,
+            yield _make_error_outputs(
                 f"**Generation failed:** {exc}",
-                gr.update(visible=False),
-                gr.update(),
-                gr.update(),
-                gr.update(),
+                vocoder_status=vocoder_status_text,
             )
+            return
 
     # Store result in app_state for export
     app_state.metrics_buffer["last_result"] = result
@@ -283,21 +401,25 @@ def _generate_audio(*args):
         except Exception as exc:
             logger.warning("Failed to add to history: %s", exc)
 
-    # Build quality badge
-    badge = _quality_badge_markdown(result.quality)
+    # Build quality badge with vocoder info
+    badge = _quality_badge_markdown(result.quality, vocoder_info=vocoder_info)
 
     # Auto-refresh history gallery and A/B dropdown choices after generation
     gallery_items = _build_history_gallery()
     ab_choices = _build_ab_choices()
 
-    # Return audio as (sample_rate, ndarray) tuple for gr.Audio
-    return (
+    # Yield final results with generate button re-enabled
+    yield (
         (result.sample_rate, result.audio),
         badge,
         gr.update(visible=True),
         gallery_items,
         gr.update(choices=ab_choices, value=None),
         gr.update(choices=ab_choices, value=None),
+        gr.update(interactive=True, value="Generate"),   # re-enable generate
+        vocoder_status_text,                             # vocoder status
+        gr.update(value="", visible=False),              # vocoder progress (clear)
+        gr.update(visible=False),                        # retry button hidden
     )
 
 
@@ -486,6 +608,64 @@ def _toggle_bit_depth(export_format: str):
 def _toggle_preset_name():
     """Show preset name textbox when saving."""
     return gr.update(visible=True)
+
+
+def _update_vocoder_choices():
+    """Update vocoder dropdown choices when model changes.
+
+    Returns
+    -------
+    tuple
+        (dropdown_update, status_text) for vocoder_dropdown and vocoder_status.
+    """
+    if app_state.loaded_model is None:
+        return (
+            gr.update(choices=["Auto", "BigVGAN Universal"], value="Auto"),
+            "**Using:** BigVGAN Universal",
+        )
+
+    has_per_model = app_state.loaded_model.vocoder_state is not None
+    if has_per_model:
+        return (
+            gr.update(
+                choices=["Auto", "BigVGAN Universal", "Per-model HiFi-GAN"],
+                value="Auto",
+            ),
+            "**Using:** Auto (per-model vocoder available)",
+        )
+    return (
+        gr.update(
+            choices=["Auto", "BigVGAN Universal"],
+            value="Auto",
+            info="Auto selects the best available vocoder for your model",
+        ),
+        "**Using:** BigVGAN Universal",
+    )
+
+
+def _retry_vocoder_download():
+    """Attempt to re-download BigVGAN weights.
+
+    Returns
+    -------
+    tuple
+        (vocoder_status, vocoder_progress, retry_btn_visible)
+    """
+    from distill.vocoder.weight_manager import ensure_bigvgan_weights
+
+    try:
+        ensure_bigvgan_weights()
+        return (
+            "**Using:** BigVGAN Universal",
+            gr.update(value="", visible=False),
+            gr.update(visible=False),
+        )
+    except OSError as exc:
+        return (
+            "**Download failed.** Click Retry to try again.",
+            gr.update(value=str(exc), visible=True),
+            gr.update(visible=True),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -904,6 +1084,22 @@ def build_generate_tab() -> dict:
                 info="0 = static, 1 = maximum variation across chunks",
             )
 
+        # ----- Vocoder Settings accordion (collapsed by default) -----
+        with gr.Accordion("Vocoder Settings", open=False):
+            vocoder_dropdown = gr.Dropdown(
+                choices=["Auto", "BigVGAN Universal"],
+                value="Auto",
+                label="Vocoder",
+                info="Auto selects the best available vocoder for your model",
+            )
+            vocoder_status = gr.Markdown(
+                value="**Using:** BigVGAN Universal",
+            )
+            vocoder_progress = gr.Markdown(value="", visible=False)
+            retry_download_btn = gr.Button(
+                "Retry Download", visible=False, variant="secondary", size="sm",
+            )
+
         # ----- Seed row -----
         with gr.Row():
             seed_input = gr.Number(
@@ -1056,7 +1252,7 @@ def build_generate_tab() -> dict:
         outputs=[seed_input],
     )
 
-    # Generate audio (now uses output_mode, spatial_width, spatial_depth, evolution)
+    # Generate audio (vocoder resolved at generate time, not model load)
     generate_btn.click(
         fn=_generate_audio,
         inputs=sliders + [
@@ -1066,9 +1262,12 @@ def build_generate_tab() -> dict:
             spatial_depth_slider,
             seed_input,
             evolution_slider,
+            vocoder_dropdown,
         ],
         outputs=[audio_output, quality_badge, audio_output,
-                 history_gallery, ab_dropdown_a, ab_dropdown_b],
+                 history_gallery, ab_dropdown_a, ab_dropdown_b,
+                 generate_btn, vocoder_status, vocoder_progress,
+                 retry_download_btn],
     )
 
     # Export audio (now includes format and metadata)
@@ -1126,6 +1325,15 @@ def build_generate_tab() -> dict:
         outputs=[blend_status] + blend_rows,
     )
 
+    # ----- Vocoder event wiring -----
+
+    # Retry download button
+    retry_download_btn.click(
+        fn=_retry_vocoder_download,
+        inputs=None,
+        outputs=[vocoder_status, vocoder_progress, retry_download_btn],
+    )
+
     # ----- History event wiring -----
 
     # Refresh history button
@@ -1171,4 +1379,6 @@ def build_generate_tab() -> dict:
         "controls_section": controls_section,
         "empty_msg": empty_msg,
         "blend_model_dds": blend_model_dds,
+        "vocoder_dropdown": vocoder_dropdown,
+        "vocoder_status": vocoder_status,
     }
