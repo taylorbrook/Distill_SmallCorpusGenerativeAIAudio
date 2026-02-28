@@ -227,6 +227,10 @@ def generate(
     bit_depth: str = typer.Option(
         "24-bit", "--bit-depth", help="Bit depth: 16-bit, 24-bit, 32-bit-float"
     ),
+    vocoder: str = typer.Option(
+        "auto", "--vocoder",
+        help="Vocoder selection: auto, bigvgan, hifigan",
+    ),
     device: str = typer.Option(
         "auto", "--device", help="Compute device: auto, mps, cuda, cpu"
     ),
@@ -371,6 +375,35 @@ def generate(
             s.metadata.name for s in engine.get_active_slots()
         )
 
+        # Resolve vocoder for status line and JSON field
+        # (BlendEngine creates its own vocoder internally)
+        import warnings
+
+        from distill.vocoder import resolve_vocoder
+
+        warnings.filterwarnings("ignore", message=".*experimental.*", category=Warning)
+
+        try:
+            _blend_vocoder, vocoder_info = resolve_vocoder(
+                selection=vocoder,
+                loaded_model=loaded,
+                device=str(torch_device),
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc))
+
+        # Always print vocoder line to stderr
+        vocoder_label = (
+            "BigVGAN Universal" if vocoder_info["name"] == "bigvgan_universal"
+            else "Per-model HiFi-GAN"
+        )
+        reason = vocoder_info.get("reason", "")
+        vocoder_line = f"[bold]Vocoder:[/bold] {vocoder_label} ({vocoder_info['selection']}"
+        if reason:
+            vocoder_line += f" -- {reason}"
+        vocoder_line += ")"
+        console.print(vocoder_line)
+
         # Build generation config for blending (uses old stereo fields for
         # internal pipeline compatibility, spatial applied post-generation)
         gen_config = GenerationConfig(
@@ -417,6 +450,10 @@ def generate(
                 "file": str(export_path),
                 "format": fmt_lower,
                 "seed": result.seed_used,
+                "vocoder": {
+                    "name": vocoder_info["name"],
+                    "selection": vocoder_info["selection"],
+                },
             })
             console.print(
                 f"[green]Generated:[/green] {export_path} ({fmt_lower})"
@@ -534,12 +571,48 @@ def generate(
             latent_vector=latent_vector,
         )
 
-        # Create pipeline with vocoder
-        from distill.vocoder import get_vocoder
+        # Resolve vocoder selection
+        import warnings
 
-        vocoder = get_vocoder("bigvgan", device=str(torch_device))
+        from distill.vocoder import resolve_vocoder
+
+        # Suppress tqdm experimental warning for Rich integration
+        warnings.filterwarnings("ignore", message=".*experimental.*", category=Warning)
+
+        # Use Rich progress for CLI downloads (not for JSON output mode)
+        tqdm_cls = None
+        if not json_output:
+            try:
+                from tqdm.rich import tqdm_rich
+
+                tqdm_cls = tqdm_rich
+            except ImportError:
+                pass  # Fall back to default tqdm if tqdm.rich unavailable
+
+        try:
+            vocoder_instance, vocoder_info = resolve_vocoder(
+                selection=vocoder,
+                loaded_model=loaded,
+                device=str(torch_device),
+                tqdm_class=tqdm_cls,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc))
+
+        # Always print vocoder line to stderr (per CONTEXT.md locked decision)
+        vocoder_label = (
+            "BigVGAN Universal" if vocoder_info["name"] == "bigvgan_universal"
+            else "Per-model HiFi-GAN"
+        )
+        reason = vocoder_info.get("reason", "")
+        vocoder_line = f"[bold]Vocoder:[/bold] {vocoder_label} ({vocoder_info['selection']}"
+        if reason:
+            vocoder_line += f" -- {reason}"
+        vocoder_line += ")"
+        console.print(vocoder_line)
+
         pipeline = GenerationPipeline(
-            loaded.model, loaded.spectrogram, torch_device, vocoder=vocoder
+            loaded.model, loaded.spectrogram, torch_device, vocoder=vocoder_instance
         )
         pipeline.model_name = loaded.metadata.name
 
@@ -578,6 +651,10 @@ def generate(
                 "file": str(export_path),
                 "format": fmt_lower,
                 "seed": result.seed_used,
+                "vocoder": {
+                    "name": vocoder_info["name"],
+                    "selection": vocoder_info["selection"],
+                },
             })
             console.print(
                 f"[green]Generated:[/green] {export_path} ({fmt_lower})"
