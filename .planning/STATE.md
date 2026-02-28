@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: HiFi-GAN Vocoder
 status: unknown
-last_updated: "2026-02-28T00:33:21.653Z"
+last_updated: "2026-02-28T22:59:05.951Z"
 progress:
-  total_phases: 15
+  total_phases: 16
   completed_phases: 15
-  total_plans: 43
-  completed_plans: 43
+  total_plans: 48
+  completed_plans: 44
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 15 — UI & CLI Vocoder Controls
+**Current focus:** Phase 16 — Per-Model HiFi-GAN Training & Griffin-Lim Removal
 
 ## Current Position
 
-Phase: 15 of 16 (UI & CLI Vocoder Controls) -- COMPLETE
-Plan: 2 of 2 in current phase -- COMPLETE
-Status: Phase 15 complete, ready for Phase 16
-Last activity: 2026-02-28 — Completed 15-02-PLAN.md (CLI vocoder controls)
+Phase: 16 of 16 (Per-Model HiFi-GAN Training & Griffin-Lim Removal)
+Plan: 1 of 5 in current phase -- COMPLETE
+Status: Plan 16-01 complete, proceeding to Plan 16-02
+Last activity: 2026-02-28 — Completed 16-01-PLAN.md (HiFi-GAN V2 architecture)
 
-Progress: █████████░░░░░░░░░░░ 50% (v1.1) [2/2 Phase 15 plans complete]
+Progress: █████████░░░░░░░░░░░ 53% (v1.1) [1/5 Phase 16 plans complete]
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: █████████░░░░░░░░░░░ 50% (v1.1
 | Phase 14 P02 | 4min | 3 tasks | 6 files |
 | Phase 15 P01 | 5min | 2 tasks | 5 files |
 | Phase 15 P02 | 2min | 1 tasks | 1 files |
+| Phase 16 P01 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,8 @@ Recent decisions affecting current work:
 - [Phase 15]: Blend mode vocoder resolution for status/JSON only; BlendEngine manages its own vocoder internally
 - [Phase 15]: Rich progress disabled in JSON output mode to avoid polluting machine-readable output
 - [Phase 15]: TqdmExperimentalWarning suppressed via warnings.filterwarnings for clean CLI output
+- [Phase 16]: Upsample rates [8,8,4,2] (product=512) to match project hop_size; config validates at construction
+- [Phase 16]: Loss functions as pure functions with torch.tensor(0.0, device=...) initialization for proper device/grad tracking
 
 ### Pending Todos
 
@@ -102,5 +105,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 15-02-PLAN.md (CLI vocoder controls)
-Resume file: Phase 16 planning
+Stopped at: Completed 16-01-PLAN.md (HiFi-GAN V2 architecture)
+Resume file: 16-02-PLAN.md

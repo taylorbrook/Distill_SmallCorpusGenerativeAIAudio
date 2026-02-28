@@ -44,8 +44,8 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 
 ### HiFi-GAN Training
 
-- [ ] **TRAIN-01**: User can train HiFi-GAN V2 vocoder on a model's training audio
-- [ ] **TRAIN-02**: Training uses adversarial loss (MPD+MSD discriminators) + mel reconstruction loss + feature matching loss
+- [x] **TRAIN-01**: User can train HiFi-GAN V2 vocoder on a model's training audio
+- [x] **TRAIN-02**: Training uses adversarial loss (MPD+MSD discriminators) + mel reconstruction loss + feature matching loss
 - [ ] **TRAIN-03**: Data augmentation applied during training to prevent discriminator overfitting on small datasets
 - [ ] **TRAIN-04**: Trained vocoder weights bundled into .distill model file
 - [ ] **TRAIN-05**: Training supports cancel with checkpoint save and resume
@@ -103,8 +103,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-01 | Phase 15 | Complete |
 | CLI-02 | Phase 16 | Pending |
 | CLI-03 | Phase 15 | Complete |
-| TRAIN-01 | Phase 16 | Pending |
-| TRAIN-02 | Phase 16 | Pending |
+| TRAIN-01 | Phase 16 | Complete |
+| TRAIN-02 | Phase 16 | Complete |
 | TRAIN-03 | Phase 16 | Pending |
 | TRAIN-04 | Phase 16 | Pending |
 | TRAIN-05 | Phase 16 | Pending |
