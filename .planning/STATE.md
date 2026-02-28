@@ -111,6 +111,10 @@ Recent decisions affecting current work:
 - [16-02]: Musical label mapping: Brightness, Rolloff, Noisiness, Loudness, Texture for 5 FEATURE_NAMES
 - [16-02]: Analyzer dataloader encodes cached 2-channel spectrograms directly (no waveform_to_mel)
 
+### Roadmap Evolution
+
+- Phase 17 added: Tech Debt Cleanup (fix 4 code-level items from v2.0 audit)
+
 ### Pending Todos
 
 None yet.

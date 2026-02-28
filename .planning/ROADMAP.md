@@ -111,7 +111,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
+Phases execute in numeric order: 12 → 13 → 14 → 15 → 16 → 17
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -131,6 +131,22 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 14. Multi-Resolution Loss | 2/2 | Complete   | 2026-02-22 | - |
 | 15. ISTFT Reconstruction | 2/2 | Complete    | 2026-02-27 | - |
 | 16. Full Pipeline Integration | 2/2 | Complete    | 2026-02-28 | - |
+| 17. Tech Debt Cleanup | 0/0 | Not planned | - | - |
+
+### Phase 17: Tech Debt Cleanup
+**Goal**: Fix 4 code-level tech debt items identified by v2.0 milestone audit
+**Depends on**: Phase 16
+**Requirements**: None (quality fixes, no new requirements)
+**Gap Closure:** Closes tech debt from v2.0 audit
+**Success Criteria** (what must be TRUE):
+  1. `get_adaptive_config` KL warmup_fraction is propagated into nested `LossConfig.kl.warmup_fraction`
+  2. Latent fallback paths in `chunking.py` and `analyzer.py` use pad-to-32/divide-by-32 for 5-layer architecture
+  3. `blending.py` has `ComplexSpectrogram` import under `TYPE_CHECKING` block
+  4. `generate_preview` has a None guard on `complex_spectrogram` parameter
+**Plans**: 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 17 to break down)
 
 ---
 *Roadmap created: 2026-02-12*
