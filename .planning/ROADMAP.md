@@ -34,7 +34,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 13: Model Persistence v2** - Model format update with optional vocoder state and backward compatibility (completed 2026-02-22)
 - [x] **Phase 14: Generation Pipeline Integration** - Wire neural vocoder through all generation paths with sample rate handling (completed 2026-02-27)
 - [x] **Phase 15: UI & CLI Vocoder Controls** - Vocoder selection dropdown, download progress, and CLI flags (completed 2026-02-28)
-- [ ] **Phase 16: Per-Model HiFi-GAN Training & Griffin-Lim Removal** - Adversarial vocoder training, auto-selection, training UI/CLI, and full Griffin-Lim removal
+- [x] **Phase 16: Per-Model HiFi-GAN Training & Griffin-Lim Removal** - Adversarial vocoder training, auto-selection, training UI/CLI, and full Griffin-Lim removal (completed 2026-02-28)
 
 ## Phase Details
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Generation Pipeline Integration | 2/2 | Complete    | 2026-02-27 | - |
 | 15. UI & CLI Vocoder Controls | 2/2 | Complete    | 2026-02-28 | - |
-| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | 3/5 | In Progress|  | - |
+| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | 5/5 | Complete   | 2026-02-28 | - |
 
 ---
 *Roadmap created: 2026-02-12*

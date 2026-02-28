@@ -3,6 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: HiFi-GAN Vocoder
 status: unknown
+last_updated: "2026-02-28T23:17:14.318Z"
+progress:
+  total_phases: 16
+  completed_phases: 16
+  total_plans: 48
+  completed_plans: 48
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.1
+milestone_name: HiFi-GAN Vocoder
+status: unknown
 last_updated: "2026-02-28T23:12:15Z"
 progress:
   total_phases: 16
@@ -60,6 +73,7 @@ Progress: ████████████████████ 100% (v1.
 | Phase 16 P02 | 5min | 2 tasks | 5 files |
 | Phase 16 P03 | 4min | 2 tasks | 4 files |
 | Phase 16 P05 | 3min | 1 tasks | 2 files |
+| Phase 16 P04 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -104,6 +118,8 @@ Recent decisions affecting current work:
 - [Phase 16]: CLI command is distill train-vocoder (top-level, not nested under train) -- distinct operation from VAE training
 - [Phase 16]: CLI preview WAVs saved to disk alongside model for headless/SSH training review
 - [Phase 16]: checkpoint_interval CLI param maps to preview_interval trainer param
+- [Phase 16]: Separate gr.Timer for vocoder training (independent from VAE timer) for clean code
+- [Phase 16]: Model path resolved via ModelLibrary.list_all() catalog with _sanitize_filename fallback
 
 ### Pending Todos
 
@@ -118,5 +134,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 16-05-PLAN.md (Train-vocoder CLI command)
-Resume file: Phase 16 complete
+Stopped at: Completed 16-04-PLAN.md (Training Dashboard UI)
+Resume file: 16-05-PLAN.md

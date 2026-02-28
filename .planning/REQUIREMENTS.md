@@ -33,8 +33,8 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 
 - [x] **UI-01**: Generate tab has vocoder selection (Auto / BigVGAN Universal / Per-model HiFi-GAN)
 - [x] **UI-02**: BigVGAN download progress shown in UI on first use
-- [ ] **UI-03**: Train tab has "Train Vocoder" option for models with completed VAE training
-- [ ] **UI-04**: Vocoder training shows loss curve and progress in UI
+- [x] **UI-03**: Train tab has "Train Vocoder" option for models with completed VAE training
+- [x] **UI-04**: Vocoder training shows loss curve and progress in UI
 
 ### CLI
 
@@ -98,8 +98,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-03 | Phase 13 | Complete |
 | UI-01 | Phase 15 | Complete |
 | UI-02 | Phase 15 | Complete |
-| UI-03 | Phase 16 | Pending |
-| UI-04 | Phase 16 | Pending |
+| UI-03 | Phase 16 | Complete |
+| UI-04 | Phase 16 | Complete |
 | CLI-01 | Phase 15 | Complete |
 | CLI-02 | Phase 16 | Complete |
 | CLI-03 | Phase 15 | Complete |
