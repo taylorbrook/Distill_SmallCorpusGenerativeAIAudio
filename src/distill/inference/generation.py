@@ -264,6 +264,8 @@ def _generate_chunks_from_vector(
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
     evolution_amount: float = 0.5,
+    complex_spectrogram: "ComplexSpectrogram | None" = None,
+    normalization_stats: dict | None = None,
 ) -> "np.ndarray":
     """Generate continuous audio from a user-provided latent vector.
 
@@ -278,7 +280,7 @@ def _generate_chunks_from_vector(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape calculation).
     latent_vector : torch.Tensor
         1-D latent vector on the target device.
     num_chunks : int
@@ -294,6 +296,10 @@ def _generate_chunks_from_vector(
     evolution_amount : float
         How far each anchor drifts from the starting vector (0-1).
         0 = static, 1 = anchors are fully random targets.
+    complex_spectrogram : ComplexSpectrogram | None
+        ComplexSpectrogram instance for ISTFT waveform reconstruction.
+    normalization_stats : dict | None
+        Normalization statistics for denormalization before ISTFT.
 
     Returns
     -------
@@ -336,12 +342,9 @@ def _generate_chunks_from_vector(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-    #   wav = spectrogram.mel_to_waveform(combined_mel)
-    #   return wav.squeeze().numpy().astype(np.float32)
-    raise NotImplementedError(
-        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
-    )
+    # Convert 2-channel mel spectrogram to waveform via ISTFT
+    wav = complex_spectrogram.complex_mel_to_waveform(combined_mel, stats=normalization_stats)
+    return wav.squeeze().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -370,10 +373,14 @@ class GenerationPipeline:
         model: "ConvVAE",
         spectrogram: "AudioSpectrogram",
         device: "torch.device",
+        complex_spectrogram: "ComplexSpectrogram | None" = None,
+        normalization_stats: dict | None = None,
     ) -> None:
         self.model = model
         self.spectrogram = spectrogram
         self.device = device
+        self.complex_spectrogram = complex_spectrogram
+        self.normalization_stats = normalization_stats
         self.model_name: str = "unknown"
 
     def generate(self, config: GenerationConfig) -> GenerationResult:
@@ -456,6 +463,8 @@ class GenerationPipeline:
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
                 evolution_amount=config.evolution_amount,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
         elif config.concat_mode == "crossfade":
             audio = generate_chunks_crossfade(
@@ -466,6 +475,8 @@ class GenerationPipeline:
                 seed=seed_used,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
         else:  # latent_interpolation
             audio = generate_chunks_latent_interp(
@@ -476,6 +487,8 @@ class GenerationPipeline:
                 seed=seed_used,
                 chunk_samples=chunk_samples,
                 steps_between=config.steps_between,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
 
         # 6. Apply anti-aliasing filter (always at internal sample rate)
@@ -607,6 +620,8 @@ class GenerationPipeline:
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
                 evolution_amount=config.evolution_amount,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
         elif config.concat_mode == "crossfade":
             return generate_chunks_crossfade(
@@ -617,6 +632,8 @@ class GenerationPipeline:
                 seed=seed_used + 1,
                 chunk_samples=chunk_samples,
                 overlap_samples=config.overlap_samples,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
         else:
             return generate_chunks_latent_interp(
@@ -627,6 +644,8 @@ class GenerationPipeline:
                 seed=seed_used + 1,
                 chunk_samples=chunk_samples,
                 steps_between=config.steps_between,
+                complex_spectrogram=self.complex_spectrogram,
+                normalization_stats=self.normalization_stats,
             )
 
     def export(

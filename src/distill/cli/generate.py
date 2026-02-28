@@ -336,6 +336,8 @@ def generate(
                 metadata=blend_loaded.metadata,
                 device=torch_device,
                 weight=weight,
+                complex_spectrogram=blend_loaded.complex_spectrogram,
+                normalization_stats=blend_loaded.normalization_stats,
             )
             console.print(
                 f"[green]Blend loaded:[/green] {blend_loaded.metadata.name} "
@@ -354,6 +356,8 @@ def generate(
             metadata=loaded.metadata,
             device=torch_device,
             weight=primary_weight,
+            complex_spectrogram=loaded.complex_spectrogram,
+            normalization_stats=loaded.normalization_stats,
         )
         console.print(
             f"[green]Primary loaded:[/green] {loaded.metadata.name} "
@@ -529,7 +533,9 @@ def generate(
 
         # Create pipeline
         pipeline = GenerationPipeline(
-            loaded.model, loaded.spectrogram, torch_device
+            loaded.model, loaded.spectrogram, torch_device,
+            complex_spectrogram=loaded.complex_spectrogram,
+            normalization_stats=loaded.normalization_stats,
         )
         pipeline.model_name = loaded.metadata.name
 

@@ -161,6 +161,8 @@ def _load_model_handler(selected_name: str) -> tuple:
             model=loaded.model,
             spectrogram=loaded.spectrogram,
             device=loaded.device,
+            complex_spectrogram=loaded.complex_spectrogram,
+            normalization_stats=loaded.normalization_stats,
         )
         app_state.preset_manager = PresetManager(
             model_id=entry.model_id,

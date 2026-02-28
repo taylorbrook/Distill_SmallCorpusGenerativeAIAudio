@@ -227,7 +227,8 @@ def synthesize_continuous_mel(
     Returns
     -------
     torch.Tensor
-        Continuous mel spectrogram, shape ``[1, 1, n_mels, total_frames]``.
+        Continuous mel spectrogram, shape ``[1, C, n_mels, total_frames]``
+        where C=2 for v2.0 models (magnitude + IF channels).
     """
     import torch  # noqa: WPS433 -- lazy import
 
@@ -255,12 +256,30 @@ def synthesize_continuous_mel(
                     latent_trajectory[0], target_shape=mel_shape
                 ).cpu()
 
+            # Decode first chunk to determine channel count
+            if model.decoder.fc is None:
+                pad_h = (16 - n_mels % 16) % 16
+                pad_w = (16 - chunk_frames % 16) % 16
+                spatial = (
+                    (n_mels + pad_h) // 16,
+                    (chunk_frames + pad_w) // 16,
+                )
+                model.decoder._init_linear(spatial)
+
+            first_mel = model.decode(latent_trajectory[0], target_shape=mel_shape)
+            n_channels = first_mel.shape[1]  # 2 for v2.0 models
+
             total_frames = (num_steps - 1) * hop_frames + chunk_frames
             window = torch.hann_window(chunk_frames)
-            output = torch.zeros(n_mels, total_frames)
+            output = torch.zeros(n_channels, n_mels, total_frames)
             norm = torch.zeros(total_frames)
 
-            for i, z in enumerate(latent_trajectory):
+            # Process first chunk
+            mel_nd = first_mel.squeeze(0).cpu()  # [C, n_mels, chunk_frames]
+            output[:, :, :chunk_frames] += mel_nd * window.unsqueeze(0).unsqueeze(0)
+            norm[:chunk_frames] += window
+
+            for i, z in enumerate(latent_trajectory[1:], start=1):
                 if model.decoder.fc is None:
                     pad_h = (16 - n_mels % 16) % 16
                     pad_w = (16 - chunk_frames % 16) % 16
@@ -271,21 +290,21 @@ def synthesize_continuous_mel(
                     model.decoder._init_linear(spatial)
 
                 mel = model.decode(z, target_shape=mel_shape)
-                mel_2d = mel.squeeze(0).squeeze(0).cpu()
+                mel_nd = mel.squeeze(0).cpu()  # [C, n_mels, chunk_frames]
 
                 start = i * hop_frames
                 end = start + chunk_frames
-                output[:, start:end] += mel_2d * window.unsqueeze(0)
+                output[:, :, start:end] += mel_nd * window.unsqueeze(0).unsqueeze(0)
                 norm[start:end] += window
 
             norm = norm.clamp(min=1e-8)
-            output = output / norm.unsqueeze(0)
+            output = output / norm.unsqueeze(0).unsqueeze(0)
 
     finally:
         if was_training:
             model.train()
 
-    return output.unsqueeze(0).unsqueeze(0)
+    return output.unsqueeze(0)  # [1, C, n_mels, total_frames]
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +402,8 @@ def generate_chunks_crossfade(
     seed: int | None,
     chunk_samples: int = 48_000,
     overlap_samples: int = 2400,
+    complex_spectrogram: "ComplexSpectrogram | None" = None,
+    normalization_stats: dict | None = None,
 ) -> "np.ndarray":
     """Generate audio via continuous overlap-add synthesis.
 
@@ -395,7 +416,7 @@ def generate_chunks_crossfade(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape calculation).
     num_chunks : int
         Target duration in chunks (each chunk_samples long).
     device : torch.device
@@ -406,6 +427,10 @@ def generate_chunks_crossfade(
         Number of audio samples per chunk (default 48000 = 1 s at 48 kHz).
     overlap_samples : int
         Kept for API compatibility (overlap is now 50% mel frames).
+    complex_spectrogram : ComplexSpectrogram | None
+        ComplexSpectrogram instance for ISTFT waveform reconstruction.
+    normalization_stats : dict | None
+        Normalization statistics for denormalization before ISTFT.
 
     Returns
     -------
@@ -426,12 +451,9 @@ def generate_chunks_crossfade(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-    #   wav = spectrogram.mel_to_waveform(combined_mel)
-    #   return wav.squeeze().numpy().astype(np.float32)
-    raise NotImplementedError(
-        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
-    )
+    # Convert 2-channel mel spectrogram to waveform via ISTFT
+    wav = complex_spectrogram.complex_mel_to_waveform(combined_mel, stats=normalization_stats)
+    return wav.squeeze().numpy().astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +469,8 @@ def generate_chunks_latent_interp(
     seed: int | None,
     chunk_samples: int = 48_000,
     steps_between: int = 10,
+    complex_spectrogram: "ComplexSpectrogram | None" = None,
+    normalization_stats: dict | None = None,
 ) -> "np.ndarray":
     """Generate audio via SLERP interpolation with continuous synthesis.
 
@@ -458,7 +482,7 @@ def generate_chunks_latent_interp(
     model : ConvVAE
         Trained VAE model.
     spectrogram : AudioSpectrogram
-        Spectrogram converter (for mel-to-waveform).
+        Spectrogram converter (for mel shape calculation).
     num_chunks : int
         Number of anchor latent vectors / target duration in seconds.
     device : torch.device
@@ -469,6 +493,10 @@ def generate_chunks_latent_interp(
         Audio samples per decoded chunk (default 48000 = 1 s at 48 kHz).
     steps_between : int
         Kept for API compatibility.
+    complex_spectrogram : ComplexSpectrogram | None
+        ComplexSpectrogram instance for ISTFT waveform reconstruction.
+    normalization_stats : dict | None
+        Normalization statistics for denormalization before ISTFT.
 
     Returns
     -------
@@ -489,9 +517,6 @@ def generate_chunks_latent_interp(
     combined_mel = synthesize_continuous_mel(
         model, spectrogram, trajectory, chunk_samples,
     )
-    # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-    #   wav = spectrogram.mel_to_waveform(combined_mel)
-    #   return wav.squeeze().numpy().astype(np.float32)
-    raise NotImplementedError(
-        "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
-    )
+    # Convert 2-channel mel spectrogram to waveform via ISTFT
+    wav = complex_spectrogram.complex_mel_to_waveform(combined_mel, stats=normalization_stats)
+    return wav.squeeze().numpy().astype(np.float32)

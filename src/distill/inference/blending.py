@@ -81,6 +81,12 @@ class ModelSlot:
     device: "torch.device"
     """Device the model resides on."""
 
+    complex_spectrogram: "ComplexSpectrogram | None" = None
+    """ComplexSpectrogram instance for ISTFT waveform reconstruction."""
+
+    normalization_stats: dict | None = None
+    """Normalization statistics for denormalization before ISTFT."""
+
     weight: float = 25.0
     """Raw blend weight 0-100 (not normalised). Default 25% (equal share of 4)."""
 
@@ -341,6 +347,8 @@ class BlendEngine:
         metadata: "ModelMetadata",
         device: "torch.device",
         weight: float = 25.0,
+        complex_spectrogram: "ComplexSpectrogram | None" = None,
+        normalization_stats: dict | None = None,
     ) -> int:
         """Load a model into the next available slot.
 
@@ -358,6 +366,10 @@ class BlendEngine:
             Device the model resides on.
         weight : float
             Initial blend weight (0-100).
+        complex_spectrogram : ComplexSpectrogram | None
+            ComplexSpectrogram instance for ISTFT waveform reconstruction.
+        normalization_stats : dict | None
+            Normalization statistics for denormalization before ISTFT.
 
         Returns
         -------
@@ -380,6 +392,8 @@ class BlendEngine:
             analysis=analysis,
             metadata=metadata,
             device=device,
+            complex_spectrogram=complex_spectrogram,
+            normalization_stats=normalization_stats,
             weight=weight,
             active=True,
         )
@@ -555,6 +569,8 @@ class BlendEngine:
                 model=slot.model,
                 spectrogram=slot.spectrogram,
                 device=slot.device,
+                complex_spectrogram=slot.complex_spectrogram,
+                normalization_stats=slot.normalization_stats,
             )
             pipeline.model_name = slot.metadata.name
             return pipeline.generate(gen_config)
@@ -676,6 +692,8 @@ class BlendEngine:
             model=first.model,
             spectrogram=first.spectrogram,
             device=first.device,
+            complex_spectrogram=first.complex_spectrogram,
+            normalization_stats=first.normalization_stats,
         )
         model_names = [s.metadata.name for s in active_slots]
         pipeline.model_name = " + ".join(model_names)
@@ -722,6 +740,8 @@ class BlendEngine:
                 model=slot.model,
                 spectrogram=slot.spectrogram,
                 device=slot.device,
+                complex_spectrogram=slot.complex_spectrogram,
+                normalization_stats=slot.normalization_stats,
             )
             pipeline.model_name = slot.metadata.name
             result = pipeline.generate(gen_config)
