@@ -36,19 +36,21 @@ def generate_preview(
     device: "torch.device",
     num_samples: int = 1,
     sample_rate: int = 48_000,
+    complex_spectrogram: "ComplexSpectrogram | None" = None,
+    normalization_stats: dict | None = None,
 ) -> list[Path]:
     """Generate WAV preview files from random latent vectors.
 
     Sets the model to eval mode, generates samples, then restores train mode.
     Each sample is decoded through the VAE decoder and converted to a waveform
-    via spectrogram reconstruction.
+    via ISTFT spectrogram reconstruction.
 
     Parameters
     ----------
     model : torch.nn.Module
         The VAE model (must have ``sample`` or ``decode`` method).
     spectrogram : AudioSpectrogram
-        Spectrogram converter for mel-to-waveform.
+        Spectrogram converter (kept for backward compat).
     output_dir : Path
         Directory to save WAV files (created if needed).
     epoch : int
@@ -59,6 +61,11 @@ def generate_preview(
         Number of preview samples to generate (default 1).
     sample_rate : int
         Output sample rate in Hz (default 48000).
+    complex_spectrogram : ComplexSpectrogram | None
+        2-channel ISTFT spectrogram converter for waveform generation.
+    normalization_stats : dict | None
+        Normalization stats ``{mag_mean, mag_std, if_mean, if_std}`` for
+        denormalization before ISTFT.
 
     Returns
     -------
@@ -79,10 +86,9 @@ def generate_preview(
             # Generate mel spectrograms from random latent vectors
             mel_recon = model.sample(num_samples, device)
 
-            # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-            #   waveforms = spectrogram.mel_to_waveform(mel_recon.cpu())
-            raise NotImplementedError(
-                "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+            # Convert 2-channel spectrogram to waveform via ISTFT
+            waveforms = complex_spectrogram.complex_mel_to_waveform(
+                mel_recon.cpu(), stats=normalization_stats,
             )
 
             # Save each sample as WAV
@@ -122,6 +128,8 @@ def generate_reconstruction_preview(
     epoch: int,
     device: "torch.device",
     sample_rate: int = 48_000,
+    complex_spectrogram: "ComplexSpectrogram | None" = None,
+    normalization_stats: dict | None = None,
 ) -> list[Path]:
     """Generate original vs. reconstruction WAV pairs for quality monitoring.
 
@@ -134,9 +142,9 @@ def generate_reconstruction_preview(
     model : torch.nn.Module
         The VAE model (must have ``forward`` returning ``(recon, mu, logvar)``).
     spectrogram : AudioSpectrogram
-        Spectrogram converter for mel-to-waveform.
+        Spectrogram converter (kept for backward compat).
     sample_batch : torch.Tensor
-        Batch of mel spectrograms ``[B, 1, n_mels, time]``.
+        Batch of mel spectrograms ``[B, 2, n_mels, time]``.
     output_dir : Path
         Directory to save WAV files (created if needed).
     epoch : int
@@ -145,6 +153,11 @@ def generate_reconstruction_preview(
         Device the model is on.
     sample_rate : int
         Output sample rate in Hz (default 48000).
+    complex_spectrogram : ComplexSpectrogram | None
+        2-channel ISTFT spectrogram converter for waveform generation.
+    normalization_stats : dict | None
+        Normalization stats ``{mag_mean, mag_std, if_mean, if_std}`` for
+        denormalization before ISTFT.
 
     Returns
     -------
@@ -167,11 +180,12 @@ def generate_reconstruction_preview(
             sample_batch = sample_batch[:n_items].to(device)
             recon, _mu, _logvar = model(sample_batch)
 
-            # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-            #   orig_waveforms = spectrogram.mel_to_waveform(sample_batch.cpu())
-            #   recon_waveforms = spectrogram.mel_to_waveform(recon.cpu())
-            raise NotImplementedError(
-                "mel_to_waveform removed (v1.0). Phase 16 will wire complex_mel_to_waveform."
+            # Convert 2-channel spectrograms to waveforms via ISTFT
+            orig_waveforms = complex_spectrogram.complex_mel_to_waveform(
+                sample_batch.cpu(), stats=normalization_stats,
+            )
+            recon_waveforms = complex_spectrogram.complex_mel_to_waveform(
+                recon.cpu(), stats=normalization_stats,
             )
 
             for i in range(n_items):

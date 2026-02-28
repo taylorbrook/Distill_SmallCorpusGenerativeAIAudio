@@ -397,7 +397,7 @@ def train(
     """
     import torch  # noqa: WPS433
 
-    from distill.audio.spectrogram import AudioSpectrogram, SpectrogramConfig
+    from distill.audio.spectrogram import AudioSpectrogram, ComplexSpectrogram, SpectrogramConfig
     from distill.models.losses import create_stft_loss, get_kl_weight
     from distill.models.vae import ConvVAE
     from distill.training.checkpoint import (
@@ -428,9 +428,11 @@ def train(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create spectrogram converter
+    # Create spectrogram converters
     spec_config = SpectrogramConfig()
     spectrogram = AudioSpectrogram(spec_config)
+    complex_spec = ComplexSpectrogram(config.complex_spectrogram)
+    complex_spec.to(device)
 
     # Create model
     model = ConvVAE(
@@ -696,6 +698,8 @@ def train(
                     output_dir=preview_dir,
                     epoch=epoch,
                     device=device,
+                    complex_spectrogram=complex_spec,
+                    normalization_stats=norm_stats,
                 )
                 for p in preview_paths:
                     if callback is not None:
@@ -704,10 +708,27 @@ def train(
                             audio_path=str(p),
                             sample_rate=spec_config.sample_rate,
                         ))
+                # Log IF coherence / spectral quality metrics
+                if preview_paths:
+                    try:
+                        import numpy as np
+                        import soundfile as sf
+                        wav_data, sr = sf.read(str(preview_paths[0]))
+                        from distill.controls.features import compute_audio_features
+                        features = compute_audio_features(wav_data.astype(np.float32), sr)
+                        logger.info(
+                            "Preview metrics (epoch %d): spectral_centroid=%.1f, "
+                            "spectral_rolloff=%.1f, rms_energy=%.4f",
+                            epoch,
+                            features.get("spectral_centroid", 0),
+                            features.get("spectral_rolloff", 0),
+                            features.get("rms_energy", 0),
+                        )
+                    except Exception:
+                        pass  # Metrics are nice-to-have, don't fail training
             except Exception:
                 logger.warning(
-                    "Preview generation failed for epoch %d "
-                    "(Phase 16 will wire ISTFT-based preview) -- skipping",
+                    "Preview generation failed for epoch %d",
                     epoch, exc_info=True,
                 )
 
