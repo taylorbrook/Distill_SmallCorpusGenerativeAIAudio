@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 16 of 18 (Encode/Decode Code Visualization)
-Plan: 1 of 2 in current phase
-Status: In Progress
-Last activity: 2026-02-28 -- Completed 16-01-PLAN.md (encode/decode pipeline & code grid renderer)
+Plan: 2 of 2 in current phase (COMPLETE)
+Status: Phase Complete
+Last activity: 2026-02-28 -- Completed 16-02-PLAN.md (codes tab UI & app registration)
 
-Progress: [==================░░] 90% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete, Phase 15 complete, Phase 16: 1/2)
+Progress: [===================░] 95% (v1.0 complete, Phase 12 complete, Phase 13 complete, Phase 14 complete, Phase 15 complete, Phase 16 complete)
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [==================░░] 90% (v1.0 complete, Phase 12 complete, Phas
 | 15 | 02 | 3 min | 2 | 2 |
 | 15 | 03 | 3 min | 2 | 1 |
 | 16 | 01 | 5 min | 2 | 3 |
+| 16 | 02 | 3 min | 2 | 2 |
 
 **Recent Trend:**
 - v1.0 shipped in 3 days across 11 phases
@@ -52,7 +53,7 @@ Progress: [==================░░] 90% (v1.0 complete, Phase 12 complete, Phas
 - v1.1 Phase 13: Complete (3/3 plans, 14 min total)
 - v1.1 Phase 14: Complete (3/3 plans, 11 min total)
 - v1.1 Phase 15: Complete (3/3 plans, 9 min total)
-- v1.1 Phase 16: In progress (1/2 plans)
+- v1.1 Phase 16: Complete (2/2 plans, 8 min total)
 - Trend: Stable
 
 ## Accumulated Context
@@ -109,6 +110,10 @@ Recent decisions affecting current work:
 - 16-01: Luminance-based text color (ITU-R BT.709) for readability on any cell background
 - 16-01: Playhead animation via CSS @keyframes with JS class toggle (no timer-based JS)
 - 16-01: JS dispatch target elem_id #code-grid-cell-clicked for grid click events
+- 16-02: MAX_LEVEL_LABELS=4 covers all supported quantizer configurations (2-4 levels)
+- 16-02: Auto-decode on encode for immediate A/B comparison (no extra Decode click needed)
+- 16-02: Model dropdown scans .distill files with torch.load peek (no library catalog dependency)
+- 16-02: Codes tab placed between Generate and Library in 5-tab layout
 
 ### Pending Todos
 
@@ -118,10 +123,10 @@ None yet.
 
 - Phase 14: RESOLVED -- Transformer prior chosen (nn.TransformerEncoder + causal mask, GPT-style decoder-only)
 - Phase 12: Empirical codebook sizing defaults need validation on actual 5/50/500 file datasets
-- Phase 16: Gradio code grid editor has no established prior art; needs early prototyping
+- Phase 16: RESOLVED -- Interactive code grid with JS bridge, cell/col/row click handlers, and level label editing
 
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 16-01-PLAN.md -- Encode/decode pipeline & code grid renderer. Phase 16: 1/2 plans complete.
+Stopped at: Completed 16-02-PLAN.md -- Codes tab UI & app registration. Phase 16: 2/2 plans complete.
 Resume file: None

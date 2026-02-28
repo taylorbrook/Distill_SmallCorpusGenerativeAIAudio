@@ -34,7 +34,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 - [x] **Phase 13: VQ-VAE Training Pipeline** - Wire VQ-VAE into training loop with codebook health monitoring, model persistence, and training UI/CLI (completed 2026-02-22)
 - [x] **Phase 14: Autoregressive Prior** - Build and train the autoregressive prior model on frozen VQ-VAE code sequences (completed 2026-02-22)
 - [x] **Phase 15: Generation Pipeline** - Wire prior-based generation with sampling controls, multi-chunk stitching, and generate UI/CLI (completed 2026-02-27)
-- [ ] **Phase 16: Encode/Decode + Code Visualization** - Encode audio to codes, decode back, visualize as timeline grid, preview codebook entries
+- [x] **Phase 16: Encode/Decode + Code Visualization** - Encode audio to codes, decode back, visualize as timeline grid, preview codebook entries (completed 2026-02-28)
 - [ ] **Phase 17: Code Editing** - Interactive code manipulation: cell editing, region swapping, embedding blending, undo/redo
 - [ ] **Phase 18: Diagnostics + Library Integration** - Codebook health indicators, usage heatmaps, model library v2 support, CLI encode/decode
 
@@ -109,7 +109,7 @@ Plans:
   2. Quantizer levels are labeled with semantic roles (e.g., Structure / Timbre / Detail) rather than raw level numbers
   3. User can click any codebook entry in the grid to hear a short audio preview of what that code sounds like
   4. User can decode the code grid back to audio and play it back, hearing a reconstruction of the original
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 16-01-PLAN.md -- Backend encode/decode/preview pipeline and interactive HTML code grid renderer
 - [ ] 16-02-PLAN.md -- Codes tab UI assembly with model selector, event wiring, and app registration
@@ -159,7 +159,7 @@ Phases 12-18 execute sequentially, except: Phase 16 can begin after Phase 13 (pa
 | 13. VQ-VAE Training Pipeline | 3/3 | Complete    | 2026-02-22 | - |
 | 14. Autoregressive Prior | 3/3 | Complete    | 2026-02-22 | - |
 | 15. Generation Pipeline | 3/3 | Complete    | 2026-02-27 | - |
-| 16. Encode/Decode + Code Visualization | 1/2 | In Progress|  | - |
+| 16. Encode/Decode + Code Visualization | 2/2 | Complete   | 2026-02-28 | - |
 | 17. Code Editing | v1.1 | 0/0 | Not started | - |
 | 18. Diagnostics + Library Integration | v1.1 | 0/0 | Not started | - |
 
