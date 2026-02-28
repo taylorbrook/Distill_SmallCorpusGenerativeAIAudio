@@ -792,9 +792,25 @@ def train(
     except Exception:
         logger.warning("Final checkpoint management failed", exc_info=True)
 
-    # Latent space analysis: skipped for 2-channel models (handled in Phase 16)
+    # Latent space analysis (user-triggered at end of training)
     analysis_result = None
-    logger.info("Skipping latent space analysis (2-channel mode) -- handled in Phase 16")
+    try:
+        from distill.controls.analyzer import LatentSpaceAnalyzer
+        analyzer = LatentSpaceAnalyzer()
+        analysis_result = analyzer.analyze(
+            model=model,
+            dataloader=train_loader,
+            spectrogram=spectrogram,
+            device=device,
+            complex_spectrogram=complex_spec,
+            normalization_stats=norm_stats,
+        )
+        logger.info(
+            "Latent space analysis complete: %d active components",
+            analysis_result.n_active_components,
+        )
+    except Exception:
+        logger.warning("Latent space analysis failed", exc_info=True)
 
     # Save as .distill model to the library
     saved_model_path = None

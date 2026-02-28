@@ -85,6 +85,20 @@ class AnalysisResult:
 
 
 # ---------------------------------------------------------------------------
+# Musical label mapping for slider controls
+# ---------------------------------------------------------------------------
+
+_MUSICAL_LABELS: dict[str, str] = {
+    "spectral_centroid": "Brightness",
+    "spectral_rolloff": "Rolloff",
+    "spectral_flatness": "Noisiness",
+    "rms_energy": "Loudness",
+    "zero_crossing_rate": "Texture",
+}
+"""Maps audio feature names to musical descriptors for slider labels."""
+
+
+# ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
 
@@ -126,6 +140,8 @@ class LatentSpaceAnalyzer:
         spectrogram: "AudioSpectrogram",
         device: "torch.device",
         n_random_samples: int = 200,
+        complex_spectrogram: "ComplexSpectrogram | None" = None,
+        normalization_stats: dict | None = None,
     ) -> AnalysisResult:
         """Run the full latent space analysis pipeline.
 
@@ -137,14 +153,21 @@ class LatentSpaceAnalyzer:
         model : ConvVAE
             Trained VAE model.
         dataloader : DataLoader
-            DataLoader yielding training data (raw waveforms).
+            DataLoader yielding cached 2-channel spectrograms
+            ``[B, 2, n_mels, time]``.
         spectrogram : AudioSpectrogram
-            Spectrogram converter for mel/waveform conversion.
+            Spectrogram converter for mel shape info.
         device : torch.device
             Device the model is on.
         n_random_samples : int
             Number of random prior samples to add to PCA input
             (default 200).
+        complex_spectrogram : ComplexSpectrogram | None
+            2-channel ISTFT spectrogram converter for waveform generation
+            in feature sweep.
+        normalization_stats : dict | None
+            Normalization stats ``{mag_mean, mag_std, if_mean, if_std}``
+            for denormalization before ISTFT.
 
         Returns
         -------
@@ -169,21 +192,16 @@ class LatentSpaceAnalyzer:
 
             with torch.no_grad():
                 for batch in dataloader:
-                    # Dataloader returns raw waveforms -- convert to mel on device
+                    # v2.0: dataloader yields cached 2-channel spectrograms
+                    # [B, 2, n_mels, time] -- encode directly
                     if isinstance(batch, (list, tuple)):
-                        waveforms = batch[0]
+                        data = batch[0]
                     else:
-                        waveforms = batch
-                    waveforms = waveforms.to(device)
-
-                    # Convert waveforms to mel spectrograms
-                    # Waveforms shape: [B, 1, samples] or [B, samples]
-                    if waveforms.dim() == 2:
-                        waveforms = waveforms.unsqueeze(1)
-                    mel = spectrogram.waveform_to_mel(waveforms)
+                        data = batch
+                    data = data.to(device)
 
                     # Encode to get mu vectors
-                    mu, _logvar = model.encode(mel)
+                    mu, _logvar = model.encode(data)
                     all_mu.append(mu.cpu().numpy())
 
             # Add random prior samples for full coverage
@@ -306,17 +324,18 @@ class LatentSpaceAnalyzer:
                             .to(device)
                         )
 
-                        # Decode to mel, convert to waveform
+                        # Decode to 2-channel spectrogram, convert to waveform via ISTFT
                         mel_out = model.decode(z_tensor, target_shape=mel_shape)
-                        # TODO(Phase 16): Replace with complex_mel_to_waveform ISTFT path
-                        #   wav = spectrogram.mel_to_waveform(mel_out.cpu())
-                        #   wav_np = wav.squeeze().numpy().astype(np.float32)
-                        #   features = compute_audio_features(
-                        #       wav_np, spectrogram.config.sample_rate,
-                        #   )
-                        #   for name in FEATURE_NAMES:
-                        #       sweep_features[name].append(features[name])
-                        pass  # Waveform reconstruction deferred to Phase 16
+                        if complex_spectrogram is not None:
+                            wav = complex_spectrogram.complex_mel_to_waveform(
+                                mel_out.cpu(), stats=normalization_stats,
+                            )
+                            wav_np = wav.squeeze().numpy().astype(np.float32)
+                            features = compute_audio_features(
+                                wav_np, spectrogram.config.sample_rate,
+                            )
+                            for name in FEATURE_NAMES:
+                                sweep_features[name].append(features[name])
 
                     # Compute Pearson correlation for each feature
                     for name in FEATURE_NAMES:
@@ -333,7 +352,7 @@ class LatentSpaceAnalyzer:
             # ---------------------------------------------------------------
             # Step 5: Build labels
             # ---------------------------------------------------------------
-            default_labels = [f"Axis {i + 1}" for i in range(n_active)]
+            default_labels = [f"PC{i + 1}" for i in range(n_active)]
             suggested_labels: list[str] = []
 
             for comp_idx in range(n_active):
@@ -349,7 +368,8 @@ class LatentSpaceAnalyzer:
                         best_abs_r = abs(r)
 
                 if best_feature is not None:
-                    suggested_labels.append(best_feature)
+                    musical = _MUSICAL_LABELS.get(best_feature, best_feature)
+                    suggested_labels.append(f"PC{comp_idx + 1} ({musical})")
                 else:
                     suggested_labels.append(default_labels[comp_idx])
 
