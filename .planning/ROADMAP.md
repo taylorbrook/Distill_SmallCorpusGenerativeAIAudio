@@ -127,7 +127,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 12. Vocoder Interface & BigVGAN Integration | v1.1 | Complete    | 2026-02-22 | 2026-02-22 |
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Generation Pipeline Integration | 2/2 | Complete    | 2026-02-27 | - |
-| 15. UI & CLI Vocoder Controls | v1.1 | 0/TBD | Not started | - |
+| 15. UI & CLI Vocoder Controls | 1/2 | In Progress|  | - |
 | 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | v1.1 | 0/TBD | Not started | - |
 
 ---

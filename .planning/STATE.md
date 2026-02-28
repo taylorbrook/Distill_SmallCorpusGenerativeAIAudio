@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Controllable exploration — users can reliably navigate between sound worlds using musically meaningful parameters
-**Current focus:** Phase 14 — Generation Pipeline Integration
+**Current focus:** Phase 15 — UI & CLI Vocoder Controls
 
 ## Current Position
 
-Phase: 14 of 16 (Generation Pipeline Integration) -- COMPLETE
-Plan: 2 of 2 in current phase -- COMPLETE
-Status: Phase 14 complete, ready for Phase 15
-Last activity: 2026-02-27 — Completed 14-02-PLAN.md (vocoder call site wiring)
+Phase: 15 of 16 (UI & CLI Vocoder Controls)
+Plan: 1 of 2 in current phase -- COMPLETE
+Status: Plan 15-01 complete, ready for Plan 15-02
+Last activity: 2026-02-28 — Completed 15-01-PLAN.md (UI vocoder controls)
 
-Progress: ████████░░░░░░░░░░░░ 40% (v1.1) [2/2 Phase 14 plans complete]
+Progress: ████████░░░░░░░░░░░░ 45% (v1.1) [1/2 Phase 15 plans complete]
 
 ## Performance Metrics
 
@@ -41,6 +41,7 @@ Progress: ████████░░░░░░░░░░░░ 40% (v1.1
 | Phase 13 P02 | 4min | 2 tasks | 8 files |
 | Phase 14 P01 | 4min | 2 tasks | 2 files |
 | Phase 14 P02 | 4min | 3 tasks | 6 files |
+| Phase 15 P01 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,9 @@ Recent decisions affecting current work:
 - [Phase 14]: GenerationConfig.sample_rate default changed from 48000 to 44100 (BigVGAN native)
 - [Phase 14]: Training preview functions require vocoder parameter (no Griffin-Lim fallback) -- intentional hard break
 - [Phase 14]: Preview sample_rate in PreviewEvent derived from vocoder.sample_rate, not spec_config.sample_rate
+- [Phase 15]: Deferred pipeline creation: app_state.pipeline = None at model load, created at generate time with resolved vocoder
+- [Phase 15]: Generator-based _generate_audio: yields intermediate button-disable update during download, then final results
+- [Phase 15]: tqdm_class forwarded through entire vocoder chain for UI/CLI progress customization
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Completed 14-02-PLAN.md (vocoder call site wiring) -- Phase 14 complete
-Resume file: Phase 15 next
+Last session: 2026-02-28
+Stopped at: Completed 15-01-PLAN.md (UI vocoder controls)
+Resume file: 15-02-PLAN.md (CLI vocoder controls)
