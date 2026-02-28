@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: HiFi-GAN Vocoder
 status: unknown
-last_updated: "2026-02-28T22:59:51Z"
+last_updated: "2026-02-28T23:06:57Z"
 progress:
   total_phases: 16
   completed_phases: 15
   total_plans: 48
-  completed_plans: 45
+  completed_plans: 46
 ---
 
 # Project State
@@ -23,11 +23,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 16 of 16 (Per-Model HiFi-GAN Training & Griffin-Lim Removal)
-Plan: 2 of 5 in current phase -- COMPLETE
-Status: Plan 16-02 complete, proceeding to Plan 16-03
-Last activity: 2026-02-28 — Completed 16-02-PLAN.md (Griffin-Lim removal)
+Plan: 3 of 5 in current phase -- COMPLETE
+Status: Plan 16-03 complete, proceeding to Plan 16-04
+Last activity: 2026-02-28 — Completed 16-03-PLAN.md (Training loop & inference)
 
-Progress: █████████░░░░░░░░░░░ 56% (v1.1) [2/5 Phase 16 plans complete]
+Progress: ████████████░░░░░░░░ 64% (v1.1) [3/5 Phase 16 plans complete]
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: █████████░░░░░░░░░░░ 56% (v1.1
 | Phase 15 P02 | 2min | 1 tasks | 1 files |
 | Phase 16 P01 | 4min | 2 tasks | 5 files |
 | Phase 16 P02 | 5min | 2 tasks | 5 files |
+| Phase 16 P03 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,10 @@ Recent decisions affecting current work:
 - [Phase 16]: Tikhonov regularization (alpha=1e-4) for stable filterbank transfer matrix in MelAdapter
 - [Phase 16]: Direct mel-domain filterbank transfer replaces Griffin-Lim waveform round-trip
 - [Phase 16]: Analyzer lazily creates BigVGAN vocoder for sweep reconstruction; vocoder parameter optional for backward compat
+- [Phase 16]: Discriminator LR at 0.5x generator LR to prevent overfitting on small datasets
+- [Phase 16]: Mel loss weight 45 (original HiFi-GAN paper) for strong reconstruction signal
+- [Phase 16]: HiFiGANVocoder undoes log1p via expm1 -- no MelAdapter needed, trained on VAE mel format directly
+- [Phase 16]: Auto-selection prefers per-model HiFi-GAN over BigVGAN when vocoder_state exists; low-epoch warning at <20
 
 ### Pending Todos
 
@@ -109,5 +114,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 16-02-PLAN.md (Griffin-Lim removal)
-Resume file: 16-03-PLAN.md
+Stopped at: Completed 16-03-PLAN.md (Training loop & inference)
+Resume file: 16-04-PLAN.md

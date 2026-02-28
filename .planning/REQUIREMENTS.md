@@ -13,7 +13,7 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 - [x] **VOC-02**: Mel adapter converts VAE's log1p-normalized mels to BigVGAN's log-clamp format
 - [x] **VOC-03**: BigVGAN model downloads automatically on first use with progress indication
 - [x] **VOC-04**: Vocoder inference runs on CUDA, MPS (Apple Silicon), and CPU
-- [ ] **VOC-05**: Vocoder auto-selects best available: per-model HiFi-GAN > BigVGAN universal
+- [x] **VOC-05**: Vocoder auto-selects best available: per-model HiFi-GAN > BigVGAN universal
 - [x] **VOC-06**: BigVGAN source code vendored with version pinning (not pip-installed)
 
 ### Generation Pipeline
@@ -46,9 +46,9 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 
 - [x] **TRAIN-01**: User can train HiFi-GAN V2 vocoder on a model's training audio
 - [x] **TRAIN-02**: Training uses adversarial loss (MPD+MSD discriminators) + mel reconstruction loss + feature matching loss
-- [ ] **TRAIN-03**: Data augmentation applied during training to prevent discriminator overfitting on small datasets
-- [ ] **TRAIN-04**: Trained vocoder weights bundled into .distill model file
-- [ ] **TRAIN-05**: Training supports cancel with checkpoint save and resume
+- [x] **TRAIN-03**: Data augmentation applied during training to prevent discriminator overfitting on small datasets
+- [x] **TRAIN-04**: Trained vocoder weights bundled into .distill model file
+- [x] **TRAIN-05**: Training supports cancel with checkpoint save and resume
 
 ## v1.2 Requirements
 
@@ -87,7 +87,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VOC-02 | Phase 12 | Complete |
 | VOC-03 | Phase 12 | Complete |
 | VOC-04 | Phase 12 | Complete |
-| VOC-05 | Phase 16 | Pending |
+| VOC-05 | Phase 16 | Complete |
 | VOC-06 | Phase 12 | Complete |
 | GEN-01 | Phase 14 | Complete |
 | GEN-02 | Phase 14 | Complete |
@@ -105,9 +105,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-03 | Phase 15 | Complete |
 | TRAIN-01 | Phase 16 | Complete |
 | TRAIN-02 | Phase 16 | Complete |
-| TRAIN-03 | Phase 16 | Pending |
-| TRAIN-04 | Phase 16 | Pending |
-| TRAIN-05 | Phase 16 | Pending |
+| TRAIN-03 | Phase 16 | Complete |
+| TRAIN-04 | Phase 16 | Complete |
+| TRAIN-05 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 25 total

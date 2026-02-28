@@ -134,7 +134,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Model Persistence v2 | 2/2 | Complete    | 2026-02-22 | - |
 | 14. Generation Pipeline Integration | 2/2 | Complete    | 2026-02-27 | - |
 | 15. UI & CLI Vocoder Controls | 2/2 | Complete    | 2026-02-28 | - |
-| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | 2/5 | In Progress|  | - |
+| 16. Per-Model HiFi-GAN Training & Griffin-Lim Removal | 3/5 | In Progress|  | - |
 
 ---
 *Roadmap created: 2026-02-12*
