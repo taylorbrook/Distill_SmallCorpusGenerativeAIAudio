@@ -38,9 +38,9 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 
 ### CLI
 
-- [ ] **CLI-01**: `--vocoder` flag on generate command selects vocoder (auto/bigvgan/hifigan)
+- [x] **CLI-01**: `--vocoder` flag on generate command selects vocoder (auto/bigvgan/hifigan)
 - [ ] **CLI-02**: `train-vocoder` CLI command trains per-model HiFi-GAN vocoder
-- [ ] **CLI-03**: BigVGAN download progress shown via Rich progress bar
+- [x] **CLI-03**: BigVGAN download progress shown via Rich progress bar
 
 ### HiFi-GAN Training
 
@@ -100,9 +100,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-02 | Phase 15 | Complete |
 | UI-03 | Phase 16 | Pending |
 | UI-04 | Phase 16 | Pending |
-| CLI-01 | Phase 15 | Pending |
+| CLI-01 | Phase 15 | Complete |
 | CLI-02 | Phase 16 | Pending |
-| CLI-03 | Phase 15 | Pending |
+| CLI-03 | Phase 15 | Complete |
 | TRAIN-01 | Phase 16 | Pending |
 | TRAIN-02 | Phase 16 | Pending |
 | TRAIN-03 | Phase 16 | Pending |

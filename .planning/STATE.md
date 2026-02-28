@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 15 of 16 (UI & CLI Vocoder Controls)
-Plan: 1 of 2 in current phase -- COMPLETE
-Status: Plan 15-01 complete, ready for Plan 15-02
-Last activity: 2026-02-28 — Completed 15-01-PLAN.md (UI vocoder controls)
+Phase: 15 of 16 (UI & CLI Vocoder Controls) -- COMPLETE
+Plan: 2 of 2 in current phase -- COMPLETE
+Status: Phase 15 complete, ready for Phase 16
+Last activity: 2026-02-28 — Completed 15-02-PLAN.md (CLI vocoder controls)
 
-Progress: ████████░░░░░░░░░░░░ 45% (v1.1) [1/2 Phase 15 plans complete]
+Progress: █████████░░░░░░░░░░░ 50% (v1.1) [2/2 Phase 15 plans complete]
 
 ## Performance Metrics
 
@@ -42,6 +42,7 @@ Progress: ████████░░░░░░░░░░░░ 45% (v1.1
 | Phase 14 P01 | 4min | 2 tasks | 2 files |
 | Phase 14 P02 | 4min | 3 tasks | 6 files |
 | Phase 15 P01 | 5min | 2 tasks | 5 files |
+| Phase 15 P02 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - [Phase 15]: Deferred pipeline creation: app_state.pipeline = None at model load, created at generate time with resolved vocoder
 - [Phase 15]: Generator-based _generate_audio: yields intermediate button-disable update during download, then final results
 - [Phase 15]: tqdm_class forwarded through entire vocoder chain for UI/CLI progress customization
+- [Phase 15]: Blend mode vocoder resolution for status/JSON only; BlendEngine manages its own vocoder internally
+- [Phase 15]: Rich progress disabled in JSON output mode to avoid polluting machine-readable output
+- [Phase 15]: TqdmExperimentalWarning suppressed via warnings.filterwarnings for clean CLI output
 
 ### Pending Todos
 
@@ -85,5 +89,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 15-01-PLAN.md (UI vocoder controls)
-Resume file: 15-02-PLAN.md (CLI vocoder controls)
+Stopped at: Completed 15-02-PLAN.md (CLI vocoder controls)
+Resume file: Phase 16 planning
