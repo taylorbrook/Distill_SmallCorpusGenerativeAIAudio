@@ -126,6 +126,7 @@ class LatentSpaceAnalyzer:
         spectrogram: "AudioSpectrogram",
         device: "torch.device",
         n_random_samples: int = 200,
+        vocoder: "VocoderBase | None" = None,
     ) -> AnalysisResult:
         """Run the full latent space analysis pipeline.
 
@@ -145,6 +146,10 @@ class LatentSpaceAnalyzer:
         n_random_samples : int
             Number of random prior samples to add to PCA input
             (default 200).
+        vocoder : VocoderBase | None
+            Vocoder for mel-to-waveform conversion during feature
+            correlation sweeps.  If ``None``, a BigVGAN vocoder is
+            created lazily.
 
         Returns
         -------
@@ -261,6 +266,13 @@ class LatentSpaceAnalyzer:
                 compute_audio_features,
             )
 
+            # Lazy-initialize vocoder for mel-to-waveform conversion
+            if vocoder is None:
+                from distill.vocoder import get_vocoder
+
+                vocoder = get_vocoder("bigvgan", device="cpu")
+                logger.info("Analyzer: lazily created BigVGAN vocoder for sweep")
+
             mel_shape = spectrogram.get_mel_shape(spectrogram.config.sample_rate)
 
             # Ensure decoder is initialised
@@ -306,14 +318,14 @@ class LatentSpaceAnalyzer:
                             .to(device)
                         )
 
-                        # Decode to mel, convert to waveform
+                        # Decode to mel, convert to waveform via neural vocoder
                         mel_out = model.decode(z_tensor, target_shape=mel_shape)
-                        wav = spectrogram.mel_to_waveform(mel_out.cpu())
+                        wav = vocoder.mel_to_waveform(mel_out.cpu())
                         wav_np = wav.squeeze().numpy().astype(np.float32)
 
-                        # Compute audio features
+                        # Compute audio features at vocoder's native sample rate
                         features = compute_audio_features(
-                            wav_np, spectrogram.config.sample_rate,
+                            wav_np, vocoder.sample_rate,
                         )
                         for name in FEATURE_NAMES:
                             sweep_features[name].append(features[name])
