@@ -115,8 +115,8 @@ class BigVGANVocoder(VocoderBase):
         """Convert mel spectrogram to waveform.
 
         Accepts VAE-format mel spectrograms [B, 1, 128, T] in log1p format.
-        Internally converts to BigVGAN format via MelAdapter (waveform
-        round-trip: Griffin-Lim -> resample -> BigVGAN mel computation).
+        Internally converts to BigVGAN format via MelAdapter (direct
+        mel-domain filterbank transfer).
 
         Parameters
         ----------
