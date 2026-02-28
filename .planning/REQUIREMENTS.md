@@ -21,7 +21,7 @@ Requirements for the HiFi-GAN vocoder milestone. Each maps to roadmap phases.
 - [x] **GEN-01**: All generation paths (single chunk, crossfade, latent interpolation, preview, reconstruction) use neural vocoder
 - [x] **GEN-02**: BigVGAN's 44.1kHz output resampled to 48kHz transparently
 - [x] **GEN-03**: Export pipeline (WAV/MP3/FLAC/OGG), metadata, and spatial audio work unchanged with vocoder output
-- [ ] **GEN-04**: Griffin-Lim reconstruction code fully removed
+- [x] **GEN-04**: Griffin-Lim reconstruction code fully removed
 
 ### Model Persistence
 
@@ -92,7 +92,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-01 | Phase 14 | Complete |
 | GEN-02 | Phase 14 | Complete |
 | GEN-03 | Phase 14 | Complete |
-| GEN-04 | Phase 16 | Pending |
+| GEN-04 | Phase 16 | Complete |
 | PERS-01 | Phase 13 | Complete |
 | PERS-02 | Phase 13 | Dropped |
 | PERS-03 | Phase 13 | Complete |

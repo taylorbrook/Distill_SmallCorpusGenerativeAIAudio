@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: HiFi-GAN Vocoder
 status: unknown
-last_updated: "2026-02-28T22:59:05.951Z"
+last_updated: "2026-02-28T22:59:51Z"
 progress:
   total_phases: 16
   completed_phases: 15
   total_plans: 48
-  completed_plans: 44
+  completed_plans: 45
 ---
 
 # Project State
@@ -23,11 +23,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 16 of 16 (Per-Model HiFi-GAN Training & Griffin-Lim Removal)
-Plan: 1 of 5 in current phase -- COMPLETE
-Status: Plan 16-01 complete, proceeding to Plan 16-02
-Last activity: 2026-02-28 — Completed 16-01-PLAN.md (HiFi-GAN V2 architecture)
+Plan: 2 of 5 in current phase -- COMPLETE
+Status: Plan 16-02 complete, proceeding to Plan 16-03
+Last activity: 2026-02-28 — Completed 16-02-PLAN.md (Griffin-Lim removal)
 
-Progress: █████████░░░░░░░░░░░ 53% (v1.1) [1/5 Phase 16 plans complete]
+Progress: █████████░░░░░░░░░░░ 56% (v1.1) [2/5 Phase 16 plans complete]
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: █████████░░░░░░░░░░░ 53% (v1.1
 | Phase 15 P01 | 5min | 2 tasks | 5 files |
 | Phase 15 P02 | 2min | 1 tasks | 1 files |
 | Phase 16 P01 | 4min | 2 tasks | 5 files |
+| Phase 16 P02 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,9 @@ Recent decisions affecting current work:
 - [Phase 15]: TqdmExperimentalWarning suppressed via warnings.filterwarnings for clean CLI output
 - [Phase 16]: Upsample rates [8,8,4,2] (product=512) to match project hop_size; config validates at construction
 - [Phase 16]: Loss functions as pure functions with torch.tensor(0.0, device=...) initialization for proper device/grad tracking
+- [Phase 16]: Tikhonov regularization (alpha=1e-4) for stable filterbank transfer matrix in MelAdapter
+- [Phase 16]: Direct mel-domain filterbank transfer replaces Griffin-Lim waveform round-trip
+- [Phase 16]: Analyzer lazily creates BigVGAN vocoder for sweep reconstruction; vocoder parameter optional for backward compat
 
 ### Pending Todos
 
@@ -105,5 +109,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 16-01-PLAN.md (HiFi-GAN V2 architecture)
-Resume file: 16-02-PLAN.md
+Stopped at: Completed 16-02-PLAN.md (Griffin-Lim removal)
+Resume file: 16-03-PLAN.md
