@@ -89,7 +89,10 @@ Plans:
   2. When BigVGAN downloads for the first time, the UI shows download progress (not a frozen interface)
   3. Running the CLI generate command with `--vocoder bigvgan` or `--vocoder auto` selects the specified vocoder
   4. BigVGAN download progress appears as a Rich progress bar in the CLI terminal
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 15-01-PLAN.md — Core vocoder resolution + UI Vocoder Settings accordion
+- [ ] 15-02-PLAN.md — CLI --vocoder flag, Rich progress, and JSON vocoder field
 
 ### Phase 16: Per-Model HiFi-GAN Training & Griffin-Lim Removal
 **Goal**: Users who want maximum fidelity can train a small per-model HiFi-GAN V2 vocoder on their specific audio, the system auto-selects the best available vocoder, and the legacy Griffin-Lim path is fully removed
