@@ -375,16 +375,21 @@ def build_train_tab() -> dict:
     )
 
     def _cancel_training() -> list:
-        """Cancel training and deactivate timer."""
+        """Request cancellation; the timer keeps polling until the run ends.
+
+        The training thread still saves a checkpoint and (after at least
+        one epoch) runs the latent analysis and saves the model, so Start
+        stays disabled until ``_poll_training`` sees the completion event.
+        """
         if app_state.training_runner is not None:
             app_state.training_runner.cancel()
-        app_state.training_active = False
+        app_state.metrics_buffer["cancelled"] = True
 
         return [
-            gr.Timer(active=False),         # timer
-            gr.update(interactive=True),    # start_btn
+            gr.update(),                    # timer (keep polling)
+            gr.update(interactive=False),   # start_btn
             gr.update(interactive=False),   # cancel_btn
-            "Training cancelled.",          # stats_md
+            "Cancelling -- saving checkpoint and model...",  # stats_md
         ]
 
     cancel_btn.click(
@@ -532,6 +537,9 @@ def build_train_tab() -> dict:
             )
         else:
             stats = "Waiting for first epoch..."
+        cancelled = buf.get("cancelled", False)
+        if cancelled and not is_complete:
+            stats = "Cancelling -- saving checkpoint and model..."
 
         # Build preview audio updates
         audio_updates = []
@@ -560,6 +568,10 @@ def build_train_tab() -> dict:
                 )
             else:
                 stats = "Training complete."
+            if cancelled:
+                stats = stats.replace("**Training complete!**", "**Training cancelled.**")
+                if not epoch_metrics:
+                    stats = "Training cancelled before the first epoch finished."
             app_state.training_active = False
 
             # Refresh model library catalog so Library tab sees the new model

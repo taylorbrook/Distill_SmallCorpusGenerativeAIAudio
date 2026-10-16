@@ -125,7 +125,7 @@ class LatentSpaceAnalyzer:
         dataloader: "DataLoader",
         spectrogram: "AudioSpectrogram",
         device: "torch.device",
-        n_random_samples: int = 200,
+        n_random_samples: int = 0,
     ) -> AnalysisResult:
         """Run the full latent space analysis pipeline.
 
@@ -144,7 +144,11 @@ class LatentSpaceAnalyzer:
             Device the model is on.
         n_random_samples : int
             Number of random prior samples to add to PCA input
-            (default 200).
+            (default 0).  Prior samples are isotropic N(0, I) noise; with
+            a small KL weight they carry far more variance than the
+            training encodings and swamp the data's principal axes, so
+            they are only mixed in when explicitly requested or when
+            fewer than two training vectors are available.
 
         Returns
         -------
@@ -186,25 +190,30 @@ class LatentSpaceAnalyzer:
                     mu, _logvar = model.encode(mel)
                     all_mu.append(mu.cpu().numpy())
 
-            # Add random prior samples for full coverage
             latent_dim = model.latent_dim
+            if all_mu:
+                training_mu = np.concatenate(all_mu, axis=0)
+            else:
+                training_mu = np.zeros((0, latent_dim), dtype=np.float32)
+
+            # PCA needs at least two vectors; fall back to prior samples
+            # only when the training data cannot support it on its own.
+            if len(training_mu) < 2 and n_random_samples < 2:
+                logger.warning(
+                    "Only %d training vector(s) encoded; adding prior "
+                    "samples so PCA can run",
+                    len(training_mu),
+                )
+                n_random_samples = 200
             prior_samples = np.random.randn(n_random_samples, latent_dim).astype(
                 np.float32,
             )
-
-            if all_mu:
-                training_mu = np.concatenate(all_mu, axis=0)
-                mu_vectors = np.concatenate(
-                    [training_mu, prior_samples], axis=0,
-                )
-            else:
-                logger.warning("No training data encoded, using prior samples only")
-                mu_vectors = prior_samples
+            mu_vectors = np.concatenate([training_mu, prior_samples], axis=0)
 
             logger.info(
                 "Collected %d latent vectors (%d training + %d prior)",
                 len(mu_vectors),
-                len(mu_vectors) - n_random_samples,
+                len(training_mu),
                 n_random_samples,
             )
 

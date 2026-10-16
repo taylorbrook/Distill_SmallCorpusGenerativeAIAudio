@@ -22,6 +22,8 @@ import json
 import logging
 from pathlib import Path
 
+from distill.storage import safe_torch_load
+
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_VERSION = 1
@@ -165,10 +167,8 @@ def load_checkpoint(
     ValueError
         If the checkpoint version is unsupported.
     """
-    import torch  # noqa: WPS433 -- lazy import
-
     path = Path(path)
-    checkpoint = torch.load(path, map_location=device, weights_only=False)
+    checkpoint = safe_torch_load(path, map_location=device)
 
     # Version compatibility check
     ckpt_version = checkpoint.get("version", 0)

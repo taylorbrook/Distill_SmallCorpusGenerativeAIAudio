@@ -33,9 +33,11 @@ if TYPE_CHECKING:
     import torch
     from torch.utils.data import DataLoader
 
-    from distill.audio.spectrogram import AudioSpectrogram
+    from distill.audio.spectrogram import AudioSpectrogram, SpectrogramConfig
+    from distill.controls.analyzer import AnalysisResult
+    from distill.models.persistence import ModelMetadata
     from distill.training.config import TrainingConfig
-    from distill.training.metrics import MetricsCallback
+    from distill.training.metrics import MetricsCallback, MetricsHistory
 
 logger = logging.getLogger(__name__)
 
@@ -314,14 +316,26 @@ def train(
     callback:
         Optional metrics event subscriber.
     cancel_event:
-        If set, training stops and saves a checkpoint.
+        If set, training stops and saves a checkpoint.  If at least one
+        epoch has completed, the run is finalised like a normal one
+        (latent analysis + library save) so the work is not lost.
     resume_checkpoint:
         Path to a ``.pt`` checkpoint file to resume from.
+    models_dir:
+        If given, the finished model (with its latent analysis) is saved
+        to this library directory as a ``.distill`` file.
+    dataset_name, model_name:
+        Used for the saved model's metadata.
 
     Returns
     -------
     dict
-        ``{model, metrics_history, output_dir, best_checkpoint_path}``.
+        ``{model, metrics_history, output_dir, best_checkpoint_path,
+        final_checkpoint_path, analysis, saved_model_path,
+        model_metadata}``.  ``final_checkpoint_path`` is the checkpoint
+        holding the returned weights *and* their latent analysis;
+        ``saved_model_path`` / ``model_metadata`` are ``None`` when no
+        library save happened.
     """
     import torch  # noqa: WPS433
 
@@ -329,10 +343,8 @@ def train(
     from distill.models.losses import get_kl_weight
     from distill.models.vae import ConvVAE
     from distill.training.checkpoint import (
-        get_best_checkpoint,
         load_checkpoint,
         manage_checkpoints,
-        save_checkpoint,
     )
     from distill.training.config import get_effective_preview_interval
     from distill.training.dataset import create_data_loaders
@@ -340,7 +352,6 @@ def train(
         EpochMetrics,
         MetricsHistory,
         PreviewEvent,
-        TrainingCompleteEvent,
     )
     from distill.training.preview import generate_preview
 
@@ -465,6 +476,25 @@ def train(
     effective_preview_interval = get_effective_preview_interval(config)
     train_start_time = time.time()
 
+    # Shared arguments for _finalize_run (completion and cancellation)
+    finalize_kwargs = {
+        "model": model,
+        "optimizer": optimizer,
+        "scheduler": scheduler,
+        "config": config,
+        "spec_config": spec_config,
+        "spectrogram": spectrogram,
+        "metrics_history": metrics_history,
+        "checkpoint_dir": checkpoint_dir,
+        "output_dir": output_dir,
+        "file_paths": file_paths,
+        "device": device,
+        "models_dir": models_dir,
+        "dataset_name": dataset_name,
+        "model_name": model_name,
+        "callback": callback,
+    }
+
     for epoch in range(start_epoch, config.max_epochs):
         epoch_start = time.time()
         print(f"[TRAIN] Starting epoch {epoch + 1}/{config.max_epochs}", flush=True)
@@ -493,27 +523,17 @@ def train(
         # Check cancellation after train epoch
         if cancel_event is not None and cancel_event.is_set():
             logger.info("Cancel detected after train epoch %d, saving checkpoint", epoch)
-            _save_checkpoint_safe(
-                checkpoint_dir, model, optimizer, scheduler, epoch, 0,
-                train_results["train_loss"], float("inf"), kl_weight,
-                config, spec_config, metrics_history,
+            return _finalize_run(
+                **finalize_kwargs,
+                final_epoch=epoch,
+                final_train=train_results["train_loss"],
+                final_val=float("inf"),
+                final_kl=kl_weight,
+                epochs_completed=epoch + 1,
+                total_time_s=time.time() - train_start_time,
+                # Only keep a cancelled run if it got through an epoch
+                run_analysis=bool(metrics_history.epoch_metrics),
             )
-            if callback is not None:
-                elapsed = time.time() - train_start_time
-                callback(TrainingCompleteEvent(
-                    total_epochs=epoch + 1,
-                    total_time_s=elapsed,
-                    final_train_loss=train_results["train_loss"],
-                    final_val_loss=float("inf"),
-                    best_val_loss=_get_best_val_loss(metrics_history),
-                    best_epoch=metrics_history.get_best_epoch(),
-                ))
-            return {
-                "model": model,
-                "metrics_history": metrics_history,
-                "output_dir": output_dir,
-                "best_checkpoint_path": get_best_checkpoint(checkpoint_dir),
-            }
 
         # Validate epoch
         val_results = validate_epoch(
@@ -615,32 +635,19 @@ def train(
         # Cancel check at end of epoch
         if cancel_event is not None and cancel_event.is_set():
             logger.info("Cancel detected at end of epoch %d, saving checkpoint", epoch)
-            _save_checkpoint_safe(
-                checkpoint_dir, model, optimizer, scheduler, epoch, 0,
-                t_loss, v_loss, kl_weight, config, spec_config, metrics_history,
+            return _finalize_run(
+                **finalize_kwargs,
+                final_epoch=epoch,
+                final_train=t_loss,
+                final_val=v_loss,
+                final_kl=kl_weight,
+                epochs_completed=epoch + 1,
+                total_time_s=elapsed,
             )
-            if callback is not None:
-                callback(TrainingCompleteEvent(
-                    total_epochs=epoch + 1,
-                    total_time_s=elapsed,
-                    final_train_loss=t_loss,
-                    final_val_loss=v_loss,
-                    best_val_loss=_get_best_val_loss(metrics_history),
-                    best_epoch=metrics_history.get_best_epoch(),
-                ))
-            return {
-                "model": model,
-                "metrics_history": metrics_history,
-                "output_dir": output_dir,
-                "best_checkpoint_path": get_best_checkpoint(checkpoint_dir),
-            }
 
     # -----------------------------------------------------------------
     # Finalize
     # -----------------------------------------------------------------
-    elapsed = time.time() - train_start_time
-
-    # Save final checkpoint
     final_epoch = config.max_epochs - 1
     final_train = metrics_history.epoch_metrics[-1].train_loss if metrics_history.epoch_metrics else 0.0
     final_val = metrics_history.epoch_metrics[-1].val_loss if metrics_history.epoch_metrics else 0.0
@@ -649,22 +656,140 @@ def train(
         kl_weight_max=config.kl_weight_max,
     )
 
-    _save_checkpoint_safe(
+    result = _finalize_run(
+        **finalize_kwargs,
+        final_epoch=final_epoch,
+        final_train=final_train,
+        final_val=final_val,
+        final_kl=final_kl,
+        epochs_completed=config.max_epochs,
+        total_time_s=time.time() - train_start_time,
+    )
+    logger.info(
+        "Training complete: %d epochs (best val_loss=%.4f at epoch %d)",
+        config.max_epochs,
+        _get_best_val_loss(metrics_history),
+        metrics_history.get_best_epoch(),
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _finalize_run(
+    *,
+    model: "torch.nn.Module",
+    optimizer: "torch.optim.Optimizer",
+    scheduler: "torch.optim.lr_scheduler.LRScheduler",
+    config: "TrainingConfig",
+    spec_config: "SpectrogramConfig",
+    spectrogram: "AudioSpectrogram",
+    metrics_history: "MetricsHistory",
+    checkpoint_dir: Path,
+    output_dir: Path,
+    file_paths: list[Path],
+    device: "torch.device",
+    models_dir: "Path | None",
+    dataset_name: str,
+    model_name: str,
+    callback: "MetricsCallback | None",
+    final_epoch: int,
+    final_train: float,
+    final_val: float,
+    final_kl: float,
+    epochs_completed: int,
+    total_time_s: float,
+    run_analysis: bool = True,
+) -> dict:
+    """Save the final checkpoint, analyse, save to the library, and report.
+
+    Shared by normal completion and cancellation so both leave behind the
+    same artefacts: a checkpoint whose ``latent_analysis`` was computed on
+    the weights it holds, and (when ``models_dir`` is set) a ``.distill``
+    model built from those same weights.
+    """
+    from distill.training.checkpoint import get_best_checkpoint, manage_checkpoints
+    from distill.training.metrics import TrainingCompleteEvent
+
+    ckpt_args = (
         checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
         final_train, final_val, final_kl, config, spec_config, metrics_history,
     )
+    _save_checkpoint_safe(*ckpt_args)
     try:
         manage_checkpoints(checkpoint_dir, max_recent=config.max_checkpoints)
     except Exception:
         logger.warning("Final checkpoint management failed", exc_info=True)
 
-    # Run latent space analysis
     analysis_result = None
+    saved_model_path = None
+    saved_metadata = None
+    if run_analysis:
+        analysis_result = _run_latent_analysis(
+            model, file_paths, config, spectrogram, device,
+        )
+        if analysis_result is not None:
+            from distill.controls.serialization import analysis_to_dict
+
+            # Re-save the final checkpoint WITH analysis included
+            _save_checkpoint_safe(
+                *ckpt_args, latent_analysis=analysis_to_dict(analysis_result),
+            )
+
+        if models_dir is not None:
+            saved_model_path, saved_metadata = _save_to_library(
+                model=model,
+                config=config,
+                spec_config=spec_config,
+                analysis=analysis_result,
+                models_dir=models_dir,
+                name=model_name or dataset_name or "Untitled Model",
+                dataset_name=dataset_name,
+                file_count=len(file_paths),
+                epochs_completed=epochs_completed,
+                final_train=final_train,
+                final_val=final_val,
+            )
+
+    if callback is not None:
+        callback(TrainingCompleteEvent(
+            total_epochs=epochs_completed,
+            total_time_s=total_time_s,
+            final_train_loss=final_train,
+            final_val_loss=final_val,
+            best_val_loss=_get_best_val_loss(metrics_history),
+            best_epoch=metrics_history.get_best_epoch(),
+        ))
+
+    final_ckpt = checkpoint_dir / f"checkpoint_epoch{final_epoch:04d}.pt"
+    return {
+        "model": model,
+        "metrics_history": metrics_history,
+        "output_dir": output_dir,
+        "best_checkpoint_path": get_best_checkpoint(checkpoint_dir),
+        "final_checkpoint_path": final_ckpt if final_ckpt.exists() else None,
+        "analysis": analysis_result,
+        "saved_model_path": saved_model_path,
+        "model_metadata": saved_metadata,
+    }
+
+
+def _run_latent_analysis(
+    model: "torch.nn.Module",
+    file_paths: list[Path],
+    config: "TrainingConfig",
+    spectrogram: "AudioSpectrogram",
+    device: "torch.device",
+) -> "AnalysisResult | None":
+    """Run PCA latent analysis over all files; ``None`` on failure."""
     try:
-        from distill.controls.analyzer import LatentSpaceAnalyzer
-        from distill.controls.serialization import analysis_to_dict
-        from distill.training.dataset import AudioTrainingDataset
         from torch.utils.data import DataLoader as TorchDataLoader
+
+        from distill.controls.analyzer import LatentSpaceAnalyzer
+        from distill.training.dataset import AudioTrainingDataset
 
         logger.info("Running latent space analysis...")
         analyzer = LatentSpaceAnalyzer()
@@ -693,80 +818,55 @@ def train(
             analysis_result.n_active_components,
             sum(analysis_result.explained_variance_ratio) * 100,
         )
-
-        # Re-save the final checkpoint WITH analysis included
-        analysis_dict = analysis_to_dict(analysis_result)
-        _save_checkpoint_safe(
-            checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
-            final_train, final_val, final_kl, config, spec_config, metrics_history,
-            latent_analysis=analysis_dict,
-        )
+        return analysis_result
     except Exception:
         logger.warning("Latent space analysis failed -- model saved without analysis", exc_info=True)
+        return None
 
-    # Save as .distill model to the library
-    saved_model_path = None
-    if models_dir is not None:
-        try:
-            from distill.models.persistence import ModelMetadata, save_model
 
-            metadata = ModelMetadata(
-                name=model_name or dataset_name or "Untitled Model",
-                dataset_name=dataset_name,
-                dataset_file_count=len(file_paths),
-                training_epochs=config.max_epochs,
-                final_train_loss=final_train,
-                final_val_loss=final_val,
-                has_analysis=analysis_result is not None,
-                n_active_components=(
-                    analysis_result.n_active_components
-                    if analysis_result is not None else 0
-                ),
-            )
-            saved_model_path = save_model(
-                model=model,
-                spectrogram_config=asdict(spec_config),
-                training_config=asdict(config),
-                metadata=metadata,
-                models_dir=models_dir,
-                analysis=analysis_result,
-            )
-            print(f"[TRAIN] Model saved to library: {saved_model_path}", flush=True)
-        except Exception as exc:
-            print(f"[TRAIN] Failed to save model to library: {exc}", flush=True)
-            logger.warning("Failed to save model to library", exc_info=True)
+def _save_to_library(
+    *,
+    model: "torch.nn.Module",
+    config: "TrainingConfig",
+    spec_config: "SpectrogramConfig",
+    analysis: "AnalysisResult | None",
+    models_dir: Path,
+    name: str,
+    dataset_name: str,
+    file_count: int,
+    epochs_completed: int,
+    final_train: float,
+    final_val: float,
+) -> "tuple[Path | None, ModelMetadata | None]":
+    """Save the model as a ``.distill`` file; ``(None, None)`` on failure."""
+    from datetime import datetime, timezone
 
-    # Emit completion event
-    if callback is not None:
-        callback(TrainingCompleteEvent(
-            total_epochs=config.max_epochs,
-            total_time_s=elapsed,
+    try:
+        from distill.models.persistence import ModelMetadata, save_model
+
+        metadata = ModelMetadata(
+            name=name,
+            dataset_name=dataset_name,
+            dataset_file_count=file_count,
+            training_date=datetime.now(timezone.utc).isoformat(),
+            training_epochs=epochs_completed,
             final_train_loss=final_train,
             final_val_loss=final_val,
-            best_val_loss=_get_best_val_loss(metrics_history),
-            best_epoch=metrics_history.get_best_epoch(),
-        ))
-
-    best_ckpt = get_best_checkpoint(checkpoint_dir)
-    logger.info(
-        "Training complete: %d epochs in %.1fs (best val_loss=%.4f at epoch %d)",
-        config.max_epochs, elapsed,
-        _get_best_val_loss(metrics_history),
-        metrics_history.get_best_epoch(),
-    )
-
-    return {
-        "model": model,
-        "metrics_history": metrics_history,
-        "output_dir": output_dir,
-        "best_checkpoint_path": best_ckpt,
-        "analysis": analysis_result,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+        )
+        saved_model_path = save_model(
+            model=model,
+            spectrogram_config=asdict(spec_config),
+            training_config=asdict(config),
+            metadata=metadata,
+            models_dir=models_dir,
+            analysis=analysis,
+        )
+        print(f"[TRAIN] Model saved to library: {saved_model_path}", flush=True)
+        return saved_model_path, metadata
+    except Exception as exc:
+        print(f"[TRAIN] Failed to save model to library: {exc}", flush=True)
+        logger.warning("Failed to save model to library", exc_info=True)
+        return None, None
 
 
 def _save_checkpoint_safe(

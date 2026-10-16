@@ -304,6 +304,8 @@ def export_flac(
 # OGG Vorbis export (soundfile)
 # ---------------------------------------------------------------------------
 
+_OGG_WRITE_BLOCK_FRAMES = 48_000
+
 
 def export_ogg(
     audio: "np.ndarray",
@@ -341,13 +343,15 @@ def export_ogg(
         audio_data = audio_data.T  # [channels, samples] -> [samples, channels]
 
     path = Path(path)
-    sf.write(
-        str(path),
-        audio_data,
-        sample_rate,
-        format="OGG",
-        subtype="VORBIS",
-    )
+    channels = 1 if audio_data.ndim == 1 else audio_data.shape[1]
+    # Write in blocks: libsndfile 1.2.2 segfaults when a single Vorbis
+    # write reaches 2**21 frames (~43.7 s at 48 kHz).
+    with sf.SoundFile(
+        str(path), "w", samplerate=sample_rate, channels=channels,
+        format="OGG", subtype="VORBIS",
+    ) as f:
+        for start in range(0, len(audio_data), _OGG_WRITE_BLOCK_FRAMES):
+            f.write(audio_data[start:start + _OGG_WRITE_BLOCK_FRAMES])
 
     return path
 

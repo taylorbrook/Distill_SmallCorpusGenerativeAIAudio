@@ -229,7 +229,8 @@ def _save_model_handler(name: str, description: str, tags_str: str) -> tuple:
     """Save the most recently trained model to the library.
 
     Requires that training has completed (``app_state.training_runner.result``
-    contains a ``best_checkpoint_path``).
+    contains a ``final_checkpoint_path`` -- the checkpoint whose latent
+    analysis matches its weights).
 
     Returns
     -------
@@ -246,7 +247,13 @@ def _save_model_handler(name: str, description: str, tags_str: str) -> tuple:
         result = _refresh_library("")
         return (*result[:5], "No training result available. Train a model first.")
 
-    checkpoint_path = runner.result.get("best_checkpoint_path")
+    # The final checkpoint carries the latent analysis (slider mapping)
+    # computed on its own weights; the best-val-loss checkpoint usually
+    # has no analysis, which would produce a model without sliders.
+    checkpoint_path = (
+        runner.result.get("final_checkpoint_path")
+        or runner.result.get("best_checkpoint_path")
+    )
     if checkpoint_path is None:
         result = _refresh_library("")
         return (*result[:5], "No checkpoint found from training.")

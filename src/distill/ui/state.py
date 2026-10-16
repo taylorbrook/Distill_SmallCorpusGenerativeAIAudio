@@ -110,4 +110,5 @@ def reset_metrics_buffer() -> None:
         "epoch_metrics": [],
         "previews": [],
         "complete": False,
+        "cancelled": False,
     })

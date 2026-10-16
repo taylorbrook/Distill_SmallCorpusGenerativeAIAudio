@@ -85,6 +85,17 @@ def _quality_badge_markdown(quality: dict) -> str:
     return f"**Quality:** {icon} {rating.upper()} -- SNR {snr_str} dB | {reason}"
 
 
+def _to_gradio_audio(sample_rate: int, audio):
+    """Convert pipeline audio to the ``(sample_rate, ndarray)`` gr.Audio wants.
+
+    The pipeline produces ``[samples]`` (mono) or ``[channels, samples]``
+    (stereo/binaural); gr.Audio expects ``[samples, channels]``.
+    """
+    if audio.ndim == 2:
+        audio = audio.T
+    return (sample_rate, audio)
+
+
 # ---------------------------------------------------------------------------
 # Handler functions
 # ---------------------------------------------------------------------------
@@ -292,7 +303,7 @@ def _generate_audio(*args):
 
     # Return audio as (sample_rate, ndarray) tuple for gr.Audio
     return (
-        (result.sample_rate, result.audio),
+        _to_gradio_audio(result.sample_rate, result.audio),
         badge,
         gr.update(visible=True),
         gallery_items,

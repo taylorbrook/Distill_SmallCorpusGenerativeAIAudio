@@ -190,13 +190,16 @@ from distill.cli.ui import app as ui_app
 
 app.add_typer(ui_app, name="ui", help="Launch the Gradio web UI")
 
-from distill.cli.generate import app as generate_app
+# ``generate`` and ``train`` take a positional argument, so they are
+# registered as plain commands: as sub-Typer callbacks Click treats them as
+# groups and rejects options placed after the positional argument.
+from distill.cli.generate import generate as generate_cmd
 
-app.add_typer(generate_app, name="generate", help="Generate audio from trained models")
+app.command("generate", help="Generate audio from trained models")(generate_cmd)
 
-from distill.cli.train import app as train_app
+from distill.cli.train import train_cmd
 
-app.add_typer(train_app, name="train", help="Train models on audio datasets")
+app.command("train", help="Train models on audio datasets")(train_cmd)
 
 from distill.cli.model import app as model_app
 

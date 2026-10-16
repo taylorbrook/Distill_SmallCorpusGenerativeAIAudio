@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
+from distill.storage import dataclass_from_dict
+
 # ---------------------------------------------------------------------------
 # Event Dataclasses
 # ---------------------------------------------------------------------------
@@ -345,7 +347,7 @@ class MetricsHistory:
         """
         history = cls()
         for d in data.get("step_metrics", []):
-            history.add_step(StepMetrics(**d))
+            history.add_step(dataclass_from_dict(StepMetrics, d))
         for d in data.get("epoch_metrics", []):
-            history.add_epoch(EpochMetrics(**d))
+            history.add_epoch(dataclass_from_dict(EpochMetrics, d))
         return history

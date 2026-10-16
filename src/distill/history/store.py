@@ -26,12 +26,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from distill.storage import dataclass_from_dict, read_json_index, write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -84,51 +84,6 @@ class HistoryEntry:
 # ---------------------------------------------------------------------------
 
 
-def _write_index_atomic(index_path: Path, data: dict) -> None:
-    """Write JSON index atomically to prevent corruption.
-
-    Strategy:
-    1. Backup existing index to ``.json.bak`` (best effort).
-    2. Write to a temp file in the same directory (same filesystem).
-    3. ``os.replace(tmp_path, index_path)`` for atomic swap (POSIX).
-    4. Clean up temp file on failure.
-
-    Parameters
-    ----------
-    index_path : Path
-        Target path for the JSON index file.
-    data : dict
-        Full index dict to serialize.
-    """
-    # Backup existing index (best effort)
-    if index_path.exists():
-        backup_path = index_path.with_suffix(".json.bak")
-        try:
-            import shutil
-
-            shutil.copy2(index_path, backup_path)
-        except OSError:
-            pass
-
-    # Ensure parent directory exists
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Write to temp file in same directory (same filesystem for atomic rename)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=index_path.parent,
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2, default=str)
-        os.replace(tmp_path, index_path)
-    except BaseException:
-        # Clean up temp file on failure
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 # ---------------------------------------------------------------------------
@@ -162,21 +117,22 @@ class GenerationHistory:
     def _load_index(self) -> None:
         """Read JSON index, deserialize to dict[str, HistoryEntry].
 
-        Handles missing or corrupt file gracefully (logs warning,
-        starts fresh).
+        A missing file starts fresh; an unreadable one is recovered from
+        its ``.json.bak`` copy (see :func:`distill.storage.read_json_index`).
+        Unknown entry fields are ignored.
         """
         if not self._index_path.exists():
             self._entries = {}
             return
 
         try:
-            raw = json.loads(self._index_path.read_text(encoding="utf-8"))
+            raw = read_json_index(self._index_path)
             entries_raw = raw.get("entries", {})
             entries: dict[str, HistoryEntry] = {}
             for entry_id, entry_dict in entries_raw.items():
                 try:
-                    entries[entry_id] = HistoryEntry(**entry_dict)
-                except (TypeError, KeyError) as exc:
+                    entries[entry_id] = dataclass_from_dict(HistoryEntry, entry_dict)
+                except (TypeError, KeyError, AttributeError) as exc:
                     logger.warning(
                         "Skipping corrupt history entry %s: %s",
                         entry_id,
@@ -200,7 +156,7 @@ class GenerationHistory:
                 for entry_id, entry in self._entries.items()
             },
         }
-        _write_index_atomic(self._index_path, data)
+        write_json_atomic(self._index_path, data)
 
     # ------------------------------------------------------------------
     # Public API

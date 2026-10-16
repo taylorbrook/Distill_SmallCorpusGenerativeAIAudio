@@ -28,6 +28,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from distill.storage import dataclass_from_dict, safe_torch_load
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -293,7 +295,7 @@ def load_model(
     from distill.models.vae import ConvVAE
 
     model_path = Path(model_path)
-    saved = torch.load(model_path, map_location=device, weights_only=False)
+    saved = safe_torch_load(model_path, map_location=device)
 
     # Validate format marker and version
     if saved.get("format") != MODEL_FORMAT_MARKER:
@@ -307,7 +309,7 @@ def load_model(
 
     # Reconstruct SpectrogramConfig and AudioSpectrogram
     spec_dict = saved["spectrogram_config"]
-    spec_config = SpectrogramConfig(**spec_dict)
+    spec_config = dataclass_from_dict(SpectrogramConfig, spec_dict)
     spectrogram = AudioSpectrogram(spec_config)
 
     # Reconstruct ConvVAE with correct latent_dim
@@ -353,7 +355,7 @@ def load_model(
 
     # Reconstruct ModelMetadata from saved dict
     meta_dict = saved.get("metadata", {})
-    metadata = ModelMetadata(**meta_dict)
+    metadata = dataclass_from_dict(ModelMetadata, meta_dict)
 
     logger.info(
         "Loaded model '%s' from %s onto %s",
@@ -446,16 +448,12 @@ def save_model_from_checkpoint(
     Path
         Path to the saved ``.distill`` file.
     """
-    import torch  # noqa: WPS433 -- lazy import
-
     from distill.audio.spectrogram import SpectrogramConfig
     from distill.controls.serialization import analysis_from_dict
     from distill.models.vae import ConvVAE
 
     checkpoint_path = Path(checkpoint_path)
-    checkpoint = torch.load(
-        checkpoint_path, map_location="cpu", weights_only=False
-    )
+    checkpoint = safe_torch_load(checkpoint_path, map_location="cpu")
 
     # Extract configs
     spectrogram_config = checkpoint.get("spectrogram_config", asdict(SpectrogramConfig()))
@@ -466,7 +464,7 @@ def save_model_from_checkpoint(
     model = ConvVAE(latent_dim=latent_dim)
 
     # Initialize encoder/decoder linear layers from spectrogram config
-    spec_config = SpectrogramConfig(**spectrogram_config)
+    spec_config = dataclass_from_dict(SpectrogramConfig, spectrogram_config)
     n_mels = spec_config.n_mels
     time_frames = spec_config.sample_rate // spec_config.hop_length + 1
     pad_h = (16 - n_mels % 16) % 16
@@ -488,7 +486,8 @@ def save_model_from_checkpoint(
 
     # Populate metadata from checkpoint data
     if checkpoint.get("epoch") is not None:
-        metadata.training_epochs = checkpoint["epoch"]
+        # Checkpoint epochs are 0-indexed; store the number of epochs trained
+        metadata.training_epochs = int(checkpoint["epoch"]) + 1
     if checkpoint.get("train_loss") is not None:
         metadata.final_train_loss = float(checkpoint["train_loss"])
     if checkpoint.get("val_loss") is not None:

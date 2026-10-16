@@ -85,11 +85,11 @@ def train_cmd(
     # ------------------------------------------------------------------
     # Resolve output directory
     # ------------------------------------------------------------------
+    models_base = resolve_path(
+        app_config["paths"].get("models", "data/models"),
+        base_dir=config_path.parent,
+    )
     if output_dir is None:
-        models_base = resolve_path(
-            app_config["paths"].get("models", "data/models"),
-            base_dir=config_path.parent,
-        )
         output_dir = models_base / f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -154,14 +154,23 @@ def train_cmd(
     console.print(f"[bold]Output:[/bold] {output_dir}")
     console.print()
 
+    # Model name: user override or dataset_name_timestamp
+    auto_name = model_name or f"{dataset_dir.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     # ------------------------------------------------------------------
     # SIGINT handling
     # ------------------------------------------------------------------
     cancel_event = threading.Event()
 
     def handle_sigint(signum: int, frame: object) -> None:
-        console.print("\n[yellow]Cancelling training (saving checkpoint)...[/yellow]")
+        console.print(
+            "\n[yellow]Cancelling training (saving checkpoint and model; "
+            "press Ctrl+C again to quit immediately)...[/yellow]"
+        )
         cancel_event.set()
+        # Finishing up can take a while (latent analysis); let a second
+        # Ctrl+C interrupt it.
+        signal.signal(signal.SIGINT, original_handler)
 
     original_handler = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, handle_sigint)
@@ -209,7 +218,9 @@ def train_cmd(
                 elif isinstance(event, TrainingCompleteEvent):
                     pass  # Handled after train() returns
 
-            # Call train() directly (NOT TrainingRunner)
+            # Call train() directly (NOT TrainingRunner).  train() saves
+            # the finished model -- with the latent analysis computed on
+            # those same weights -- into the library itself.
             from distill.training.loop import train as run_training
 
             result = run_training(
@@ -219,6 +230,9 @@ def train_cmd(
                 device=torch_device,
                 callback=cli_callback,
                 cancel_event=cancel_event,
+                models_dir=models_base,
+                dataset_name=dataset_dir.name,
+                model_name=auto_name,
             )
     finally:
         # Restore original signal handler
@@ -227,53 +241,26 @@ def train_cmd(
     # ------------------------------------------------------------------
     # Post-training output
     # ------------------------------------------------------------------
+    saved_model_path = result.get("saved_model_path")
+    meta = result.get("model_metadata")
+    if saved_model_path is not None and meta is not None:
+        console.print("\n[bold green]Model saved to library![/bold green]")
+        console.print(f"  Name: {meta.name}")
+        console.print(f"  Path: {saved_model_path}")
+        console.print(f"  ID:   {meta.model_id}")
+        if not meta.has_analysis:
+            console.print(
+                "  [yellow]Latent analysis failed -- sliders unavailable "
+                "for this model.[/yellow]"
+            )
+    elif not cancel_event.is_set():
+        console.print("\n[yellow]Warning:[/yellow] Failed to auto-save model (see log).")
+
     if cancel_event.is_set():
         console.print("\n[yellow]Training cancelled.[/yellow] Checkpoint saved.")
         raise typer.Exit(code=3)
 
-    # ------------------------------------------------------------------
-    # Auto-save model to library
-    # ------------------------------------------------------------------
     best_checkpoint = result.get("best_checkpoint_path")
-    saved_model_path = None
-    auto_name = None
-
-    if best_checkpoint is not None:
-        from distill.models.persistence import ModelMetadata, save_model_from_checkpoint
-
-        # Generate model name: user override or dataset_name_timestamp
-        if model_name:
-            auto_name = model_name
-        else:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            auto_name = f"{dataset_dir.name}_{ts}"
-
-        meta = ModelMetadata(
-            name=auto_name,
-            dataset_name=dataset_dir.name,
-            dataset_file_count=len(file_paths),
-            training_date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-        )
-
-        try:
-            models_base = resolve_path(
-                app_config["paths"].get("models", "data/models"),
-                base_dir=config_path.parent,
-            )
-            models_base.mkdir(parents=True, exist_ok=True)
-
-            saved_model_path = save_model_from_checkpoint(
-                checkpoint_path=best_checkpoint,
-                metadata=meta,
-                models_dir=models_base,
-            )
-            console.print(f"\n[bold green]Model saved to library![/bold green]")
-            console.print(f"  Name: {auto_name}")
-            console.print(f"  Path: {saved_model_path}")
-            console.print(f"  ID:   {meta.model_id}")
-        except Exception as exc:
-            console.print(f"\n[yellow]Warning:[/yellow] Failed to auto-save model: {exc}")
-            logger.warning("Auto-save model failed", exc_info=True)
 
     # Build result summary
     metrics_history = result.get("metrics_history")
@@ -301,7 +288,7 @@ def train_cmd(
         "best_val_loss": best_val_loss,
         "best_epoch": best_epoch,
         "model_path": str(saved_model_path) if saved_model_path else None,
-        "model_name": auto_name if saved_model_path else None,
+        "model_name": meta.name if saved_model_path and meta else None,
     }
 
     if json_output:
