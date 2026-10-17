@@ -47,7 +47,6 @@ from distill.inference.quality import (
     compute_quality_score,
 )
 from distill.inference.blending import (
-    BlendMode,
     BlendEngine,
     ModelSlot,
     MAX_BLEND_MODELS,
@@ -89,7 +88,6 @@ __all__ = [
     "detect_clipping",
     "compute_quality_score",
     # blending.py
-    "BlendMode",
     "BlendEngine",
     "ModelSlot",
     "MAX_BLEND_MODELS",

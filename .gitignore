@@ -8,6 +8,7 @@ data/models/*
 !data/models/.gitkeep
 data/generated/*
 !data/generated/.gitkeep
+data/training/
 
 # Virtual environment
 .venv/

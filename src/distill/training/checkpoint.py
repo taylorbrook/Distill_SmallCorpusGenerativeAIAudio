@@ -8,7 +8,8 @@ without loading multi-megabyte state dicts.
 
 Retention policy: keep the 3 most recent checkpoints plus the 1 checkpoint
 with lowest validation loss (4 max).  If the best checkpoint is already
-among the 3 most recent, the total count is 3.
+among the 3 most recent, the total count is 3.  Retention works on one
+directory, so every training run needs its own (see :func:`new_run_dir`).
 
 Design notes:
 - Lazy torch import (project pattern).
@@ -20,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+from datetime import datetime
 from pathlib import Path
 
 from distill.storage import safe_torch_load
@@ -52,6 +55,7 @@ def save_checkpoint(
     spectrogram_config: dict,
     metrics_history_dict: dict,
     latent_analysis: dict | None = None,
+    epoch_complete: bool = True,
 ) -> Path:
     """Save a full training checkpoint and lightweight JSON sidecar.
 
@@ -84,6 +88,9 @@ def save_checkpoint(
     latent_analysis : dict | None
         Optional serialized latent space analysis from ``analysis_to_dict()``.
         Stored in the checkpoint so downstream save flows pick it up automatically.
+    epoch_complete : bool
+        ``False`` when training stopped part-way through ``epoch`` (a
+        mid-epoch cancel); resuming then repeats that epoch.
 
     Returns
     -------
@@ -98,6 +105,7 @@ def save_checkpoint(
     checkpoint = {
         "version": CHECKPOINT_VERSION,
         "epoch": epoch,
+        "epoch_complete": epoch_complete,
         "step": step,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
@@ -117,6 +125,7 @@ def save_checkpoint(
     meta_path = path.with_suffix(".pt" + _META_SUFFIX)
     meta = {
         "epoch": epoch,
+        "epoch_complete": epoch_complete,
         "train_loss": float(train_loss),
         "val_loss": float(val_loss),
     }
@@ -283,8 +292,54 @@ def get_best_checkpoint(checkpoint_dir: Path) -> Path | None:
     ckpts = list_checkpoints(checkpoint_dir)
     if not ckpts:
         return None
-    best = min(ckpts, key=lambda c: c["val_loss"])
+    best = min(ckpts, key=lambda c: _ranking_loss(c["val_loss"]))
     return best["path"]
+
+
+def _ranking_loss(val_loss: float) -> float:
+    """Validation loss for ranking: NaN (or missing) never wins."""
+    try:
+        val_loss = float(val_loss)
+    except (TypeError, ValueError):
+        return math.inf
+    return val_loss if math.isfinite(val_loss) else math.inf
+
+
+def get_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
+    """Return the path to the checkpoint with the highest epoch.
+
+    This is where an interrupted run left off, so it is the one to
+    resume from (the best-val-loss checkpoint can be many epochs older).
+
+    Returns
+    -------
+    Path | None
+        Path to the latest checkpoint, or ``None`` if none exist.
+    """
+    ckpts = list_checkpoints(checkpoint_dir)
+    if not ckpts:
+        return None
+    return ckpts[-1]["path"]
+
+
+def new_run_dir(parent: Path, prefix: str = "run") -> Path:
+    """Create and return a fresh, empty directory for one training run.
+
+    Named ``<prefix>_YYYYmmdd_HHMMSS`` (with a numeric suffix if that
+    already exists), so separate runs never share a checkpoint directory.
+    """
+    parent = Path(parent)
+    parent.mkdir(parents=True, exist_ok=True)
+    base = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    candidate = parent / base
+    counter = 1
+    while True:
+        try:
+            candidate.mkdir()
+            return candidate
+        except FileExistsError:
+            candidate = parent / f"{base}_{counter}"
+            counter += 1
 
 
 # ---------------------------------------------------------------------------

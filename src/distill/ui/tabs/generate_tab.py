@@ -9,9 +9,12 @@ Pre-creates ``MAX_SLIDERS`` Gradio sliders distributed across 3 columns
 is loaded.
 
 Phase 10 additions:
-- Output mode selector (mono/stereo/binaural) with spatial width+depth sliders
-- Export format dropdown (WAV/MP3/FLAC/OGG) with editable metadata fields
-- Multi-model blend accordion with up to 4 model slots and weight sliders
+- Output mode selector (mono/stereo) with spatial width+depth sliders.
+  Binaural is hidden until an HRTF (SOFA) file ships with the app.
+- Export format dropdown (WAV/MP3/FLAC/OGG) with editable metadata fields;
+  sample rate and bit depth are applied at export time
+- Multi-model blend accordion with up to 4 model slots and weight sliders;
+  with two or more models picked, each generates and the outputs are mixed
 
 Uses ``app_state`` singleton for backend access (GenerationPipeline,
 PresetManager, GenerationHistory, ABComparison, BlendEngine, etc.).
@@ -170,12 +173,64 @@ def _update_sliders_for_model():
     return updates
 
 
+def _blend_selection(names, weights, visible_count) -> list[tuple[str, float]]:
+    """(model name, weight) pairs from the visible blend rows that are in use."""
+    rows = list(zip(names, weights))[: int(visible_count or 0)]
+    return [(name, float(weight)) for name, weight in rows if name and weight and weight > 0]
+
+
+def _load_blend_model(name: str):
+    """Load a library model for blending, reusing models already in memory."""
+    from distill.models.persistence import load_model
+    from distill.ui.tabs.library_tab import _find_model_by_name
+
+    entry = _find_model_by_name(name)
+    if entry is None:
+        raise ValueError(f"Model '{name}' not found in library.")
+    current = app_state.loaded_model
+    if current is not None and current.metadata.model_id == entry.model_id:
+        return current
+    if entry.model_id not in app_state.blend_models:
+        device = str(app_state.device) if app_state.device else "cpu"
+        app_state.blend_models[entry.model_id] = load_model(
+            app_state.models_dir / entry.file_path, device=device,
+        )
+    return app_state.blend_models[entry.model_id]
+
+
+def _build_blend_engine(selection: list[tuple[str, float]]):
+    """A BlendEngine with one slot per selected (name, weight) pair."""
+    from distill.inference.blending import BlendEngine
+
+    engine = BlendEngine()
+    for name, weight in selection:
+        loaded = _load_blend_model(name)
+        engine.add_model(
+            model=loaded.model,
+            spectrogram=loaded.spectrogram,
+            analysis=loaded.analysis,
+            metadata=loaded.metadata,
+            device=loaded.device,
+            weight=weight,
+        )
+    # Release blend models that are no longer selected
+    in_use = {slot.metadata.model_id for slot in engine.slots}
+    for model_id in list(app_state.blend_models):
+        if model_id not in in_use:
+            del app_state.blend_models[model_id]
+    app_state.blend_engine = engine
+    return engine
+
+
 def _generate_audio(*args):
     """Generate audio from slider values and generation config.
 
     Arguments are unpacked as:
         slider_0 ... slider_{MAX_SLIDERS-1}, duration, output_mode,
-        spatial_width, spatial_depth, seed
+        spatial_width, spatial_depth, seed, evolution,
+        blend_model_0 ... blend_model_{MAX_BLEND_SLOTS-1},
+        blend_weight_0 ... blend_weight_{MAX_BLEND_SLOTS-1},
+        blend_visible_count
 
     Returns:
         Tuple of (audio, badge, audio_visible, history_gallery, ab_choices_a,
@@ -193,6 +248,11 @@ def _generate_audio(*args):
     spatial_depth = args[MAX_SLIDERS + 3]
     seed_val = args[MAX_SLIDERS + 4]
     evolution = args[MAX_SLIDERS + 5]
+    blend_start = MAX_SLIDERS + 6
+    blend_end = blend_start + 2 * MAX_BLEND_SLOTS
+    blend_names = args[blend_start:blend_start + MAX_BLEND_SLOTS]
+    blend_weights = args[blend_start + MAX_BLEND_SLOTS:blend_end]
+    blend_count = args[blend_end] if len(args) > blend_end else 0
 
     # Validate model loaded
     if app_state.loaded_model is None or app_state.pipeline is None:
@@ -245,13 +305,13 @@ def _generate_audio(*args):
         evolution_amount=float(evolution),
     )
 
-    # Check if blend engine has active models
-    if (
-        app_state.blend_engine is not None
-        and len(app_state.blend_engine.get_active_slots()) > 0
-    ):
+    # Blend when two or more models are picked in the blend panel
+    selection = _blend_selection(blend_names, blend_weights, blend_count)
+    model_name = app_state.loaded_model.metadata.name
+    if len(selection) >= 2:
+        model_name = " + ".join(name for name, _ in selection)
         try:
-            result = app_state.blend_engine.blend_generate(positions, config)
+            result = _build_blend_engine(selection).blend_generate(positions, config)
         except Exception as exc:
             logger.exception("Blend generation failed")
             return (
@@ -286,7 +346,7 @@ def _generate_audio(*args):
             app_state.history_store.add_to_history(
                 result=result,
                 model_id=app_state.loaded_model.metadata.model_id,
-                model_name=app_state.loaded_model.metadata.name,
+                model_name=model_name,
                 slider_positions=positions,
                 n_components=n_active,
                 preset_name="custom",
@@ -321,13 +381,22 @@ def _export_audio(
     meta_album: str,
     meta_title: str,
 ):
-    """Export the last generated audio in the selected format with metadata."""
-    from distill.inference.export import ExportFormat, FORMAT_EXTENSIONS
+    """Export the last generated audio in the selected format with metadata.
+
+    The sample rate and bit depth dropdowns apply here: the result is
+    resampled to the chosen rate before writing.
+    """
     from distill.audio.metadata import build_export_metadata
+    from distill.inference.export import FORMAT_EXTENSIONS, ExportFormat
+    from distill.inference.generation import convert_result
 
     last_result = app_state.metrics_buffer.get("last_result")
     if last_result is None:
         return "No audio to export. Generate audio first."
+    try:
+        last_result = convert_result(last_result, int(sample_rate_str), bit_depth)
+    except ValueError as exc:
+        return f"**Export failed:** {exc}"
 
     # Resolve export format
     fmt = ExportFormat(export_format)
@@ -388,7 +457,7 @@ def _export_audio(
             export_audio(
                 audio=last_result.audio,
                 path=output_path,
-                sample_rate=int(sample_rate_str),
+                sample_rate=last_result.sample_rate,
                 format=fmt,
                 bit_depth=bit_depth,
                 metadata=metadata,
@@ -503,58 +572,53 @@ def _toggle_preset_name():
 # Blend panel handlers
 # ---------------------------------------------------------------------------
 
-# Track how many blend rows are visible (module-level counter)
-_blend_visible_count = 1
+_SINGLE_MODEL_STATUS = "Single model mode (blend inactive)."
 
 
-def _add_blend_row():
-    """Reveal the next hidden blend model row.
+def _blend_rows_update(count: int) -> list:
+    """Visible-row count, status text and row visibility for the blend panel."""
+    if count <= 1:
+        status = _SINGLE_MODEL_STATUS
+    else:
+        status = (
+            f"{count} model slots. Each picked model generates with the "
+            "current settings and the results are mixed at these weights."
+        )
+    return [count, status] + [
+        gr.update(visible=(i < count)) for i in range(MAX_BLEND_SLOTS)
+    ]
 
-    Returns status markdown + visibility updates for all MAX_BLEND_SLOTS rows.
-    """
-    global _blend_visible_count  # noqa: WPS420
-    if _blend_visible_count < MAX_BLEND_SLOTS:
-        _blend_visible_count += 1
-    status = f"{_blend_visible_count} model slot(s) active."
-    updates = [status]
-    for i in range(MAX_BLEND_SLOTS):
-        updates.append(gr.update(visible=(i < _blend_visible_count)))
-    return updates
+
+def _add_blend_row(count: int):
+    """Reveal the next hidden blend model row."""
+    return _blend_rows_update(min(int(count) + 1, MAX_BLEND_SLOTS))
 
 
-def _remove_blend_row():
-    """Hide the last visible blend model row.
-
-    Returns status markdown + visibility updates for all MAX_BLEND_SLOTS rows.
-    """
-    global _blend_visible_count  # noqa: WPS420
-    if _blend_visible_count > 1:
-        _blend_visible_count -= 1
-    status = f"{_blend_visible_count} model slot(s) active."
-    if _blend_visible_count == 1:
-        status = "Single model mode (blend inactive)."
-    updates = [status]
-    for i in range(MAX_BLEND_SLOTS):
-        updates.append(gr.update(visible=(i < _blend_visible_count)))
-    return updates
+def _remove_blend_row(count: int):
+    """Hide the last visible blend model row."""
+    return _blend_rows_update(max(int(count) - 1, 1))
 
 
 def _refresh_blend_model_choices():
     """Refresh all blend model dropdown choices from ModelLibrary.
 
-    Returns gr.update for each of MAX_BLEND_SLOTS dropdowns.
+    Returns gr.update for each of MAX_BLEND_SLOTS dropdowns; the first
+    slot is set to the loaded model so adding a row blends with it.
     Called via cross-tab wiring when library content changes.
     """
     choices: list[str] = []
     if app_state.model_library is not None:
         try:
-            entries = app_state.model_library.list_models()
-            choices = [e.name for e in entries]
+            choices = [e.name for e in app_state.model_library.list_all()]
         except Exception:
-            logger.warning("Failed to list models for blend dropdowns")
+            logger.warning("Failed to list models for blend dropdowns", exc_info=True)
 
-    updates = []
-    for _ in range(MAX_BLEND_SLOTS):
+    loaded = app_state.loaded_model
+    first_value = loaded.metadata.name if loaded is not None else None
+    if first_value not in choices:
+        first_value = None
+    updates = [gr.update(choices=choices, value=first_value)]
+    for _ in range(MAX_BLEND_SLOTS - 1):
         updates.append(gr.update(choices=choices))
     return updates
 
@@ -794,11 +858,7 @@ def build_generate_tab() -> dict:
 
         # ----- Multi-model blend accordion (collapsible) -----
         with gr.Accordion("Multi-Model Blend", open=False):
-            blend_mode_radio = gr.Radio(
-                choices=["latent", "audio"],
-                value="latent",
-                label="Blend Mode",
-            )
+            blend_count_state = gr.State(1)
             # Pre-create up to 4 model rows (hidden by default)
             blend_model_dds: list[gr.Dropdown] = []
             blend_weight_sliders: list[gr.Slider] = []
@@ -825,9 +885,7 @@ def build_generate_tab() -> dict:
             with gr.Row():
                 add_blend_model_btn = gr.Button("Add Model", size="sm")
                 remove_blend_model_btn = gr.Button("Remove Last", size="sm")
-            blend_status = gr.Markdown(
-                value="Single model mode (blend inactive)."
-            )
+            blend_status = gr.Markdown(value=_SINGLE_MODEL_STATUS)
 
         # ----- Slider section: 3 columns -----
         gr.Markdown("### Parameters")
@@ -884,8 +942,9 @@ def build_generate_tab() -> dict:
                 maximum=60.0,
                 precision=1,
             )
+            # Binaural is hidden until an HRTF file ships (audio/hrtf.py)
             output_mode_dd = gr.Dropdown(
-                choices=["mono", "stereo", "binaural"],
+                choices=["mono", "stereo"],
                 value="mono",
                 label="Output Mode",
             )
@@ -1077,7 +1136,7 @@ def build_generate_tab() -> dict:
             spatial_depth_slider,
             seed_input,
             evolution_slider,
-        ],
+        ] + blend_model_dds + blend_weight_sliders + [blend_count_state],
         outputs=[audio_output, quality_badge, audio_output,
                  history_gallery, ab_dropdown_a, ab_dropdown_b],
     )
@@ -1127,14 +1186,14 @@ def build_generate_tab() -> dict:
     # Add/remove blend model rows
     add_blend_model_btn.click(
         fn=_add_blend_row,
-        inputs=None,
-        outputs=[blend_status] + blend_rows,
+        inputs=[blend_count_state],
+        outputs=[blend_count_state, blend_status] + blend_rows,
     )
 
     remove_blend_model_btn.click(
         fn=_remove_blend_row,
-        inputs=None,
-        outputs=[blend_status] + blend_rows,
+        inputs=[blend_count_state],
+        outputs=[blend_count_state, blend_status] + blend_rows,
     )
 
     # ----- History event wiring -----

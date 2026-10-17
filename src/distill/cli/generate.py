@@ -3,7 +3,8 @@
 Provides batch audio generation with model resolution (by name, ID, or
 ``.distill`` file path), preset support, and configurable output options.
 Supports multi-format export (WAV/MP3/FLAC/OGG), spatial audio
-(mono/stereo/binaural), multi-model blending, and metadata embedding.
+(mono/stereo; binaural is hidden until an HRTF file ships), multi-model
+blending (each model's output mixed at its weight), and metadata embedding.
 
 Design notes:
 - ``Console(stderr=True)`` for all Rich output (progress/status to stderr).
@@ -25,6 +26,9 @@ app = typer.Typer()
 
 # Valid format choices
 _VALID_FORMATS = ("wav", "mp3", "flac", "ogg")
+
+# Binaural is left out until an HRTF (SOFA) file ships with the app
+_VALID_SPATIAL_MODES = ("mono", "stereo")
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +181,7 @@ def generate(
     ),
     # --- Spatial audio options (Phase 10) ---
     spatial_mode: str = typer.Option(
-        "mono", "--spatial-mode", help="Spatial mode: mono, stereo, binaural"
+        "mono", "--spatial-mode", help="Spatial mode: mono, stereo"
     ),
     spatial_width: float = typer.Option(
         0.7, "--spatial-width", help="Spatial width (0.0-1.5)"
@@ -218,7 +222,7 @@ def generate(
         48000, "--sample-rate", help="Output sample rate: 44100, 48000, 96000"
     ),
     bit_depth: str = typer.Option(
-        "24-bit", "--bit-depth", help="Bit depth: 16-bit, 24-bit, 32-bit-float"
+        "24-bit", "--bit-depth", help="Bit depth: 16-bit, 24-bit, '32-bit float'"
     ),
     device: str = typer.Option(
         "auto", "--device", help="Compute device: auto, mps, cuda, cpu"
@@ -261,6 +265,12 @@ def generate(
         )
     export_format = ExportFormat(fmt_lower)
     file_ext = FORMAT_EXTENSIONS[export_format].lstrip(".")
+
+    if spatial_mode not in _VALID_SPATIAL_MODES:
+        raise typer.BadParameter(
+            f"Invalid spatial mode '{spatial_mode}'. "
+            f"Must be one of: {', '.join(_VALID_SPATIAL_MODES)}"
+        )
 
     # ---- Handle deprecated --stereo flag ----
     if stereo is not None:
@@ -364,12 +374,11 @@ def generate(
             s.metadata.name for s in engine.get_active_slots()
         )
 
-        # Build generation config for blending (uses old stereo fields for
-        # internal pipeline compatibility, spatial applied post-generation)
         gen_config = GenerationConfig(
             duration_s=duration,
             seed=seed,
-            stereo_mode="mono",  # spatial applied separately
+            spatial=spatial_config,
+            export_format=fmt_lower,
             sample_rate=sample_rate,
             bit_depth=bit_depth,
         )
@@ -385,9 +394,6 @@ def generate(
                 config=gen_config,
             )
 
-            # Apply spatial processing to blended result
-            audio = _apply_spatial_post(result.audio, spatial_config, result.sample_rate)
-
             # Build metadata
             metadata = build_export_metadata(
                 model_name=model_name_for_meta,
@@ -398,7 +404,7 @@ def generate(
 
             # Export with format and metadata
             export_path = _export_result(
-                audio=audio,
+                audio=result.audio,
                 result=result,
                 output_dir=output_dir,
                 export_format=export_format,
@@ -518,10 +524,13 @@ def generate(
                     f"[green]Sliders applied:[/green] {len(slider)} position(s) set"
                 )
 
+        # Spatial processing runs inside the pipeline, before peak
+        # normalisation and quality scoring
         gen_config = GenerationConfig(
             duration_s=duration,
             seed=seed,
-            stereo_mode="mono",  # spatial applied post-generation
+            spatial=spatial_config,
+            export_format=fmt_lower,
             sample_rate=sample_rate,
             bit_depth=bit_depth,
             latent_vector=latent_vector,
@@ -541,11 +550,6 @@ def generate(
 
             result = pipeline.generate(gen_config)
 
-            # Apply spatial processing
-            audio = _apply_spatial_post(
-                result.audio, spatial_config, result.sample_rate
-            )
-
             # Build metadata
             metadata = build_export_metadata(
                 model_name=loaded.metadata.name,
@@ -556,7 +560,7 @@ def generate(
 
             # Export with format and metadata
             export_path = _export_result(
-                audio=audio,
+                audio=result.audio,
                 result=result,
                 output_dir=output_dir,
                 export_format=export_format,
@@ -579,52 +583,6 @@ def generate(
     else:
         for r in results:
             print(r["file"])
-
-
-# ---------------------------------------------------------------------------
-# Spatial post-processing helper
-# ---------------------------------------------------------------------------
-
-
-def _apply_spatial_post(
-    audio: "np.ndarray",
-    spatial_config: "SpatialConfig",
-    sample_rate: int,
-) -> "np.ndarray":
-    """Apply spatial audio processing to generated mono audio.
-
-    If the audio is already stereo (from stereo generation mode) or
-    spatial mode is MONO, returns audio unchanged. Otherwise applies
-    the configured spatial mode (stereo mid-side or binaural HRTF).
-
-    Parameters
-    ----------
-    audio : np.ndarray
-        Audio data (1-D mono or 2-D stereo).
-    spatial_config : SpatialConfig
-        Spatial audio configuration.
-    sample_rate : int
-        Audio sample rate.
-
-    Returns
-    -------
-    np.ndarray
-        Processed audio.
-    """
-    from distill.inference.spatial import SpatialMode, apply_spatial
-
-    if spatial_config.mode == SpatialMode.MONO:
-        return audio
-
-    # Only apply spatial to mono audio
-    import numpy as np  # noqa: WPS433
-
-    audio = np.asarray(audio, dtype=np.float32)
-    if audio.ndim == 1:
-        return apply_spatial(audio, spatial_config, sample_rate)
-
-    # Already stereo -- return as-is
-    return audio
 
 
 # ---------------------------------------------------------------------------

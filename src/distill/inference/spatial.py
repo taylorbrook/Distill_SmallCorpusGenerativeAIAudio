@@ -296,8 +296,15 @@ def _apply_binaural(
     config: SpatialConfig,
     sample_rate: int,
 ) -> "np.ndarray":
-    """Apply HRTF-based binaural rendering."""
-    from distill.audio.hrtf import load_hrtf, apply_binaural  # noqa: WPS433
+    """Apply HRTF-based binaural rendering.
 
-    hrtf = load_hrtf(target_sample_rate=sample_rate)
-    return apply_binaural(mono, hrtf, width=config.width, depth=config.depth)
+    The mono signal gets the same mid-side widening as stereo mode (so
+    ``width`` behaves alike in both), then is rendered for headphones
+    through a virtual speaker pair.
+    """
+    from distill.audio.hrtf import apply_binaural, load_speaker_pair  # noqa: WPS433
+    from distill.inference.stereo import apply_mid_side_widening  # noqa: WPS433
+
+    left_speaker, right_speaker = load_speaker_pair(target_sample_rate=sample_rate)
+    stereo = apply_mid_side_widening(mono, width=config.width, sample_rate=sample_rate)
+    return apply_binaural(stereo, left_speaker, right_speaker, depth=config.depth)

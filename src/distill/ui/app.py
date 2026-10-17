@@ -16,6 +16,7 @@ results without duplicating config load and device detection.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import gradio as gr
@@ -102,7 +103,9 @@ def create_app(
 
         # After loading a model from Library, update Generate tab sliders.
         # The Library load handler sets app_state, then this chained event
-        # reads app_state and updates slider visibility/labels.
+        # reads app_state and updates slider visibility/labels.  It must be
+        # chained with .then(): a separate listener on the button can run
+        # before the model has loaded and leave the sliders empty.
         _gen_slider_outputs = (
             gen_refs["sliders"]
             + [
@@ -112,7 +115,7 @@ def create_app(
             ]
         )
 
-        lib_refs["load_btn"].click(
+        lib_refs["load_event"].then(
             fn=_update_sliders_for_model,
             inputs=None,
             outputs=_gen_slider_outputs,
@@ -125,15 +128,16 @@ def create_app(
         # Card click -> select in dropdown, load model, update Generate sliders
         from distill.ui.tabs.library_tab import _load_model_handler
 
-        def _card_click_select(name: str):
+        def _card_click_select(evt: gr.EventData):
             """Set dropdown to clicked card name."""
+            name = getattr(evt, "model_name", None)
             if not name:
                 return gr.update()
             return gr.update(value=name)
 
-        lib_refs["card_selected_name"].change(
+        lib_refs["card_html"].click(
             fn=_card_click_select,
-            inputs=[lib_refs["card_selected_name"]],
+            inputs=None,
             outputs=[lib_refs["model_dropdown"]],
         ).then(
             fn=_load_model_handler,
@@ -171,4 +175,26 @@ def launch_ui(
         server_port=7860,
         share=False,
         inbrowser=True,
+        allowed_paths=allowed_paths(),
     )
+
+
+def allowed_paths() -> list[str]:
+    """Data directories whose files the UI hands to the browser.
+
+    Gradio only serves files under the working directory or its temp dir
+    unless listed here, so history audio, thumbnails, training previews
+    and exports failed with InvalidPathError when the data directories
+    were configured elsewhere.  Call after :func:`create_app`.
+    """
+    from distill.ui.state import app_state
+
+    dirs: list[Path] = [
+        app_state.datasets_dir,
+        app_state.models_dir,
+        app_state.generated_dir,
+        app_state.presets_dir,
+        app_state.history_dir,
+        app_state.training_dir,
+    ]
+    return [str(Path(d).resolve()) for d in dirs]

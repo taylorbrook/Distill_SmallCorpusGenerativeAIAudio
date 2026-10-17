@@ -47,6 +47,7 @@ from distill.audio.filters import (
 from distill.audio.hrtf import (
     HRTFData,
     load_hrtf,
+    load_speaker_pair,
     apply_binaural,
     clear_hrtf_cache,
 )
@@ -91,6 +92,7 @@ __all__ = [
     # hrtf.py
     "HRTFData",
     "load_hrtf",
+    "load_speaker_pair",
     "apply_binaural",
     "clear_hrtf_cache",
     # metadata.py

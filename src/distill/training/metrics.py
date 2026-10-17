@@ -17,6 +17,7 @@ Design notes:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
@@ -233,7 +234,12 @@ class MetricsHistory:
         """
         if not self.epoch_metrics:
             return 0
-        best = min(self.epoch_metrics, key=lambda m: m.val_loss)
+        # A NaN loss must never rank as best (min() keeps the first item
+        # when comparisons with NaN are all False)
+        best = min(
+            self.epoch_metrics,
+            key=lambda m: m.val_loss if math.isfinite(m.val_loss) else math.inf,
+        )
         return best.epoch
 
     # -----------------------------------------------------------------

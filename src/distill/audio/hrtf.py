@@ -1,15 +1,19 @@
 """HRTF loading from SOFA files and binaural convolution for spatial audio.
 
 Loads Head-Related Transfer Function (HRTF) data from SOFA files, caches
-the results, and provides binaural convolution with width and depth controls
-for immersive headphone listening.
+the results, and renders stereo for headphones through a virtual speaker
+pair.
 
 Design notes:
 - Lazy imports for sofar, scipy, numpy, torch/torchaudio (project pattern).
-- HRTF data cached by (sofa_path, sample_rate) to avoid repeated I/O.
+- HRTF data cached by (sofa_path, sample_rate, azimuth, elevation).
+- Positions follow the SOFA convention: azimuth counter-clockwise from the
+  front, so 90 deg is the listener's LEFT and 270 deg the right.
 - Binaural convolution uses scipy.signal.fftconvolve for efficiency.
-- Width blends between center and full binaural image.
 - Depth applies gentle high-frequency rolloff for distance simulation.
+
+Status: binaural output is hidden in the UI and CLI until a SOFA file is
+shipped or downloaded (see below).
 
 HRTF file:
     The MIT KEMAR SOFA file should be placed at:
@@ -27,8 +31,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Module-level cache: (sofa_path_str, sample_rate) -> HRTFData
-_hrtf_cache: dict[tuple[str, int], "HRTFData"] = {}
+# Module-level cache: (sofa_path_str, sample_rate, azimuth, elevation) -> HRTFData
+_hrtf_cache: dict[tuple[str, int, float, float], "HRTFData"] = {}
+
+VIRTUAL_SPEAKER_AZIMUTH = 30.0
+"""Virtual speakers sit at +/-30 deg, the standard stereo triangle."""
 
 
 @dataclass
@@ -83,7 +90,7 @@ def get_default_hrtf_path() -> Path:
 def load_hrtf(
     sofa_path: Path | None = None,
     target_sample_rate: int = 48_000,
-    azimuth: float = 90.0,
+    azimuth: float = 0.0,
     elevation: float = 0.0,
 ) -> HRTFData:
     """Load HRTF data from a SOFA file with caching and optional resampling.
@@ -95,7 +102,8 @@ def load_hrtf(
     target_sample_rate : int
         Desired sample rate for the HRIRs.  Resamples if SOFA rate differs.
     azimuth : float
-        Target source azimuth in degrees (0-360).  Default ``90.0`` (right).
+        Target source azimuth in degrees, counter-clockwise from the front
+        (SOFA convention: ``90`` is left, ``270`` is right).  Default ``0``.
     elevation : float
         Target source elevation in degrees.  Default ``0.0`` (ear level).
 
@@ -114,7 +122,7 @@ def load_hrtf(
     if sofa_path is None:
         sofa_path = get_default_hrtf_path()
 
-    cache_key = (str(sofa_path), target_sample_rate)
+    cache_key = (str(sofa_path), target_sample_rate, float(azimuth), float(elevation))
     if cache_key in _hrtf_cache:
         return _hrtf_cache[cache_key]
 
@@ -124,14 +132,24 @@ def load_hrtf(
     sofa_obj = sofar.read_sofa(str(sofa_path))
 
     # Find nearest source position to requested (azimuth, elevation)
-    # SourcePosition is [N, 3] with columns (azimuth, elevation, distance)
-    positions = np.array(sofa_obj.SourcePosition)
-    target = np.array([azimuth, elevation])
-    distances = np.sqrt(np.sum((positions[:, :2] - target) ** 2, axis=1))
-    nearest_idx = int(np.argmin(distances))
+    positions = np.array(sofa_obj.SourcePosition, dtype=np.float64)
+    if str(getattr(sofa_obj, "SourcePosition_Type", "spherical")).lower() == "cartesian":
+        directions = positions / np.linalg.norm(positions, axis=1, keepdims=True)
+        az_el = np.stack([
+            np.degrees(np.arctan2(directions[:, 1], directions[:, 0])) % 360.0,
+            np.degrees(np.arcsin(np.clip(directions[:, 2], -1.0, 1.0))),
+        ], axis=1)
+    else:
+        # Spherical: columns (azimuth, elevation, distance) in degrees
+        directions = _unit_vectors(positions[:, 0], positions[:, 1])
+        az_el = positions[:, :2]
+    target = _unit_vectors(np.array([azimuth]), np.array([elevation]))[0]
+    # Largest dot product = smallest angle on the sphere, which wraps
+    # around 0/360 deg (a plain azimuth difference does not)
+    nearest_idx = int(np.argmax(directions @ target))
 
-    actual_az = float(positions[nearest_idx, 0])
-    actual_el = float(positions[nearest_idx, 1])
+    actual_az = float(az_el[nearest_idx, 0])
+    actual_el = float(az_el[nearest_idx, 1])
     logger.debug(
         "Nearest HRTF position: azimuth=%.1f, elevation=%.1f (requested %.1f, %.1f)",
         actual_az,
@@ -174,23 +192,46 @@ def load_hrtf(
     return hrtf_data
 
 
+def _unit_vectors(azimuth_deg: "np.ndarray", elevation_deg: "np.ndarray") -> "np.ndarray":
+    """Direction vectors ``[N, 3]`` for SOFA spherical angles in degrees."""
+    import numpy as np  # noqa: WPS433
+
+    az = np.radians(azimuth_deg)
+    el = np.radians(elevation_deg)
+    return np.stack([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)], axis=1)
+
+
+def load_speaker_pair(
+    sofa_path: Path | None = None,
+    target_sample_rate: int = 48_000,
+) -> tuple[HRTFData, HRTFData]:
+    """HRTFs for a virtual stereo speaker pair at +/-30 deg (left, right)."""
+    left = load_hrtf(sofa_path, target_sample_rate, azimuth=VIRTUAL_SPEAKER_AZIMUTH)
+    right = load_hrtf(sofa_path, target_sample_rate, azimuth=360.0 - VIRTUAL_SPEAKER_AZIMUTH)
+    return left, right
+
+
 def apply_binaural(
-    mono: "np.ndarray",
-    hrtf: HRTFData,
-    width: float = 1.0,
+    stereo: "np.ndarray",
+    left_speaker: HRTFData,
+    right_speaker: HRTFData,
     depth: float = 0.5,
 ) -> "np.ndarray":
-    """Apply binaural spatialization to mono audio using HRTF convolution.
+    """Render stereo audio for headphones through a virtual speaker pair.
+
+    Each channel is played from its own virtual speaker; each ear hears
+    both speakers through the measured HRIRs.  A mono signal (equal
+    channels) therefore stays centred instead of sitting in one ear, and
+    the stereo width of the input carries over to the binaural image.
 
     Parameters
     ----------
-    mono : np.ndarray
-        1-D mono audio array ``[samples]``.
-    hrtf : HRTFData
-        Loaded HRTF data with left/right impulse responses.
-    width : float
-        Spatial width.  ``0.0`` = mono center, ``1.0`` = natural binaural,
-        up to ``1.5`` = exaggerated.  Default ``1.0``.
+    stereo : np.ndarray
+        ``[2, samples]`` audio (left, right).  1-D input is treated as
+        mono and sent to both speakers.
+    left_speaker, right_speaker : HRTFData
+        HRIRs for the left and right virtual speaker positions
+        (see :func:`load_speaker_pair`).
     depth : float
         Front-back depth.  ``0.0`` = close/intimate (full bandwidth),
         ``1.0`` = distant/diffuse (high-frequency rolloff).  Default ``0.5``.
@@ -198,29 +239,29 @@ def apply_binaural(
     Returns
     -------
     np.ndarray
-        Stereo audio ``[2, samples]`` as float32.
+        Binaural audio ``[2, samples]`` (left ear, right ear) as float32.
     """
     import numpy as np  # noqa: WPS433
     from scipy.signal import fftconvolve, butter, sosfiltfilt  # noqa: WPS433
 
-    mono = np.asarray(mono, dtype=np.float32).ravel()
-    n_samples = len(mono)
+    stereo = np.asarray(stereo, dtype=np.float32)
+    if stereo.ndim == 1:
+        stereo = np.stack([stereo, stereo])
+    left_in, right_in = stereo[0], stereo[1]
+    n_samples = stereo.shape[1]
 
-    # Convolve with left and right HRIRs
-    left = fftconvolve(mono, hrtf.hrir_left, mode="full")[:n_samples]
-    right = fftconvolve(mono, hrtf.hrir_right, mode="full")[:n_samples]
+    def _conv(signal: "np.ndarray", hrir: "np.ndarray") -> "np.ndarray":
+        return fftconvolve(signal, hrir, mode="full")[:n_samples]
 
-    # Width control: blend between center and full binaural
-    center = (left + right) * 0.5
-    left_out = center + width * (left - center)
-    right_out = center + width * (right - center)
+    left_out = _conv(left_in, left_speaker.hrir_left) + _conv(right_in, right_speaker.hrir_left)
+    right_out = _conv(left_in, left_speaker.hrir_right) + _conv(right_in, right_speaker.hrir_right)
 
     # Depth control: gentle high-frequency rolloff proportional to depth
     # Close (depth=0.0) = no rolloff (full bandwidth)
     # Far (depth=1.0) = cutoff at ~8 kHz
     if depth > 0.01:
         # Cutoff frequency scales from 20 kHz (depth=0) to 8 kHz (depth=1)
-        nyquist = hrtf.sample_rate / 2.0
+        nyquist = left_speaker.sample_rate / 2.0
         cutoff_hz = 20_000.0 - depth * 12_000.0  # 20k -> 8k
         # Clamp to valid range for Butterworth (must be < Nyquist)
         cutoff_hz = min(cutoff_hz, nyquist * 0.95)
@@ -231,8 +272,7 @@ def apply_binaural(
         left_out = sosfiltfilt(sos, left_out).astype(np.float32)
         right_out = sosfiltfilt(sos, right_out).astype(np.float32)
 
-    stereo = np.stack([left_out, right_out], axis=0).astype(np.float32)
-    return stereo
+    return np.stack([left_out, right_out], axis=0).astype(np.float32)
 
 
 def clear_hrtf_cache() -> None:

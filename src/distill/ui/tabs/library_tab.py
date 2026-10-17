@@ -17,7 +17,7 @@ from typing import Any
 import gradio as gr
 
 from distill.ui.components.guided_nav import get_empty_state_message
-from distill.ui.components.model_card import render_model_cards
+from distill.ui.components.model_card import CARD_CLICK_JS, render_model_cards
 from distill.ui.state import app_state
 
 logger = logging.getLogger(__name__)
@@ -309,8 +309,10 @@ def build_library_tab() -> dict[str, Any]:
     Returns
     -------
     dict[str, Any]
-        Dictionary with ``"load_btn"`` key for cross-tab wiring in
-        ``app.py``.  Other tabs may need to trigger on model load.
+        Component and event references for cross-tab wiring in ``app.py``:
+        ``load_event`` (chain Generate-tab updates after it with
+        ``.then()``), ``card_html`` (its ``click`` event carries
+        ``model_name``), ``model_dropdown`` and ``status_msg``.
     """
     # -- Empty state (shown when library has no models) --
     empty_state = gr.Markdown(
@@ -352,16 +354,13 @@ def build_library_tab() -> dict[str, Any]:
             )
             save_btn = gr.Button("Save to Library", variant="primary")
 
-        # Hidden textbox for card click -> dropdown selection (JS bridge)
-        card_selected_name = gr.Textbox(
-            value="",
-            visible=False,
-            elem_id="model-card-selected-name",
-        )
-
-        # Card grid view (default visible)
+        # Card grid view (default visible); clicking a card loads it
+        # (wired in app.py)
         with gr.Column(visible=True) as card_section:
-            card_html = gr.HTML(value=render_model_cards([]))
+            card_html = gr.HTML(
+                value=render_model_cards([]),
+                js_on_load=CARD_CLICK_JS,
+            )
 
         # Table view (hidden by default)
         with gr.Column(visible=False) as table_section:
@@ -412,8 +411,8 @@ def build_library_tab() -> dict[str, Any]:
 
     # Card click -> load handled via cross-tab wiring in app.py
 
-    # Load model
-    load_btn.click(
+    # Load model (app.py chains the Generate-tab refresh after this)
+    load_event = load_btn.click(
         fn=_load_model_handler,
         inputs=[model_dropdown],
         outputs=[status_msg],
@@ -444,7 +443,8 @@ def build_library_tab() -> dict[str, Any]:
 
     return {
         "load_btn": load_btn,
-        "card_selected_name": card_selected_name,
+        "load_event": load_event,
+        "card_html": card_html,
         "model_dropdown": model_dropdown,
         "status_msg": status_msg,
     }

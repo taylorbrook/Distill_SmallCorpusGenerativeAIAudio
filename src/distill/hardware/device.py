@@ -95,12 +95,18 @@ def _smoke_test(device: torch.device) -> bool:
 
 
 def _cleanup_cache(device: torch.device) -> None:
-    """Clear the GPU memory cache for *device* (no-op for CPU)."""
+    """Clear the GPU memory cache for *device* (no-op for CPU).
+
+    Also a no-op when the backend is unavailable: ``select_device("mps")``
+    on a machine without MPS gets here after the failed smoke test, and
+    ``torch.mps.empty_cache()`` would raise instead of letting it fall
+    back to CPU.
+    """
     import torch
 
-    if device.type == "cuda":
+    if device.type == "cuda" and torch.cuda.is_available():
         torch.cuda.empty_cache()
-    elif device.type == "mps":
+    elif device.type == "mps" and torch.backends.mps.is_available():
         torch.mps.empty_cache()
 
 

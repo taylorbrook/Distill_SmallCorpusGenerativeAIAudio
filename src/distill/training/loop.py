@@ -320,7 +320,12 @@ def train(
         epoch has completed, the run is finalised like a normal one
         (latent analysis + library save) so the work is not lost.
     resume_checkpoint:
-        Path to a ``.pt`` checkpoint file to resume from.
+        Path to a ``.pt`` checkpoint file to resume from.  The weights,
+        optimiser moments and epoch counter come from the checkpoint; the
+        learning rate, weight decay and epoch count come from *config*.
+        An epoch that was cancelled part-way is repeated.  Raises if the
+        checkpoint cannot be loaded.  Without it, ``output_dir`` must not
+        already hold checkpoints (each run needs its own directory).
     models_dir:
         If given, the finished model (with its latent analysis) is saved
         to this library directory as a ``.distill`` file.
@@ -343,6 +348,7 @@ def train(
     from distill.models.losses import get_kl_weight
     from distill.models.vae import ConvVAE
     from distill.training.checkpoint import (
+        list_checkpoints,
         load_checkpoint,
         manage_checkpoints,
     )
@@ -362,6 +368,13 @@ def train(
     output_dir = Path(output_dir)
     checkpoint_dir = output_dir / "checkpoints"
     preview_dir = output_dir / "previews"
+    if resume_checkpoint is None and list_checkpoints(checkpoint_dir):
+        # Retention and "best" selection work per directory, so a second
+        # run here would delete or be confused with the first run's files.
+        raise ValueError(
+            f"{checkpoint_dir} already holds checkpoints from another run. "
+            "Resume that run or use a new output directory."
+        )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -407,7 +420,6 @@ def train(
 
     # Resume state
     start_epoch = 0
-    kl_weight_override: float | None = None
 
     if resume_checkpoint is not None:
         try:
@@ -415,22 +427,29 @@ def train(
                 resume_checkpoint, model, optimizer, scheduler,
                 device=str(device),
             )
-            start_epoch = ckpt.get("epoch", 0) + 1
-            kl_weight_override = ckpt.get("kl_weight")
+        except Exception as exc:
+            # Never fall back to a fresh run: it would train from scratch
+            # into the interrupted run's checkpoint directory.
+            raise RuntimeError(
+                f"Could not resume from checkpoint {resume_checkpoint}: {exc}"
+            ) from exc
 
-            # Restore metrics history
-            if "metrics_history" in ckpt:
-                metrics_history = MetricsHistory.from_dict(ckpt["metrics_history"])
+        start_epoch = _resume_start_epoch(ckpt)
+        if start_epoch >= config.max_epochs:
+            raise ValueError(
+                f"The checkpoint already covers {start_epoch} epochs; "
+                f"set max epochs above {start_epoch} to continue training."
+            )
+        _apply_config_to_resumed_optimizer(optimizer, scheduler, config)
 
-            logger.info(
-                "Resumed training from epoch %d (val_loss=%.4f)",
-                start_epoch, ckpt.get("val_loss", float("inf")),
-            )
-        except Exception:
-            logger.warning(
-                "Failed to load resume checkpoint %s, starting fresh",
-                resume_checkpoint, exc_info=True,
-            )
+        # Restore metrics history
+        if "metrics_history" in ckpt:
+            metrics_history = MetricsHistory.from_dict(ckpt["metrics_history"])
+
+        logger.info(
+            "Resumed training at epoch %d (lr=%.2e)",
+            start_epoch, optimizer.param_groups[0]["lr"],
+        )
 
     # -----------------------------------------------------------------
     # Create data loaders
@@ -533,6 +552,9 @@ def train(
                 total_time_s=time.time() - train_start_time,
                 # Only keep a cancelled run if it got through an epoch
                 run_analysis=bool(metrics_history.epoch_metrics),
+                # Validation and the scheduler step never ran for this
+                # epoch, so a resume must repeat it
+                epoch_complete=False,
             )
 
         # Validate epoch
@@ -703,6 +725,7 @@ def _finalize_run(
     epochs_completed: int,
     total_time_s: float,
     run_analysis: bool = True,
+    epoch_complete: bool = True,
 ) -> dict:
     """Save the final checkpoint, analyse, save to the library, and report.
 
@@ -718,7 +741,7 @@ def _finalize_run(
         checkpoint_dir, model, optimizer, scheduler, final_epoch, 0,
         final_train, final_val, final_kl, config, spec_config, metrics_history,
     )
-    _save_checkpoint_safe(*ckpt_args)
+    _save_checkpoint_safe(*ckpt_args, epoch_complete=epoch_complete)
     try:
         manage_checkpoints(checkpoint_dir, max_recent=config.max_checkpoints)
     except Exception:
@@ -736,7 +759,9 @@ def _finalize_run(
 
             # Re-save the final checkpoint WITH analysis included
             _save_checkpoint_safe(
-                *ckpt_args, latent_analysis=analysis_to_dict(analysis_result),
+                *ckpt_args,
+                latent_analysis=analysis_to_dict(analysis_result),
+                epoch_complete=epoch_complete,
             )
 
         if models_dir is not None:
@@ -883,6 +908,7 @@ def _save_checkpoint_safe(
     spec_config: "SpectrogramConfig",
     metrics_history: "MetricsHistory",
     latent_analysis: dict | None = None,
+    epoch_complete: bool = True,
 ) -> None:
     """Save a checkpoint, catching and logging any errors."""
     from dataclasses import asdict as _asdict
@@ -905,13 +931,56 @@ def _save_checkpoint_safe(
             spectrogram_config=_asdict(spec_config),
             metrics_history_dict=metrics_history.to_dict(),
             latent_analysis=latent_analysis,
+            epoch_complete=epoch_complete,
         )
     except Exception:
         logger.warning("Failed to save checkpoint at epoch %d", epoch, exc_info=True)
 
 
 def _get_best_val_loss(metrics_history: "MetricsHistory") -> float:
-    """Return the best validation loss from history."""
-    if not metrics_history.epoch_metrics:
-        return float("inf")
-    return min(m.val_loss for m in metrics_history.epoch_metrics)
+    """Return the best finite validation loss from history (``inf`` if none)."""
+    import math
+
+    finite = [m.val_loss for m in metrics_history.epoch_metrics if math.isfinite(m.val_loss)]
+    return min(finite, default=float("inf"))
+
+
+def _resume_start_epoch(ckpt: dict) -> int:
+    """First epoch to train after loading *ckpt*.
+
+    A checkpoint written by a mid-epoch cancel holds a partly trained
+    epoch, so that epoch is repeated.  Checkpoints from before the
+    ``epoch_complete`` flag existed only stored ``val_loss=inf`` on that
+    path.
+    """
+    epoch = int(ckpt.get("epoch", 0))
+    complete = ckpt.get("epoch_complete", ckpt.get("val_loss") != float("inf"))
+    return epoch + 1 if complete else epoch
+
+
+def _apply_config_to_resumed_optimizer(
+    optimizer: "torch.optim.Optimizer",
+    scheduler: "torch.optim.lr_scheduler.CosineAnnealingLR",
+    config: "TrainingConfig",
+) -> None:
+    """Make a resumed run follow *config* rather than the checkpoint.
+
+    ``load_state_dict`` restores the old learning rate, weight decay and
+    cosine period (``T_max``).  Keep the restored step count and optimiser
+    moments, but continue on the schedule the new config describes.
+    """
+    import math
+
+    scheduler.T_max = config.max_epochs
+    scheduler.base_lrs = [config.learning_rate] * len(optimizer.param_groups)
+    # CosineAnnealingLR updates the lr recursively from its current value,
+    # so set the closed-form value for the restored step explicitly.
+    progress = math.pi * scheduler.last_epoch / config.max_epochs
+    lr = scheduler.eta_min + (config.learning_rate - scheduler.eta_min) * (
+        1 + math.cos(progress)
+    ) / 2
+    for group in optimizer.param_groups:
+        group["initial_lr"] = config.learning_rate
+        group["lr"] = lr
+        group["weight_decay"] = config.regularization.weight_decay
+    scheduler._last_lr = [group["lr"] for group in optimizer.param_groups]

@@ -1,10 +1,10 @@
-"""Multi-model blending engine for loading up to 4 models simultaneously and blending their outputs via latent-space or audio-domain averaging.
+"""Multi-model blending engine: load up to 4 models and mix their outputs.
 
-Supports two blending strategies:
-- **Latent-space blending**: weighted average of latent vectors before decoding
-  (requires matching latent_dim across all models).
-- **Audio-domain blending**: weighted average of generated waveforms (works with
-  any model architecture combination).
+Each model generates audio from its own latent space (driven by the shared
+slider positions), and the waveforms are mixed at the chosen weights.
+Latents are not averaged across models: independently trained models do
+not share a latent space, so an averaged vector decoded by one of them is
+not a blend of anything.
 
 Design notes:
 - Lazy imports for numpy, torch (project pattern).
@@ -16,8 +16,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
 
     from distill.controls.analyzer import AnalysisResult
     from distill.audio.spectrogram import AudioSpectrogram
+    from distill.inference.generation import GenerationConfig, GenerationResult
     from distill.models.persistence import ModelMetadata
     from distill.models.vae import ConvVAE
 
@@ -37,21 +37,6 @@ logger = logging.getLogger(__name__)
 
 MAX_BLEND_MODELS = 4
 """Maximum number of models that can be loaded simultaneously for blending."""
-
-# ---------------------------------------------------------------------------
-# Blend mode
-# ---------------------------------------------------------------------------
-
-
-class BlendMode(str, Enum):
-    """Blending strategy for multi-model generation."""
-
-    LATENT = "latent"
-    """Weighted average of latent vectors before decoding."""
-
-    AUDIO = "audio"
-    """Weighted average of audio waveforms after generation."""
-
 
 # ---------------------------------------------------------------------------
 # Model slot
@@ -210,57 +195,6 @@ def resolve_union_sliders(slots: list["ModelSlot"]) -> list[UnionSliderInfo]:
 
 
 # ---------------------------------------------------------------------------
-# Latent-space blending
-# ---------------------------------------------------------------------------
-
-
-def blend_latent_space(
-    slots: list["ModelSlot"],
-    latent_vectors: list["np.ndarray"],
-    weights: list[float],
-) -> "np.ndarray":
-    """Blend multiple latent vectors via weighted average.
-
-    All models must share the same ``latent_dim``.
-
-    Parameters
-    ----------
-    slots : list[ModelSlot]
-        Model slots (used to validate latent_dim consistency).
-    latent_vectors : list[np.ndarray]
-        Per-model latent vectors, each shape ``[latent_dim]``.
-    weights : list[float]
-        Raw blend weights (will be normalised internally).
-
-    Returns
-    -------
-    np.ndarray
-        Blended latent vector of shape ``[latent_dim]`` (float32).
-
-    Raises
-    ------
-    ValueError
-        If models have mismatched latent_dim.
-    """
-    import numpy as np  # noqa: WPS433 -- lazy import
-
-    # Validate all models share latent_dim
-    dims = [slot.model.latent_dim for slot in slots]
-    if len(set(dims)) > 1:
-        raise ValueError(
-            f"Latent-space blending requires matching latent_dim across "
-            f"all models, but got dimensions: {dims}. "
-            f"Use audio-domain blending (BlendMode.AUDIO) instead."
-        )
-
-    norm_weights = normalize_weights(weights)
-    blended = np.zeros_like(latent_vectors[0], dtype=np.float32)
-    for w, z in zip(norm_weights, latent_vectors):
-        blended += w * z.astype(np.float32)
-    return blended
-
-
-# ---------------------------------------------------------------------------
 # Audio-domain blending
 # ---------------------------------------------------------------------------
 
@@ -325,13 +259,12 @@ class BlendEngine:
     """Multi-model blending engine.
 
     Manages up to :data:`MAX_BLEND_MODELS` model slots with
-    add/remove/set_weight operations and generates blended audio via
-    either latent-space or audio-domain averaging.
+    add/remove/set_weight operations and generates blended audio by
+    mixing each model's own output at the slot weights.
     """
 
     def __init__(self) -> None:
         self.slots: list[ModelSlot] = []
-        self.blend_mode: BlendMode = BlendMode.LATENT
 
     def add_model(
         self,
@@ -441,35 +374,6 @@ class BlendEngine:
             raise IndexError(f"Slot index {index} out of range (0-{len(self.slots) - 1}).")
         self.slots[index].weight = weight
 
-    def set_blend_mode(self, mode: BlendMode) -> None:
-        """Set the blending strategy.
-
-        When switching to latent-space mode, validates that all active
-        models share the same ``latent_dim``.
-
-        Parameters
-        ----------
-        mode : BlendMode
-            Desired blending mode.
-
-        Raises
-        ------
-        ValueError
-            If ``LATENT`` mode is requested but models have mismatched
-            latent dimensions.
-        """
-        if mode is BlendMode.LATENT:
-            active = self.get_active_slots()
-            if len(active) > 1:
-                dims = [s.model.latent_dim for s in active]
-                if len(set(dims)) > 1:
-                    raise ValueError(
-                        f"Cannot use latent-space blending: active models "
-                        f"have mismatched latent_dim {dims}. "
-                        f"Use BlendMode.AUDIO (audio-domain blending) instead."
-                    )
-        self.blend_mode = mode
-
     def get_active_slots(self) -> list[ModelSlot]:
         """Return slots that are active and have non-zero weight.
 
@@ -497,16 +401,18 @@ class BlendEngine:
     ) -> "GenerationResult":
         """Generate blended audio from multiple models.
 
-        Uses the current :attr:`blend_mode` to combine outputs from all
-        active model slots.  Union slider positions are mapped to each
-        model's PCA components (zero-filled for missing components).
+        Every active model generates with *config* (duration, spatial
+        mode, evolution, sample rate, ...) and the same seed, from its own
+        latent vector for the union slider positions (zero-filled for
+        components it lacks).  The outputs are mixed at the slot weights.
 
         Parameters
         ----------
         slider_positions : list[int]
             Integer positions for each union slider.
         config : GenerationConfig
-            Generation configuration (duration, stereo mode, etc.).
+            Generation configuration.  Its ``latent_vector`` is ignored
+            (each model gets its own).
 
         Returns
         -------
@@ -518,61 +424,33 @@ class BlendEngine:
         ValueError
             If no active slots are available.
         """
-        import numpy as np  # noqa: WPS433 -- lazy import
+        import random
 
-        from distill.controls.mapping import SliderState, sliders_to_latent
-        from distill.inference.generation import (
-            GenerationConfig,
-            GenerationPipeline,
-            GenerationResult,
-        )
+        from distill.inference.generation import GenerationPipeline
 
         active_slots = self.get_active_slots()
         if not active_slots:
             raise ValueError("No active model slots for blending.")
 
-        # Single model: no blending needed, just generate normally
-        if len(active_slots) == 1:
-            slot = active_slots[0]
-            latent_vector = self._build_latent_for_slot(
-                slot, slider_positions, 0, self.get_union_sliders(),
-            )
-            gen_config = GenerationConfig(
-                duration_s=config.duration_s,
-                max_duration_s=config.max_duration_s,
-                seed=config.seed,
-                chunk_duration_s=config.chunk_duration_s,
-                concat_mode=config.concat_mode,
-                stereo_mode=config.stereo_mode,
-                stereo_width=config.stereo_width,
-                sample_rate=config.sample_rate,
-                bit_depth=config.bit_depth,
-                steps_between=config.steps_between,
-                overlap_samples=config.overlap_samples,
-                latent_vector=latent_vector,
-            )
+        # One seed for every model, so a blend is reproducible from it
+        seed = config.seed if config.seed is not None else random.randint(0, 2**31 - 1)
+        config = replace(config, seed=seed, latent_vector=None)
+        union_sliders = self.get_union_sliders()
+
+        results = []
+        for i, slot in enumerate(active_slots):
+            z = self._build_latent_for_slot(slot, slider_positions, i, union_sliders)
             pipeline = GenerationPipeline(
                 model=slot.model,
                 spectrogram=slot.spectrogram,
                 device=slot.device,
             )
             pipeline.model_name = slot.metadata.name
-            return pipeline.generate(gen_config)
+            results.append(pipeline.generate(replace(config, latent_vector=z)))
 
-        # Multiple models: blend according to mode
-        raw_weights = [s.weight for s in active_slots]
-        union_sliders = self.get_union_sliders()
-
-        if self.blend_mode is BlendMode.LATENT:
-            return self._blend_latent(
-                active_slots, slider_positions, union_sliders,
-                raw_weights, config,
-            )
-        else:
-            return self._blend_audio(
-                active_slots, slider_positions, union_sliders,
-                raw_weights, config,
-            )
+        if len(results) == 1:
+            return results[0]
+        return self._mix_results(results, [s.weight for s in active_slots], config)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -633,118 +511,24 @@ class BlendEngine:
         )
         return sliders_to_latent(state, slot.analysis)
 
-    def _blend_latent(
-        self,
-        active_slots: list[ModelSlot],
-        slider_positions: list[int],
-        union_sliders: list[UnionSliderInfo],
+    @staticmethod
+    def _mix_results(
+        results: list["GenerationResult"],
         raw_weights: list[float],
         config: "GenerationConfig",
     ) -> "GenerationResult":
-        """Latent-space blending: average latent vectors, decode once."""
-        from distill.inference.generation import (
-            GenerationConfig,
-            GenerationPipeline,
-        )
-
-        # Build per-model latent vectors
-        latent_vectors = []
-        for i, slot in enumerate(active_slots):
-            z = self._build_latent_for_slot(slot, slider_positions, i, union_sliders)
-            latent_vectors.append(z)
-
-        # Blend latent vectors
-        blended_z = blend_latent_space(active_slots, latent_vectors, raw_weights)
-
-        # Use first model's pipeline to decode
-        first = active_slots[0]
-        gen_config = GenerationConfig(
-            duration_s=config.duration_s,
-            max_duration_s=config.max_duration_s,
-            seed=config.seed,
-            chunk_duration_s=config.chunk_duration_s,
-            concat_mode=config.concat_mode,
-            stereo_mode=config.stereo_mode,
-            stereo_width=config.stereo_width,
-            sample_rate=config.sample_rate,
-            bit_depth=config.bit_depth,
-            steps_between=config.steps_between,
-            overlap_samples=config.overlap_samples,
-            latent_vector=blended_z,
-        )
-        pipeline = GenerationPipeline(
-            model=first.model,
-            spectrogram=first.spectrogram,
-            device=first.device,
-        )
-        model_names = [s.metadata.name for s in active_slots]
-        pipeline.model_name = " + ".join(model_names)
-        return pipeline.generate(gen_config)
-
-    def _blend_audio(
-        self,
-        active_slots: list[ModelSlot],
-        slider_positions: list[int],
-        union_sliders: list[UnionSliderInfo],
-        raw_weights: list[float],
-        config: "GenerationConfig",
-    ) -> "GenerationResult":
-        """Audio-domain blending: generate per-model, average waveforms."""
-        import numpy as np  # noqa: WPS433 -- lazy import
-
-        from distill.inference.generation import (
-            GenerationConfig,
-            GenerationPipeline,
-            GenerationResult,
-        )
+        """Mix per-model results into one at the given weights."""
+        from distill.inference.generation import GenerationResult
         from distill.inference.quality import compute_quality_score
 
-        audio_outputs = []
-        seed_used = None
-
-        for i, slot in enumerate(active_slots):
-            z = self._build_latent_for_slot(slot, slider_positions, i, union_sliders)
-            gen_config = GenerationConfig(
-                duration_s=config.duration_s,
-                max_duration_s=config.max_duration_s,
-                seed=config.seed,
-                chunk_duration_s=config.chunk_duration_s,
-                concat_mode=config.concat_mode,
-                stereo_mode=config.stereo_mode,
-                stereo_width=config.stereo_width,
-                sample_rate=config.sample_rate,
-                bit_depth=config.bit_depth,
-                steps_between=config.steps_between,
-                overlap_samples=config.overlap_samples,
-                latent_vector=z,
-            )
-            pipeline = GenerationPipeline(
-                model=slot.model,
-                spectrogram=slot.spectrogram,
-                device=slot.device,
-            )
-            pipeline.model_name = slot.metadata.name
-            result = pipeline.generate(gen_config)
-            audio_outputs.append(result.audio)
-            if seed_used is None:
-                seed_used = result.seed_used
-
-        # Blend audio waveforms
-        blended_audio = blend_audio_domain(audio_outputs, raw_weights)
-
-        # Compute quality on blended result
-        quality = compute_quality_score(blended_audio, config.sample_rate)
-
-        model_names = [s.metadata.name for s in active_slots]
-        channels = 1 if blended_audio.ndim == 1 else blended_audio.shape[0]
-        actual_duration = blended_audio.shape[-1] / config.sample_rate
-
+        blended_audio = blend_audio_domain([r.audio for r in results], raw_weights)
+        sample_rate = results[0].sample_rate
         return GenerationResult(
             audio=blended_audio,
-            sample_rate=config.sample_rate,
-            quality=quality,
+            sample_rate=sample_rate,
+            quality=compute_quality_score(blended_audio, sample_rate),
             config=config,
-            seed_used=seed_used or 0,
-            duration_s=actual_duration,
-            channels=channels,
+            seed_used=results[0].seed_used,
+            duration_s=blended_audio.shape[-1] / sample_rate,
+            channels=1 if blended_audio.ndim == 1 else blended_audio.shape[0],
         )

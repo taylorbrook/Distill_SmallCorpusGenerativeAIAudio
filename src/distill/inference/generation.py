@@ -19,7 +19,7 @@ Design notes:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -219,6 +219,48 @@ class GenerationResult:
 
     channels: int
     """Number of channels: 1 for mono, 2 for stereo."""
+
+
+def convert_result(
+    result: GenerationResult,
+    sample_rate: int,
+    bit_depth: str,
+) -> GenerationResult:
+    """Return *result* with a different output sample rate and bit depth.
+
+    Lets export settings be chosen after generation: the audio is
+    resampled from ``result.sample_rate`` and ``config`` records the new
+    settings, so the exported file's header, samples and sidecar agree.
+    """
+    import numpy as np  # noqa: WPS433 -- lazy import
+    import torch  # noqa: WPS433 -- lazy import
+
+    if sample_rate not in SAMPLE_RATE_OPTIONS:
+        raise ValueError(
+            f"sample_rate must be one of {SAMPLE_RATE_OPTIONS}, got {sample_rate}"
+        )
+    if bit_depth not in BIT_DEPTH_MAP:
+        raise ValueError(
+            f"bit_depth must be one of {list(BIT_DEPTH_MAP.keys())}, "
+            f"got {bit_depth!r}"
+        )
+
+    audio = result.audio
+    if sample_rate != result.sample_rate:
+        tensor = torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32))
+        resampler = _get_resampler(result.sample_rate, sample_rate)
+        if tensor.ndim == 1:
+            audio = resampler(tensor.unsqueeze(0)).squeeze(0).numpy()
+        else:
+            audio = resampler(tensor).numpy()
+
+    return replace(
+        result,
+        audio=audio,
+        sample_rate=sample_rate,
+        duration_s=audio.shape[-1] / sample_rate,
+        config=replace(result.config, sample_rate=sample_rate, bit_depth=bit_depth),
+    )
 
 
 # ---------------------------------------------------------------------------

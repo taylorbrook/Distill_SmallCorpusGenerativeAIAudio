@@ -19,6 +19,7 @@ DEFAULT_CONFIG: dict = {
         "generated": "data/generated",
         "presets": "data/presets",
         "history": "data/history",
+        "training": "data/training",  # checkpoints and previews, one dir per run
     },
     "hardware": {
         "device": "auto",          # "auto", "mps", "cuda", "cpu"

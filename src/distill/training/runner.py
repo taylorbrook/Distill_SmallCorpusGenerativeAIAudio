@@ -63,6 +63,7 @@ class TrainingRunner:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._cancel_event = threading.Event()
+        self._start_lock = threading.Lock()
         self._is_running: bool = False
         self._last_error: Exception | None = None
         self._result: dict | None = None
@@ -108,22 +109,11 @@ class TrainingRunner:
         RuntimeError
             If training is already running.
         """
-        if self._is_running:
-            raise RuntimeError("Training is already running. Cancel first.")
-
-        self._cancel_event.clear()
-        self._last_error = None
-        self._result = None
-        self._is_running = True
-
-        self._thread = threading.Thread(
-            target=self._run_training,
-            args=(config, file_paths, output_dir, device, callback, None,
-                  models_dir, dataset_name, model_name),
-            daemon=True,
+        self._launch(
+            (config, file_paths, output_dir, device, callback, None,
+             models_dir, dataset_name, model_name),
             name="training-runner",
         )
-        self._thread.start()
 
     def cancel(self) -> None:
         """Request training cancellation.
@@ -178,22 +168,11 @@ class TrainingRunner:
         RuntimeError
             If training is already running.
         """
-        if self._is_running:
-            raise RuntimeError("Training is already running. Cancel first.")
-
-        self._cancel_event.clear()
-        self._last_error = None
-        self._result = None
-        self._is_running = True
-
-        self._thread = threading.Thread(
-            target=self._run_training,
-            args=(config, file_paths, output_dir, device, callback, checkpoint_path,
-                  models_dir, dataset_name, model_name),
-            daemon=True,
+        self._launch(
+            (config, file_paths, output_dir, device, callback, checkpoint_path,
+             models_dir, dataset_name, model_name),
             name="training-runner-resume",
         )
-        self._thread.start()
 
     def wait(self, timeout: float | None = None) -> bool:
         """Wait for the training thread to finish.
@@ -231,6 +210,26 @@ class TrainingRunner:
     # -----------------------------------------------------------------
     # Internal
     # -----------------------------------------------------------------
+
+    def _launch(self, args: tuple, name: str) -> None:
+        """Start the training thread unless one is already running."""
+        # The check and the flag update must be atomic: Start and Resume
+        # clicks are handled on different worker threads.
+        with self._start_lock:
+            if self._is_running:
+                raise RuntimeError("Training is already running. Cancel first.")
+            self._cancel_event.clear()
+            self._last_error = None
+            self._result = None
+            self._is_running = True
+
+        self._thread = threading.Thread(
+            target=self._run_training,
+            args=args,
+            daemon=True,
+            name=name,
+        )
+        self._thread.start()
 
     def _run_training(
         self,

@@ -42,6 +42,22 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def _load_import_dir(import_dir: Path) -> Dataset:
+    """Build the dataset from the audio files directly inside *import_dir*.
+
+    Imports are copied flat into this directory, so subdirectories are not
+    data -- older versions wrote training output (including preview WAVs)
+    to ``imported/training``, which a recursive scan would pick up.
+    """
+    from distill.audio.validation import is_supported_format
+
+    files = sorted(
+        p for p in import_dir.iterdir()
+        if p.is_file() and not p.name.startswith(".") and is_supported_format(p)
+    )
+    return Dataset.from_files(files, name="imported", base_dir=import_dir)
+
+
 def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
     """Common import logic for both drag-and-drop and folder upload.
 
@@ -88,7 +104,7 @@ def _import_files(file_paths: list[Path]) -> tuple[str, list[str], str | None]:
         return "No valid audio files found.", [], None
 
     # Create Dataset from the imported directory
-    dataset = Dataset.from_directory(import_dir, name="imported")
+    dataset = _load_import_dir(import_dir)
     app_state.current_dataset = dataset
 
     # Compute summary with thumbnails
@@ -181,17 +197,17 @@ def _clear_dataset() -> tuple:
     )
 
 
-def _handle_thumbnail_click(evt: gr.SelectData) -> str | None:
+def _handle_thumbnail_click(evt: gr.SelectData) -> dict:
     """Play the audio file corresponding to the clicked thumbnail.
 
     Args:
         evt: Gradio SelectData event with the selected index.
 
     Returns:
-        File path string for gr.Audio playback, or None.
+        Update for the (initially hidden) playback component.
     """
     if app_state.current_dataset is None:
-        return None
+        return gr.update(value=None, visible=False)
 
     idx = evt.index
     valid_files = app_state.current_dataset.valid_files
@@ -199,9 +215,9 @@ def _handle_thumbnail_click(evt: gr.SelectData) -> str | None:
     if 0 <= idx < len(valid_files):
         audio_path = valid_files[idx]
         if audio_path.exists():
-            return str(audio_path)
+            return gr.update(value=str(audio_path), visible=True)
 
-    return None
+    return gr.update(value=None, visible=False)
 
 
 def _load_existing_imports() -> tuple[str, list[str], bool]:
@@ -214,16 +230,12 @@ def _load_existing_imports() -> tuple[str, list[str], bool]:
         Tuple of (stats_markdown, thumbnail_paths, has_files).
     """
     import_dir = app_state.datasets_dir / "imported"
-    if not import_dir.exists():
+    if not import_dir.is_dir():
         return "", [], False
 
-    from distill.audio.validation import collect_audio_files
-
-    existing = collect_audio_files(import_dir)
-    if not existing:
+    dataset = _load_import_dir(import_dir)
+    if not dataset.valid_files:
         return "", [], False
-
-    dataset = Dataset.from_directory(import_dir, name="imported")
     app_state.current_dataset = dataset
 
     summary = compute_summary(dataset, generate_thumbnails=True)

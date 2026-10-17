@@ -40,6 +40,7 @@ class AppState:
     generated_dir: Path = field(default_factory=lambda: Path("data/generated"))
     presets_dir: Path = field(default_factory=lambda: Path("data/presets"))
     history_dir: Path = field(default_factory=lambda: Path("data/history"))
+    training_dir: Path = field(default_factory=lambda: Path("data/training"))
 
     # Current loaded model
     loaded_model: Optional[LoadedModel] = None
@@ -64,8 +65,8 @@ class AppState:
 
     # Multi-model blending
     blend_engine: Optional[BlendEngine] = None
-    loaded_models: list = field(default_factory=list)
-    """Tracking list for multiple loaded model references in blend mode."""
+    blend_models: dict[str, LoadedModel] = field(default_factory=dict)
+    """Models loaded for the blend panel, keyed by model_id."""
 
     # Device
     device: Optional[torch.device] = None
@@ -92,6 +93,7 @@ def init_state(config: dict[str, Any], device: Any) -> None:
     app_state.generated_dir = resolve_path(paths.get("generated", "data/generated"))
     app_state.presets_dir = resolve_path(paths.get("presets", "data/presets"))
     app_state.history_dir = resolve_path(paths.get("history", "data/history"))
+    app_state.training_dir = resolve_path(paths.get("training", "data/training"))
 
     app_state.device = device
 

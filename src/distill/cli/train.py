@@ -42,7 +42,7 @@ def train_cmd(
     epochs: Annotated[Optional[int], typer.Option("--epochs", "-e", help="Override max epochs")] = None,
     learning_rate: Annotated[Optional[float], typer.Option("--lr", help="Override learning rate")] = None,
     batch_size: Annotated[Optional[int], typer.Option("--batch-size", help="Override batch size")] = None,
-    output_dir: Annotated[Optional[Path], typer.Option("--output-dir", "-o", help="Training output directory")] = None,
+    output_dir: Annotated[Optional[Path], typer.Option("--output-dir", "-o", help="Training output directory (default: a new folder under paths.training)")] = None,
     device: str = typer.Option("auto", "--device", help="Compute device: auto, mps, cuda, cpu"),
     config: Annotated[Optional[Path], typer.Option("--config", help="Config file path")] = None,
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
@@ -69,6 +69,7 @@ def train_cmd(
     from distill.audio.validation import collect_audio_files
     from distill.cli import bootstrap
     from distill.config.settings import resolve_path
+    from distill.training.checkpoint import new_run_dir
     from distill.training.config import (
         OverfittingPreset,
         TrainingConfig,
@@ -90,7 +91,12 @@ def train_cmd(
         base_dir=config_path.parent,
     )
     if output_dir is None:
-        output_dir = models_base / f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # A fresh directory per run: checkpoint retention works per directory
+        training_base = resolve_path(
+            app_config["paths"].get("training", "data/training"),
+            base_dir=config_path.parent,
+        )
+        output_dir = new_run_dir(training_base / dataset_dir.name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------

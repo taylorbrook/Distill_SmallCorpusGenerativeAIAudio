@@ -47,12 +47,20 @@ def bootstrap(
 ) -> tuple:
     """Load config and select device.  Shared by all commands.
 
+    A subcommand's own ``--config`` / ``--device`` win; when they are not
+    given, the global ones (``distill --config X --device Y <command>``)
+    apply.
+
     Returns
     -------
     tuple of (config_dict, torch_device, config_path)
     """
     from distill.config.settings import get_config_path, load_config
     from distill.hardware.device import select_device
+
+    config_path = config_path or _cli_state.get("config")
+    if device == "auto":
+        device = _cli_state.get("device") or "auto"
 
     path = config_path or get_config_path()
     config = load_config(path)
@@ -167,10 +175,14 @@ def _launch_gui(
     report = format_device_report(torch_device, info, verbose=verbose)
     console.print(f"[bold]Device:[/bold] {report}")
 
-    # Ensure data directories exist
-    for _key, path_str in config.get("paths", {}).items():
-        resolved = resolve_path(path_str, base_dir=path.parent)
-        resolved.mkdir(parents=True, exist_ok=True)
+    # Resolve data directories against the config file's directory, as the
+    # CLI commands do, so a --config elsewhere does not mix up libraries
+    config["paths"] = {
+        key: str(resolve_path(path_str, base_dir=path.parent))
+        for key, path_str in config.get("paths", {}).items()
+    }
+    for path_str in config["paths"].values():
+        Path(path_str).mkdir(parents=True, exist_ok=True)
 
     # Launch
     console.print()

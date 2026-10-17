@@ -6,6 +6,11 @@ shared ``app_state.metrics_buffer`` every 2 seconds and pushes updates
 to the loss chart, stats panel, and preview audio slots.
 
 Key design points:
+- One ``TrainingRunner`` lives on ``app_state``; Start/Resume refuse to
+  launch a second run, and a reloaded page reattaches to a running one.
+- Each run writes checkpoints and previews to its own directory under
+  ``app_state.training_dir`` (never inside the dataset, which is scanned
+  for audio).  Resume continues the newest run from its latest checkpoint.
 - ``gr.Timer(active=False)`` -- activated only when training starts.
 - 20 pre-created ``gr.Audio`` slots (hidden) revealed as previews arrive.
 - Preset dropdown auto-populates epochs/LR/advanced from
@@ -20,7 +25,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from distill.training.checkpoint import get_best_checkpoint, list_checkpoints
+from distill.training.checkpoint import get_latest_checkpoint, new_run_dir
 from distill.training.config import (
     OverfittingPreset,
     TrainingConfig,
@@ -113,20 +118,103 @@ def _format_eta(seconds: float) -> str:
 
 
 # -------------------------------------------------------------------
-# Helper: output directory for current dataset
+# Helpers: run directories and the shared runner
 # -------------------------------------------------------------------
 
 
-def _get_output_dir() -> Path:
-    """Return the training output directory for the current dataset."""
+def _dataset_training_dir() -> Path:
+    """Parent directory of the current dataset's training runs.
+
+    Lives under ``app_state.training_dir``, not under ``datasets_dir``:
+    dataset directories are scanned for audio, so preview WAVs written
+    there would become training data.
+    """
     ds = app_state.current_dataset
     name = ds.name if ds else "default"
-    return app_state.datasets_dir / name / "training"
+    return app_state.training_dir / name
 
 
-def _get_checkpoint_dir() -> Path:
-    """Return the checkpoint directory for the current dataset."""
-    return _get_output_dir() / "checkpoints"
+def _latest_checkpoint() -> Path | None:
+    """The newest checkpoint across the current dataset's runs.
+
+    That is where training last left off, so it is what Resume continues
+    (a cancel checkpoint is never the best-val-loss one).
+    """
+    root = _dataset_training_dir()
+    if not root.is_dir():
+        return None
+    candidates = [
+        get_latest_checkpoint(run / "checkpoints")
+        for run in root.iterdir()
+        if run.is_dir()
+    ]
+    candidates = [c for c in candidates if c is not None]
+    return max(candidates, key=lambda c: c.stat().st_mtime, default=None)
+
+
+def _get_runner() -> TrainingRunner:
+    """The app's single training runner (created on first use)."""
+    if app_state.training_runner is None:
+        app_state.training_runner = TrainingRunner()
+    return app_state.training_runner
+
+
+def _training_in_progress() -> bool:
+    runner = app_state.training_runner
+    return runner is not None and runner.is_running
+
+
+def _build_config(
+    max_epochs: int,
+    learning_rate: float,
+    dropout: float,
+    weight_decay: float,
+    kl_weight_max: float,
+    preset_name: str,
+) -> TrainingConfig:
+    """Adaptive config for the current dataset with the UI's overrides."""
+    ds = app_state.current_dataset
+    file_count = len(ds.valid_files) if hasattr(ds, "valid_files") else 10
+    config = get_adaptive_config(file_count)
+    config.max_epochs = int(max_epochs)
+    config.learning_rate = float(learning_rate)
+    config.regularization.dropout = float(dropout)
+    config.regularization.weight_decay = float(weight_decay)
+    config.kl_weight_max = float(kl_weight_max)
+    if preset_name in _PRESET_MAP:
+        config.preset = _PRESET_MAP[preset_name]
+    return config
+
+
+def _control_updates(running: bool) -> list:
+    """Updates for (timer, start_btn, cancel_btn, resume_btn)."""
+    if running:
+        cancelled = app_state.metrics_buffer.get("cancelled", False)
+        return [
+            gr.Timer(active=True),
+            gr.update(interactive=False),
+            gr.update(interactive=not cancelled),
+            gr.update(interactive=False),
+        ]
+    return [
+        gr.Timer(active=False),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
+        gr.update(interactive=True, visible=_latest_checkpoint() is not None),
+    ]
+
+
+def _no_preview_updates() -> list:
+    return [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+
+
+def _already_running_outputs() -> list:
+    """Outputs for a Start/Resume click while a run is in progress."""
+    return [
+        gr.update(),
+        "**Training is already running.** Cancel it before starting another run.",
+        *_control_updates(running=True),
+    ] + _no_preview_updates()
 
 
 # -------------------------------------------------------------------
@@ -264,16 +352,25 @@ def build_train_tab() -> dict:
         """Check if a dataset is loaded and toggle empty/main UI."""
         has_ds = app_state.current_dataset is not None
         # Also check for existing checkpoints to show Resume button
-        show_resume = False
-        if has_ds:
-            ckpt_dir = _get_checkpoint_dir()
-            ckpts = list_checkpoints(ckpt_dir) if ckpt_dir.exists() else []
-            show_resume = len(ckpts) > 0
+        show_resume = has_ds and _latest_checkpoint() is not None
         return (
             gr.update(visible=not has_ds),   # empty_state
             gr.update(visible=has_ds),        # train_ui
             gr.update(visible=show_resume),   # resume_btn
         )
+
+    def _reattach_to_run() -> list:
+        """Page load: if a run is in progress, resume polling it.
+
+        Without this a reloaded page shows an enabled Start button and an
+        idle dashboard while the previous run is still training.
+        """
+        if not _training_in_progress():
+            return [gr.update() for _ in range(5)]
+        return [
+            "Training in progress...",
+            *_control_updates(running=True),
+        ]
 
     # Poll dataset readiness when the tab renders via a load event
     app_context = gr.context.Context.root_block
@@ -282,6 +379,11 @@ def build_train_tab() -> dict:
             fn=_check_dataset_ready,
             inputs=None,
             outputs=[empty_state, train_ui, resume_btn],
+        )
+        app_context.load(
+            fn=_reattach_to_run,
+            inputs=None,
+            outputs=[stats_md, timer, start_btn, cancel_btn, resume_btn],
         )
 
     def _start_training(
@@ -299,35 +401,19 @@ def build_train_tab() -> dict:
             return [
                 gr.update(),          # loss_plot
                 "No dataset loaded. Go to the Data tab first.",  # stats_md
-                gr.Timer(active=False),  # timer
-                gr.update(interactive=True),   # start_btn
-                gr.update(interactive=False),  # cancel_btn
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+                *_control_updates(running=False),
+            ] + _no_preview_updates()
 
-        # Build config from adaptive base, override with UI values
-        file_count = len(ds.valid_files) if hasattr(ds, "valid_files") else 10
-        config = get_adaptive_config(file_count)
-        config.max_epochs = int(max_epochs)
-        config.learning_rate = float(learning_rate)
-        config.regularization.dropout = float(dropout)
-        config.regularization.weight_decay = float(weight_decay)
-        config.kl_weight_max = float(kl_weight_max)
+        runner = _get_runner()
+        if runner.is_running:
+            return _already_running_outputs()
 
-        # Map preset
-        if preset_name in _PRESET_MAP:
-            config.preset = _PRESET_MAP[preset_name]
-
-        # Clear metrics buffer
+        config = _build_config(
+            max_epochs, learning_rate, dropout, weight_decay,
+            kl_weight_max, preset_name,
+        )
         reset_metrics_buffer()
-
-        # Create runner and start
-        output_dir = _get_output_dir()
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        runner = TrainingRunner()
-        app_state.training_runner = runner
-        app_state.training_active = True
-
+        output_dir = new_run_dir(_dataset_training_dir())
         file_paths = list(ds.valid_files) if hasattr(ds, "valid_files") else []
 
         try:
@@ -341,37 +427,35 @@ def build_train_tab() -> dict:
                 dataset_name=ds.name if ds else "untitled",
                 model_name=model_name.strip() if model_name else "",
             )
-        except RuntimeError as exc:
-            app_state.training_active = False
-            return [
-                gr.update(),
-                f"Failed to start training: {exc}",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+        except RuntimeError:
+            # Another Start/Resume click won the race
+            return _already_running_outputs()
+        app_state.training_active = True
 
         # Return: activate timer, disable Start, enable Cancel, hide previews
         return [
             gr.update(value=None),           # loss_plot (clear)
             "Training started...",           # stats_md
-            gr.Timer(active=True),           # timer
-            gr.update(interactive=False),    # start_btn
-            gr.update(interactive=True),     # cancel_btn
+            *_control_updates(running=True),
         ] + [gr.update(visible=False, value=None) for _ in range(_MAX_PREVIEW_SLOTS)]
+
+    _train_inputs = [
+        model_name_input,
+        max_epochs_num,
+        learning_rate_num,
+        dropout_slider,
+        weight_decay_slider,
+        kl_weight_slider,
+        preset_dd,
+    ]
+    _run_outputs = [
+        loss_plot, stats_md, timer, start_btn, cancel_btn, resume_btn,
+    ] + preview_audios
 
     start_btn.click(
         fn=_start_training,
-        inputs=[
-            model_name_input,
-            max_epochs_num,
-            learning_rate_num,
-            dropout_slider,
-            weight_decay_slider,
-            kl_weight_slider,
-            preset_dd,
-        ],
-        outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
+        inputs=_train_inputs,
+        outputs=_run_outputs,
     )
 
     def _cancel_training() -> list:
@@ -407,48 +491,35 @@ def build_train_tab() -> dict:
         kl_weight_max: float,
         preset_name: str,
     ) -> list:
-        """Resume training from the best existing checkpoint."""
+        """Continue the newest run from its latest checkpoint."""
         ds = app_state.current_dataset
         if ds is None:
             return [
                 gr.update(),
                 "No dataset loaded.",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+                *_control_updates(running=False),
+            ] + _no_preview_updates()
 
-        ckpt_dir = _get_checkpoint_dir()
-        best_ckpt = get_best_checkpoint(ckpt_dir)
-        if best_ckpt is None:
+        runner = _get_runner()
+        if runner.is_running:
+            return _already_running_outputs()
+
+        checkpoint = _latest_checkpoint()
+        if checkpoint is None:
             return [
                 gr.update(),
                 "No checkpoint found to resume from.",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+                *_control_updates(running=False),
+            ] + _no_preview_updates()
 
-        # Build config
-        file_count = len(ds.valid_files) if hasattr(ds, "valid_files") else 10
-        config = get_adaptive_config(file_count)
-        config.max_epochs = int(max_epochs)
-        config.learning_rate = float(learning_rate)
-        config.regularization.dropout = float(dropout)
-        config.regularization.weight_decay = float(weight_decay)
-        config.kl_weight_max = float(kl_weight_max)
-
-        if preset_name in _PRESET_MAP:
-            config.preset = _PRESET_MAP[preset_name]
-
-        # Clear metrics buffer
+        config = _build_config(
+            max_epochs, learning_rate, dropout, weight_decay,
+            kl_weight_max, preset_name,
+        )
         reset_metrics_buffer()
-
-        output_dir = _get_output_dir()
-        runner = TrainingRunner()
-        app_state.training_runner = runner
-        app_state.training_active = True
-
+        # Keep writing into the run being resumed: its checkpoints belong
+        # to the same run, so retention and "best" selection stay correct.
+        output_dir = checkpoint.parent.parent
         file_paths = list(ds.valid_files) if hasattr(ds, "valid_files") else []
 
         try:
@@ -457,42 +528,26 @@ def build_train_tab() -> dict:
                 file_paths=file_paths,
                 output_dir=output_dir,
                 device=app_state.device,
-                checkpoint_path=best_ckpt,
+                checkpoint_path=checkpoint,
                 callback=_training_callback,
                 models_dir=app_state.models_dir,
                 dataset_name=ds.name,
                 model_name=model_name.strip() if model_name else "",
             )
-        except RuntimeError as exc:
-            app_state.training_active = False
-            return [
-                gr.update(),
-                f"Failed to resume training: {exc}",
-                gr.Timer(active=False),
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+        except RuntimeError:
+            return _already_running_outputs()
+        app_state.training_active = True
 
         return [
             gr.update(value=None),
-            f"Resuming from checkpoint: {best_ckpt.name}",
-            gr.Timer(active=True),
-            gr.update(interactive=False),
-            gr.update(interactive=True),
+            f"Resuming {output_dir.name} from {checkpoint.name}",
+            *_control_updates(running=True),
         ] + [gr.update(visible=False, value=None) for _ in range(_MAX_PREVIEW_SLOTS)]
 
     resume_btn.click(
         fn=_resume_training,
-        inputs=[
-            model_name_input,
-            max_epochs_num,
-            learning_rate_num,
-            dropout_slider,
-            weight_decay_slider,
-            kl_weight_slider,
-            preset_dd,
-        ],
-        outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
+        inputs=_train_inputs,
+        outputs=_run_outputs,
     )
 
     def _poll_training() -> list:
@@ -518,10 +573,8 @@ def build_train_tab() -> dict:
             return [
                 gr.update(),                    # loss_plot
                 error_msg,                      # stats_md
-                gr.Timer(active=False),         # timer
-                gr.update(interactive=True),    # start_btn
-                gr.update(interactive=False),   # cancel_btn
-            ] + [gr.update() for _ in range(_MAX_PREVIEW_SLOTS)]
+                *_control_updates(running=False),
+            ] + _no_preview_updates()
 
         # Build loss chart
         chart = build_loss_chart(epoch_metrics)
@@ -585,9 +638,7 @@ def build_train_tab() -> dict:
             return [
                 chart,                          # loss_plot
                 stats,                          # stats_md
-                gr.Timer(active=False),         # timer
-                gr.update(interactive=True),    # start_btn
-                gr.update(interactive=False),   # cancel_btn
+                *_control_updates(running=False),
             ] + audio_updates
 
         return [
@@ -596,12 +647,13 @@ def build_train_tab() -> dict:
             gr.update(), # timer (keep active)
             gr.update(), # start_btn (keep disabled)
             gr.update(), # cancel_btn (keep enabled)
+            gr.update(), # resume_btn (keep disabled)
         ] + audio_updates
 
     timer.tick(
         fn=_poll_training,
         inputs=None,
-        outputs=[loss_plot, stats_md, timer, start_btn, cancel_btn] + preview_audios,
+        outputs=_run_outputs,
     )
 
     return {

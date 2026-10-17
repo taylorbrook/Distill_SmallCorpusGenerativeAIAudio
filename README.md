@@ -17,8 +17,8 @@ The core innovation is PCA-based latent space analysis that maps the VAE's inter
 - **Train on tiny datasets** — meaningful results from as few as 5-20 audio files
 - **Musically meaningful sliders** — PCA-mapped controls (brightness, warmth, roughness, harmonic tension, etc.) instead of opaque latent dimensions
 - **Multi-format export** — WAV (48kHz/24bit default), MP3, FLAC, OGG with embedded metadata
-- **Spatial audio** — mono, stereo field, and binaural (HRTF) output
-- **Multi-model blending** — load multiple trained models and blend between them
+- **Spatial audio** — mono and stereo field output (binaural/HRTF rendering is built but hidden until an HRTF file ships)
+- **Multi-model blending** — load multiple trained models and mix their outputs at chosen weights
 - **Presets** — save and recall slider configurations per model
 - **Generation history** — browse past outputs with A/B comparison
 - **Model library** — save, load, search, and manage trained models
@@ -150,6 +150,7 @@ project_name = "Distill"
 datasets = "data/datasets"
 models = "data/models"
 generated = "data/generated"
+training = "data/training"   # checkpoints and previews, one folder per run
 
 [hardware]
 device = "mps"          # auto, mps, cuda, cpu

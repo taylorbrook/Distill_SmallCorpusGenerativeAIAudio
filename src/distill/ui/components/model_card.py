@@ -70,16 +70,6 @@ def render_single_card(model: "ModelEntry") -> str:
 <div style="border: 1px solid #ddd; border-radius: 8px; padding: 16px;
             transition: box-shadow 0.2s, border-color 0.2s; cursor: pointer;"
      data-model-name="{name}"
-     onclick="
-       var modelName = this.getAttribute('data-model-name');
-       var tb = document.querySelector('#model-card-selected-name textarea');
-       if (tb) {{
-         var nativeSet = Object.getOwnPropertyDescriptor(
-           window.HTMLTextAreaElement.prototype, 'value').set;
-         nativeSet.call(tb, modelName);
-         tb.dispatchEvent(new Event('input', {{bubbles: true}}));
-       }}
-     "
      onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'; this.style.borderColor='#6366f1'"
      onmouseout="this.style.boxShadow='none'; this.style.borderColor='#ddd'">
     <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">{name}</h3>
@@ -93,6 +83,18 @@ def render_single_card(model: "ModelEntry") -> str:
         {components} components &middot; {size}
     </p>{tags_str}
 </div>"""
+
+
+CARD_CLICK_JS = """
+element.addEventListener('click', (event) => {
+  const card = event.target.closest('[data-model-name]');
+  if (card) {
+    trigger('click', {model_name: card.getAttribute('data-model-name')});
+  }
+});
+"""
+"""``js_on_load`` for the card grid's ``gr.HTML``: a click on a card fires
+the component's ``click`` event with ``model_name`` in its event data."""
 
 
 def render_model_cards(models: list["ModelEntry"]) -> str:
